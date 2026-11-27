@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { OPENCHAMBER_SDK_MANIFEST_API_VERSIONS } from './api-version.ts';
+import { sourceControlCapabilitiesSchema } from './source-control-capabilities.ts';
 import { OPENCHAMBER_ENGINE_PATTERN } from './host-version.ts';
 import {
   DECLARED_GUEST_CAPABILITIES,
@@ -76,8 +77,8 @@ import {
   GUEST_LINK_ACTIONS,
   GUEST_LINK_KEY,
   GUEST_LINK_KEYS_MAX,
-  isBuildableLinkTemplate,
 } from './manifest.ts';
+import { isBuildableLinkTemplate, isWildcardLinkOrigin, linkOriginValidator } from './links.ts';
 import { isGuestRequestPath } from './contract.ts';
 import { sourceControlUrlsSchema } from './source-control-urls.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
@@ -311,33 +312,6 @@ const literalSchema = z.string().trim().min(1).max(64);
 
 const DECLARED_CAPABILITIES_MESSAGE = `contributes.capabilities may list ${DECLARED_GUEST_CAPABILITIES.map((capability) => `"${capability}"`).join(', ')}.`;
 
-const sourceControlCapabilitiesSchema = z.object({
-  projects: z.boolean().default(false),
-  issues: z.boolean().default(false),
-  changeRequests: z.boolean().default(false),
-  draftChangeRequests: z.boolean().default(false),
-  draftConversion: z.boolean().optional(),
-  merge: z.union([
-    z.literal(false),
-    z.object({
-      methods: z.array(z.enum(['merge', 'squash', 'rebase', 'submit'])).min(1).max(3)
-        .refine((methods) => new Set(methods).size === methods.length, { message: 'merge methods must be unique' })
-        .refine((methods) => !methods.includes('submit') || methods.length === 1, { message: '"submit" is the only merge method when present' }),
-    }).strict(),
-  ]).default(false),
-  ci: z.boolean().default(false),
-  comments: z.boolean().default(false),
-  commentEdit: z.boolean().default(false),
-  reviews: z.boolean().default(false),
-  state: z.boolean().default(false),
-  labels: z.boolean().default(false),
-  reviewers: z.boolean().default(false),
-  changeRequestPatch: z.boolean().default(false),
-  liveSummaries: z.boolean().default(false),
-  reviewModel: z.enum(['verdict', 'votes']).optional(),
-  revisions: z.boolean().optional(),
-}).strict();
-
 const FIXED_USERNAME = /^[A-Za-z0-9._-]{1,64}$/;
 
 export const sourceControlServiceLoginSchema = z.object({
@@ -405,10 +379,10 @@ const sourceControlSchema = z.object({
     urls: sourceControlUrlsSchema,
     features: z.object({
       authorCanReview: z.boolean().default(false),
-      issueCloseReason: z.boolean().default(false),
+      issueCloseReason: z.boolean().default(false), issueAssignees: z.boolean().default(false).catch(false),
       issueEdit: z.boolean().optional(),
-      changeRequestEdit: z.boolean().optional(),
-      submitRequirements: z.boolean().optional(),
+      changeRequestEdit: z.boolean().optional(), baseChange: z.boolean().default(false).catch(false), updateBranch: z.boolean().default(false).catch(false),
+      rebase: z.boolean().default(false).catch(false), submitRequirements: z.boolean().optional(),
     }).strict(),
     changeRequestTemplates: z.array(z.string().trim().max(256).refine(isRepositoryFilePath, {
       message: 'must be a file path inside the repository, like .gitea/pull_request_template.md, with no "." or ".." segment',
@@ -678,9 +652,7 @@ const blockSchema = z.object({
 }).strict();
 
 const IPV4_HOSTNAME = /^\d+(?:\.\d+){3}$/;
-const isLinkOrigin = (value: string): boolean => (
-  isApprovableOrigin(value) && !IPV4_HOSTNAME.test(new URL(value).hostname)
-);
+const isLinkOrigin = linkOriginValidator((value) => isApprovableOrigin(value) && !IPV4_HOSTNAME.test(new URL(value).hostname));
 
 const linksSchema = z.object({
   action: z.enum(GUEST_LINK_ACTIONS),
@@ -689,7 +661,7 @@ const linksSchema = z.object({
       .refine((keys) => new Set(keys).size === keys.length, { message: 'keys must be unique' }),
   }).strict().optional(),
   urls: z.object({
-    origin: z.string().trim().refine(isLinkOrigin, { message: 'must be a public https origin with no path, like https://tasks.example.com' }),
+    origin: z.string().trim().refine(isLinkOrigin, { message: 'must be a public https origin with no path, like https://tasks.example.com, or https://*.example.com for its subdomains' }),
     identifier: z.enum(TRACKER_IDENTIFIER_KINDS),
     item: z.array(z.string().trim().min(1)).min(1).max(TRACKER_URL_TEMPLATES_MAX)
       .refine((templates) => new Set(templates).size === templates.length, { message: 'link templates must be unique' }),
@@ -713,10 +685,10 @@ const linksSchema = z.object({
     });
     return;
   }
-  if (value.action === 'attach' && value.identifier && value.urls?.identifier === 'number') {
+  if (value.action === 'attach' && value.identifier && (value.urls?.identifier === 'number' || isWildcardLinkOrigin(value.urls?.origin ?? ''))) {
     ctx.addIssue({
-      code: 'custom', path: ['urls', 'identifier'],
-      message: 'action "attach" with identifier keys needs urls.identifier "key-number" or "short-code": a key like PROJ-12 cannot fill a "number" {id}, so its chip would have no link.',
+      code: 'custom', path: ['urls'],
+      message: 'action "attach" with identifier keys needs urls.identifier "key-number" or "short-code" and an exact origin: a key like PROJ-12 cannot fill a "number" {id} or name a host under a wildcard, so its chip would have no link.',
     });
   }
 });

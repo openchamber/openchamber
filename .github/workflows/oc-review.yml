@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
+      - name: Validate docs source
+        run: bun run docs:validate
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Lint
@@ -49,13 +51,14 @@ jobs:
 
   # The part of `bun run check:changed` the other jobs do not run: dead code,
   # the ratchet over the files the pull request touches, and the file size
-  # limit. The checkout is the merge commit, so its first parent is the base.
+  # limit. A pull request is checked out as its merge commit, whose first parent
+  # is the base; a run started by hand compares the branch with origin/main.
   changed-gate:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -65,7 +68,7 @@ jobs:
       - name: Dead code
         run: bun run dead-code
       - name: Ratchet and file size
-        run: node scripts/check-changed.mjs --base HEAD^1 --ratchet-only
+        run: node scripts/check-changed.mjs --base ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/main' }} --ratchet-only
 
   # The scenarios of the behavior net that the pull request's files can break
   # (scripts/verify/DOCUMENTATION.md), in four parts so a wide change still
@@ -81,19 +84,19 @@ jobs:
         part: [1, 2, 3, 4]
     steps:
       # A pull request is checked out as its merge commit, whose first parent
-      # is the base. A run started by hand compares the branch with where it
-      # left origin/main, which needs the history.
+      # is the base. A run started by hand plays the whole net: on main, or a
+      # branch equal to it, a comparison would select nothing and pass.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
+          fetch-depth: 2
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Play the scenarios the change touches
-        run: bun run verify -- --changed ${{ github.event_name == 'pull_request' && '--base HEAD^1' || '' }} --retry-failed --shard ${{ matrix.part }}/4
+      - name: Play the scenarios
+        run: bun run verify -- ${{ github.event_name == 'pull_request' && '--changed --base HEAD^1' || '' }} --retry-failed --shard ${{ matrix.part }}/4
       - name: Keep the failures, also of a scenario that passed when played again
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

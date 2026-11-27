@@ -2,6 +2,8 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { opensDiff, useOpenCommentSource } from '@/components/comments/useOpenCommentSource';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
@@ -14,7 +16,8 @@ import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
 import { ReceivedPageCard } from '../../sharePages/received/ReceivedPageCard';
 import { readBrowserAnnotationPrompt } from '@/lib/browser/annotationPrompt';
-import { quoteDisplayText } from '@/lib/messages/quoteDisplayText';
+import { chatQuoteExcerpt, quoteDisplayText } from '@/lib/messages/quoteDisplayText';
+import { ChatQuoteBody } from '../../ChatQuoteBody';
 
 
 const QUOTE_BAR_CLASS = 'border-s-3 border-primary/45 ps-3';
@@ -24,14 +27,17 @@ const ContextCard: React.FC<{
     summary: string;
     title?: string;
     body: string;
+    bodyContent?: React.ReactNode;
+    bodyDir?: 'ltr' | 'rtl' | 'auto';
     text: string;
     mono?: boolean;
     captionless?: boolean;
     collapsed?: boolean;
     onExpand?: () => void;
     reveal?: { label: string; onReveal: () => void };
+    openSource?: { label: string; onOpen: () => void };
     attachmentFilenames: readonly string[];
-}> = ({ icon, summary, title, body, text, mono, captionless, collapsed, onExpand, reveal, attachmentFilenames }) => {
+}> = ({ icon, summary, title, body, bodyContent, bodyDir, text, mono, captionless, collapsed, onExpand, reveal, openSource, attachmentFilenames }) => {
     const [expanded, setExpanded] = React.useState(false);
     const hasBody = body.trim().length > 0;
     const hasText = text.trim().length > 0;
@@ -40,6 +46,21 @@ const ContextCard: React.FC<{
         <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
             <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{summary}</span>
+            {openSource && !collapsed ? (
+                <button
+                    type="button"
+                    className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                    aria-label={openSource.label}
+                    title={openSource.label}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        openSource.onOpen();
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                >
+                    <Icon name="external-link" className="size-3.5" />
+                </button>
+            ) : null}
         </div>
     );
     const comment = hasText ? (
@@ -106,6 +127,7 @@ const ContextCard: React.FC<{
                 {showCaption ? caption : <span className="sr-only">{summary}</span>}
                 {hasBody ? (
                     <div
+                        dir={bodyDir}
                         className={cn(
                             'whitespace-pre-wrap break-words',
                             !reveal && 'text-muted-foreground',
@@ -114,7 +136,7 @@ const ContextCard: React.FC<{
                             !expanded && 'line-clamp-4'
                         )}
                     >
-                        {body}
+                        {bodyContent ?? body}
                     </div>
                 ) : null}
             </div>
@@ -136,6 +158,7 @@ const UserContextPart: React.FC<{
 }> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
     const { t } = useI18n();
     const quoteHighlights = useChatQuoteHighlightApi();
+    const openCommentSource = useOpenCommentSource(useEffectiveDirectory() ?? null);
     const changeRequestTerm = useChangeRequestTerm(payload.kind === 'pr-comment' || payload.kind === 'pr-check' ? payload.provider : null);
     const shared = { collapsed, onExpand, attachmentFilenames };
 
@@ -154,7 +177,12 @@ const UserContextPart: React.FC<{
                 : payload.startLine === payload.endLine
                 ? t('chat.message.context.codeCommentLine', { file: fullFile, line: payload.startLine })
                 : t('chat.message.context.codeComment', { file: fullFile, start: payload.startLine, end: payload.endLine });
-            return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} mono {...shared} />;
+            return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} mono openSource={openCommentSource.canOpen(payload)
+                ? {
+                    label: t(opensDiff(payload.origin) ? 'chat.toolPart.openFileDiff' : 'chat.toolPart.openFile'),
+                    onOpen: () => openCommentSource.open(payload),
+                }
+                : undefined} {...shared} />;
         }
         case 'terminal':
             return (
@@ -212,15 +240,23 @@ const UserContextPart: React.FC<{
                     ? t('chat.message.context.codeCommentLine', { file, line: payload.startLine })
                     : t('chat.message.context.codeComment', { file, start: payload.startLine, end: payload.endLine }))
                 : t('chat.message.context.fileQuote', { file });
-            return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} {...shared} />;
+            return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} openSource={openCommentSource.canOpen({ source: 'file-quote' })
+                ? {
+                    label: t('chat.toolPart.openFile'),
+                    onOpen: () => openCommentSource.open({ fileLabel: payload.fileLabel, startLine: payload.startLine ?? 0 }),
+                }
+                : undefined} {...shared} />;
         }
         case 'chat-quote': {
             const sourceMessageId = payload.messageId;
+            const excerpt = chatQuoteExcerpt(payload.quote, payload.anchor);
             return (
                 <ContextCard
                     icon="chat-1"
                     summary={t('chat.message.context.chatQuote')}
                     body={quoteDisplayText(payload.quote)}
+                    bodyContent={<ChatQuoteBody excerpt={excerpt} />}
+                    bodyDir={excerpt.dir ?? 'auto'}
                     text={payload.text}
                     captionless
                     reveal={quoteHighlights && sourceMessageId

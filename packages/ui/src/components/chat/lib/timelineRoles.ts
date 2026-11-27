@@ -2,6 +2,7 @@ import type { Message } from '@/lib/opencode/model';
 import { readDispatchedSessionResult } from '@/lib/opencode/dispatched-session';
 import { readWorkflowReport } from '@/lib/workflows/report';
 import { readShareAnswer } from '@/lib/share-pages/answer';
+import { readShellCompletion } from '@/lib/opencode/background-shell';
 import { readSubagentRun } from '@/lib/opencode/subagent-run';
 
 const NOTICE_ROLES = new Set<Message['role']>(['compaction', 'shell']);
@@ -35,19 +36,23 @@ export const isSkippedTimelineMessage = (message: Message): boolean =>
 export const createNoticeTurnSplitter = () => {
     let afterAnswer = false;
     let noticeIndex = -1;
+    let openedByCommand = false;
     return (message: Message, index: number): number => {
         if (message.role === 'assistant') {
             const splitAt = noticeIndex;
             afterAnswer = message.finish === 'stop';
             noticeIndex = -1;
+            openedByCommand = false;
             return splitAt;
         }
         if (afterAnswer && isSkippedTimelineMessage(message)) {
-            noticeIndex = index;
+            if (!openedByCommand) noticeIndex = index;
+            openedByCommand ||= readShellCompletion(message) !== undefined;
             return -1;
         }
         afterAnswer = false;
         noticeIndex = -1;
+        openedByCommand = false;
         return -1;
     };
 };

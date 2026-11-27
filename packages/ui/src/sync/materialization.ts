@@ -1,6 +1,7 @@
 import type { Message, Part } from "@/lib/opencode/model"
-import { confirmedOptimisticIDs, mergeMessages, type OptimisticItem } from "./optimistic"
+import { confirmedOptimisticIDs, isPendingInboxMessage, mergeMessages, type OptimisticItem } from "./optimistic"
 import type { SessionMaterializationReason } from "./event-reducer"
+import { isSameCompletedCompaction } from "./message-ordering"
 import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 
 const STREAMING_PART_FIELDS = ["text", "output"] as const
@@ -329,6 +330,12 @@ function mergeMaterializedParts(
   return [...mergedParts, ...missingLiveParts]
 }
 
+function settledCompactionTwin(existing: Message, incoming: readonly Message[], current: readonly Message[]): Message | undefined {
+  if (existing.role !== "compaction") return undefined
+  const twin = incoming.find((message) => isSameCompletedCompaction(message, existing))
+  return twin && !current.some((message) => message.id === twin.id) ? twin : undefined
+}
+
 export function materializeSessionSnapshots(
   state: MaterializedState,
   sessionID: string,
@@ -348,21 +355,25 @@ export function materializeSessionSnapshots(
   const incomingByID = new Map(nextMessages.map((message) => [message.id, message] as const))
   let reconciledCurrentMessages = currentMessages
   const deliveredWhileAway = new Set<string>()
+  const movedIDs = new Set<string>()
   for (let index = 0; index < currentMessages.length; index += 1) {
     const existing = currentMessages[index]
-    const incoming = incomingByID.get(existing.id)
-    const delivered = existing.role === "synthetic" && existing.pending === true && incoming?.role === "synthetic"
+    const incoming = incomingByID.get(existing.id) ?? settledCompactionTwin(existing, nextMessages, currentMessages)
+    const delivered = incoming?.role === existing.role && isPendingInboxMessage(existing) && !isPendingInboxMessage(incoming)
     const completed = existing.role === "assistant"
       && incoming?.role === "assistant"
       && incoming.time.completed !== undefined
       && (existing.time.completed === undefined || existing.closedLocally === true)
-    if (!incoming || (!delivered && !completed)) continue
-    if (delivered) deliveredWhileAway.add(existing.id)
+    const compacted = existing.role === "compaction" && incoming?.role === "compaction"
+      && (incoming.id !== existing.id || (existing.status === "running" && incoming.status !== "running"))
+    if (!incoming || (!delivered && !completed && !compacted)) continue
+    if (delivered && existing.role === "synthetic") deliveredWhileAway.add(existing.id)
+    if (delivered) movedIDs.add(existing.id)
     if (reconciledCurrentMessages === currentMessages) reconciledCurrentMessages = [...currentMessages]
     reconciledCurrentMessages[index] = incoming
   }
   if (deliveredWhileAway.size > 0) reconciledCurrentMessages = reconciledCurrentMessages.filter((message) => !deliveredWhileAway.has(message.id))
-  const messages = mergeMessages(reconciledCurrentMessages, nextMessages, options.mode === "prepend" ? "older" : options.placement)
+  const messages = mergeMessages(reconciledCurrentMessages, nextMessages, options.mode === "prepend" ? "older" : options.placement, movedIDs)
   const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
 
   let partsChanged = false

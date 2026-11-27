@@ -1,8 +1,10 @@
 import React from 'react';
+import { FieldDictationHost } from '@/components/dictation/FieldDictationHost';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useMergedWorktreeCleanup } from '@/hooks/useMergedWorktreeCleanup';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { setOptimisticRefs } from '@/sync/session-actions';
@@ -25,15 +27,18 @@ const SyncOptimisticBridge: React.FC = () => {
   const addRef = React.useRef(sync.optimistic.add);
   const removeRef = React.useRef(sync.optimistic.remove);
   const confirmRef = React.useRef(sync.optimistic.confirm);
+  const admitRef = React.useRef(sync.optimistic.admit);
   addRef.current = sync.optimistic.add;
   removeRef.current = sync.optimistic.remove;
   confirmRef.current = sync.optimistic.confirm;
+  admitRef.current = sync.optimistic.admit;
 
   React.useEffect(() => {
     setOptimisticRefs(
       (input) => addRef.current(input),
       (input) => removeRef.current(input),
       (input) => confirmRef.current(input),
+      (input) => admitRef.current(input),
     );
   }, []);
 
@@ -68,6 +73,7 @@ export function SyncRuntimeEffects({ backgroundWorkEnabled }: {
   backgroundWorkEnabled: boolean;
 }) {
   useSessionAutoCleanup({ enabled: backgroundWorkEnabled });
+  useSettingsFileSync();
   useQueuedMessageAutoSend(backgroundWorkEnabled && !isServerOwnedMessageQueue());
 
   return <SyncOptimisticBridge />;
@@ -85,6 +91,7 @@ export function SyncAppEffects({ backgroundWorkEnabled }: {
     <>
       <SyncRuntimeEffects backgroundWorkEnabled={backgroundWorkEnabled} />
       <MiniChatPresenceBridge />
+      <FieldDictationHost />
     </>
   );
 }

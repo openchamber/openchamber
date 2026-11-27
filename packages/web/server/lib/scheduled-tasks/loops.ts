@@ -7,6 +7,7 @@ import path from 'path';
 import { parseMdFile, writeMdFile } from '../opencode/markdown-files.js';
 import { getAncestors, findWorktreeRoot } from '../opencode/config-files.js';
 import { MAX_TASK_NAME_LENGTH } from '../projects/task-text-limits.js';
+import { directoryReachability } from '../directory-reachability/index.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import { isBoolean } from '../shared/object-guards.js';
 
@@ -127,7 +128,7 @@ export const setLoopFileEnabled = (filePath: string, enabled: boolean) => {
 };
 
 const walkLoopMdFiles = (rootDir: string) => {
-  if (!rootDir || !fs.existsSync(rootDir)) {
+  if (!rootDir) {
     return [];
   }
   try {
@@ -135,8 +136,10 @@ const walkLoopMdFiles = (rootDir: string) => {
       .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
       .map((entry) => path.join(rootDir, entry.name))
       .sort();
-  } catch {
-    return [];
+  } catch (error) {
+    const code = controlErrorFields(error)?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
+    throw error;
   }
 };
 
@@ -176,4 +179,19 @@ export const discoverLoops = (projectPath: string | null | undefined) => {
     loops.push(entry);
   }
   return loops;
+};
+
+export const readProjectLoops = async (projectPath: string, logger: { warn?: (message: string, details: { projectPath: string; error: string }) => void }) => {
+  if (await directoryReachability.isUnreachable(projectPath)) return null;
+  const roots = [USER_LOOP_ROOT(), ...getAncestors(projectPath, findWorktreeRoot(projectPath) || projectPath).map((folder) => path.join(folder, '.agents', LOOP_DIR_NAME))];
+  if ((await Promise.all(roots.map(directoryReachability.isUnreachable))).includes(true)) return null;
+  try {
+    return discoverLoops(projectPath);
+  } catch (error) {
+    logger.warn?.('[ScheduledTasks] kept the saved loop tasks: their folder could not be read', {
+      projectPath,
+      error: String(controlErrorFields(error)?.message ?? error),
+    });
+    return null;
+  }
 };

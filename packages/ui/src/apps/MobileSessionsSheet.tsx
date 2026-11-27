@@ -53,6 +53,7 @@ import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder }
 import { useUIStore } from '@/stores/useUIStore';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { useHasNativeSessionBanners } from '@/hooks/useHasNativeSessionBanners';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
@@ -71,6 +72,7 @@ import { MobileProjectIcon } from './MobileProjectIcon';
 import { selectHasChats } from './mobileSessionFields';
 import { getProjectLabel, normalizePath } from './mobilePaths';
 import { MobileSessionList } from './mobileSidebar/MobileSessionList';
+import { MobileRowDisplayItems } from './mobileSidebar/MobileRowDisplayItems';
 import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -111,8 +113,9 @@ const MOBILE_MENU_ITEM_CLASS = 'min-h-10 items-center justify-between';
 function MobileMarkAllReadItem(): React.ReactNode {
   const { t } = useI18n();
   const hasUnread = useHasUnreadSession();
+  const hasBanners = useHasNativeSessionBanners();
   return (
-    <DropdownMenuItem disabled={!hasUnread} onClick={markAllSessionsViewed} className={MOBILE_MENU_ITEM_CLASS}>
+    <DropdownMenuItem disabled={!hasUnread && !hasBanners} onClick={markAllSessionsViewed} className={MOBILE_MENU_ITEM_CLASS}>
       <span className="flex items-center gap-2">
         <Icon name="check-double" className="size-4" />
         {t('sessions.sidebar.header.actions.markAllRead')}
@@ -180,10 +183,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
   const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
   const setKeepPinnedInPlace = useSessionDisplayStore((state) => state.setKeepPinnedInPlace);
-  const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
-  const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
-  const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
-  const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const savedSections = useSessionDisplayStore((state) => state.sections);
   const customSections = React.useMemo(() => savedSections.filter((entry) => entry.kind === 'custom'), [savedSections]);
@@ -350,12 +349,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {sessionWorkEnabled && showWorkSection ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepWorkInPlace: next });
         })) : null}
-        {renderMenuChoice('detailed', 'sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, toggleSetting(detailedZoneRows, setDetailedZoneRows, (next) => {
-          void updateDesktopSettings({ sidebarDetailedZoneRows: next });
-        }))}
-        {renderMenuChoice('branch-names', 'sessions.sidebar.header.displayMode.worktreeNameByBranch', worktreeNameByBranch, toggleSetting(worktreeNameByBranch, setWorktreeNameByBranch, (next) => {
-          void updateDesktopSettings({ sidebarWorktreeNameByBranch: next });
-        }))}
+        <MobileRowDisplayItems />
         <DropdownMenuSeparator />
         {canEditOrder ? (
           <DropdownMenuItem onClick={() => setEditingOrder(true)} className={MOBILE_MENU_ITEM_CLASS}>

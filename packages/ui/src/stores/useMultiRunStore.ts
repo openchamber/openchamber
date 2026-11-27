@@ -206,11 +206,10 @@ export const useMultiRunStore = create<MultiRunStore>()(
             return null;
           }
 
-          const directory = project.path;
+          const directory = params.spaceDirectory ?? project.path;
 
-          const isGit = await checkIsGitRepository(directory);
+          const shouldIsolateRuns = !params.spaceDirectory && await checkIsGitRepository(directory) && params.isolateRuns !== false;
           assertCurrent();
-          const shouldIsolateRuns = isGit && params.isolateRuns !== false;
 
           const groupSlug = toGitSafeSlug(groupName) || 'multi-run';
           const membershipGroup: MultiRunMembership['group'] = { kind: 'id', id: generateUuid() };

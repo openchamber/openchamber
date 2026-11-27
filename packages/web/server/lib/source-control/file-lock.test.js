@@ -17,6 +17,26 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
+it('releases the lock after a transient unlink failure', async () => {
+  const lockPath = await setup();
+  let failures = 1;
+  const fsImpl = { ...fs, unlink: async (file) => {
+    if (file === lockPath && failures-- > 0) throw Object.assign(new Error('busy'), { code: 'EPERM' });
+    return fs.unlink(file);
+  } };
+  await withSourceControlFileLock(lockPath, () => {}, { fsImpl });
+  await expect(withSourceControlFileLock(lockPath, () => 'next', { waitMs: 0 })).resolves.toBe('next');
+});
+
+it('a live owner whose release stayed refused does not block the next contender', async () => {
+  const lockPath = await setup();
+  const fsImpl = { ...fs, unlink: async () => { throw Object.assign(new Error('busy'), { code: 'EPERM' }); } };
+  await expect(withSourceControlFileLock(lockPath, () => {}, { fsImpl })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_LOCK_FAILED' });
+  await fs.access(lockPath);
+  await expect(withSourceControlFileLock(lockPath, () => 'next', { waitMs: 25 })).resolves.toBe('next');
+  await expect(fs.stat(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
 it('creates mode 0600 with unique identity and releases after success or operation failure', async () => {
   const lockPath = await setup();
   const nonces = [];

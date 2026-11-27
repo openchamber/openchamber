@@ -164,15 +164,15 @@ describe('carrying a task name into a new worktree', () => {
     await namer.carryToWorktree({ sessionId: 'agent', worktree: '/wt/a' });
     await namer.carryToWorktree({ sessionId: 'renamed', worktree: '/wt/b' });
 
-    expect(setWorktreeTaskTitle).toHaveBeenNthCalledWith(1, '/wt/a', { title: 'Login fix', by: 'agent' });
-    expect(setWorktreeTaskTitle).toHaveBeenNthCalledWith(2, '/wt/b', { title: 'My login fix', by: 'agent' });
+    expect(setWorktreeTaskTitle).toHaveBeenNthCalledWith(1, '/wt/a', { title: 'Login fix', by: 'agent', session: 'agent' });
+    expect(setWorktreeTaskTitle).toHaveBeenNthCalledWith(2, '/wt/b', { title: 'My login fix', by: 'agent', session: 'renamed' });
   });
 
   it('carries generated session titles as agent-owned without requiring metadata', async () => {
     const { namer, setWorktreeTaskTitle } = setup({ sessions: [{ id: 's', title: 'New session - 2026-10-27' }] });
 
     await namer.carryToWorktree({ sessionId: 's', worktree: '/wt/a' });
-    expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'New session - 2026-10-27', by: 'agent' });
+    expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'New session - 2026-10-27', by: 'agent', session: 's' });
   });
 
   it('preserves explicit user ownership and skips a missing session', async () => {
@@ -180,7 +180,7 @@ describe('carrying a task name into a new worktree', () => {
       { id: 's', title: 'Mine now', metadata: { openchamber: { workTitle: { title: 'Mine', by: 'user' } } } },
     ] });
     await namer.carryToWorktree({ sessionId: 's', worktree: '/wt/a' });
-    expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'Mine now', by: 'user' });
+    expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'Mine now', by: 'user', session: 's' });
     expect(await namer.carryToWorktree({ sessionId: 'missing', worktree: '/wt/a' })).toBeNull();
   });
 });

@@ -42,7 +42,9 @@ describe('source-control provider descriptors', () => {
     expect(parsed?.features).toEqual({
       referenceSearch: true, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: false,
-      issueEdit: false, changeRequestEdit: false,
+      // Every server older than the field served review submission.
+      reviews: true,
+      issueAssignees: false, issueCloseReasonWrite: false, issueEdit: false, baseChange: false, updateBranch: false, rebase: false, changeRequestEdit: false,
       // Every server older than the field served change-request diffs.
       changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
       submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false,
@@ -94,6 +96,21 @@ describe('source-control provider descriptors', () => {
       ...descriptor, features: { ...descriptor.features, changeRequestPatch: false },
     }]);
     expect(parsed?.features.changeRequestPatch).toBe(false);
+  });
+
+  test('reads dismissal and restoration capabilities, and drops values it does not know', () => {
+    const reviewThreads = { start: false, reply: true, resolve: true };
+    const [full] = sourceControlProviderListSchema.parse([{
+      ...acmeDescriptor(), capabilities: { reviewThreads, reviewDismiss: 'others', reviewUndismiss: true },
+    }]);
+    expect(full?.capabilities).toEqual({ reviewThreads, reviewDismiss: 'others', reviewUndismiss: true });
+
+    // An unknown dismissal value drops only itself, not the thread capabilities beside it.
+    const [unknown] = sourceControlProviderListSchema.parse([{
+      ...acmeDescriptor(), capabilities: { reviewThreads, reviewDismiss: 'theirs', reviewUndismiss: 'yes' },
+    }]);
+    expect(unknown?.id).toBe('acme');
+    expect(unknown?.capabilities).toEqual({ reviewThreads });
   });
 
   test('refuses an icon path that is not path data', () => {

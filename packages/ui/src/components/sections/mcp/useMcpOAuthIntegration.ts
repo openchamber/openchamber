@@ -9,7 +9,11 @@ export const useMcpOAuthIntegration = (
   enabled = true,
   onUnavailable?: () => void,
 ): IntegrationInfo | null => {
-  const [integration, setIntegration] = React.useState<IntegrationInfo | null>(null);
+  const [result, setResult] = React.useState<{
+    serverName: string;
+    directory: string | null;
+    integration: IntegrationInfo;
+  } | null>(null);
   const onUnavailableRef = React.useRef(onUnavailable);
   React.useEffect(() => {
     onUnavailableRef.current = onUnavailable;
@@ -17,7 +21,7 @@ export const useMcpOAuthIntegration = (
 
   React.useEffect(() => {
     let cancelled = false;
-    setIntegration(null);
+    setResult(null);
     if (!enabled) return;
     const sdk = directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient();
     const load = async (attempt = 0): Promise<void> => {
@@ -26,7 +30,7 @@ export const useMcpOAuthIntegration = (
         if (cancelled) return;
         const found = findMcpIntegration(data, serverName) ?? null;
         if (found) {
-          setIntegration(found);
+          setResult({ serverName, directory, integration: found });
           if (getMcpOAuthMethods(found).length === 0) onUnavailableRef.current?.();
           return;
         }
@@ -50,5 +54,6 @@ export const useMcpOAuthIntegration = (
     };
   }, [directory, enabled, serverName]);
 
-  return getMcpOAuthMethods(integration ?? undefined).length > 0 ? integration : null;
+  if (!enabled || result?.serverName !== serverName || result.directory !== directory) return null;
+  return getMcpOAuthMethods(result.integration).length > 0 ? result.integration : null;
 };

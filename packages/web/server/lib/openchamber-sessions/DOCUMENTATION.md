@@ -47,6 +47,18 @@ This module owns server-side session creation, dispatch, forking, archive and me
 
 ## Decisions
 
+### Why an absent model is looked up again before it is refused
+
+While OpenCode takes in a changed managed config (a tool switched in Settings),
+its catalog lists only its built-in provider: 50 to 80 ms, measured on 2.4.1. A
+send in that moment was refused with "Unknown model". `catalog-reload.ts` rereads
+only the model list, for at most 3 s (the window reached 1.2 s on a machine at
+load 42; the CLI gives up at 4 s), and keeps the last catalog when a reread
+fails, so a wrong model is still refused. A default is treated the same: a
+list holding only OpenCode's own provider counts no other provider's model as
+missing, and when no named model is listed the create waits, then refuses.
+Only a user who named no model gets the fallback.
+
 ### Why a server-side unread baseline and not marking all old turns unread
 
 The server and VS Code extension share the data directory's `sessions-unread.json` baseline because earlier clients record no viewed watermark. Proxy responses treat turns ending by that baseline as viewed without writing OpenCode; an unreadable existing baseline stays unchanged because replacing it would silently mark newer turns seen. A save failure leaves the process using its in-memory baseline and permits another attempt on restart.

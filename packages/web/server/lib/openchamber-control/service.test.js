@@ -357,6 +357,7 @@ describe('OpenChamber control service', () => {
       model('a', 'new', 3, 'fam'), model('a', 'older', 2, 'fam'), model('a', 'secret', 4),
       model('b', 'old', 1, 'bfam'), model('b', 'newer', 5, 'bfam'),
     ] })) };
+    client.plugin = { list: async () => ({ data: [{ state: { status: 'active' } }] }) };
     client.provider = { list: vi.fn(async () => ({ data: [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }] })) };
 
     const first = await service.execute('models.search', {}, '/repo');
@@ -379,6 +380,7 @@ describe('OpenChamber control service', () => {
       readSettingsFromDiskMigrated: vi.fn(async () => ({ favoriteModels: [], recentModels: [], hiddenModels: [] })),
     });
     client.model = { list: vi.fn(async () => ({ data: [model('glm-5.3-highspeed', 2), model('glm-5.2', 1), model('glm-5.3', 2)] })) };
+    client.plugin = { list: async () => ({ data: [{ state: { status: 'active' } }] }) };
     client.provider = { list: vi.fn(async () => ({ data: [{ id: 'z', name: 'Zed' }] })) };
 
     const found = await service.execute('models.search', { query: 'glm' }, '/repo');
@@ -647,6 +649,33 @@ describe('OpenChamber control service', () => {
     await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'Go', pullRequest: 42 }, '/repo'))
       .rejects.toThrow('pullRequest applies only to session.create');
     expect(sessionService.send).not.toHaveBeenCalled();
+  });
+
+  it('passes existingBranch and setUpstream through on session.create and rejects it on send/fork', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', {
+      worktree: ' fix-x ',
+      existingBranch: ' dre/fix/x ',
+      setUpstream: true,
+    }, '/repo');
+    expect(sessionService.create.mock.calls).toEqual([
+      [{ directory: '/repo', worktree: { name: 'fix-x', existingBranch: 'dre/fix/x' }, setUpstream: true }],
+    ]);
+
+    await expect(service.execute('session.create', { existingBranch: ' dre/fix/x ' }, '/repo'))
+      .rejects.toMatchObject({ statusCode: 400, message: 'existingBranch needs worktree: pass the folder name for the worktree that checks the branch out' });
+    for (const existingBranch of ['  ', 42, null]) {
+      await expect(service.execute('session.create', { worktree: 'fix-x', existingBranch }, '/repo'))
+        .rejects.toMatchObject({ statusCode: 400, message: 'existingBranch must be a non-empty branch name' });
+    }
+    expect(sessionService.create).toHaveBeenCalledTimes(1);
+
+    await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'Go', existingBranch: 'dre/fix/x' }, '/repo'))
+      .rejects.toThrow('existingBranch applies only to session.create or session.moveToWorktree');
+    await expect(service.execute('session.fork', { sessionId: 'ses_1', existingBranch: 'dre/fix/x' }, '/repo'))
+      .rejects.toThrow('existingBranch applies only to session.create or session.moveToWorktree');
+    expect(sessionService.send).not.toHaveBeenCalled();
+    expect(sessionService.fork).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1083,6 +1112,17 @@ describe('OpenChamber control service', () => {
       expect(client.session.list).toHaveBeenCalledTimes(1);
     });
 
+    it('marks the leads and lists only them, in every project', async () => {
+      const { service, client } = createService();
+      const lead = { openchamber: { lead: { at: 1 } } };
+      client.session.list.mockResolvedValue({ data: [session('lead', { metadata: lead }), session('plain'), session('copy', { parentID: 'lead', metadata: lead })] });
+      const everything = await service.execute('session.list', {}, '/repo');
+      expect(everything.sessions.map(({ id, lead: marked }) => [id, marked])).toEqual([['lead', true], ['plain', undefined]]);
+      const leads = await service.execute('session.list', { leads: true }, '/repo');
+      expect(leads.sessions.map(({ id }) => id)).toEqual(['lead']);
+      expect(client.session.list.mock.calls.at(-1)[0]).not.toHaveProperty('directory');
+    });
+
     it('lists the sessions the caller created with ownWork, with their status, and archives only those', async () => {
       const archive = vi.fn(async () => ({ archived: [], failedIds: [] }));
       const { service, client } = createService();
@@ -1189,6 +1229,20 @@ describe('OpenChamber control service', () => {
       await expect(service.execute('session.track', { sessionId: 'in-wt' })).rejects.toMatchObject({ statusCode: 409 });
       await expect(service.execute('session.markDone', { sessionId: 'pinned' })).resolves.toMatchObject({ inWork: false });
       expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('tracks and lists a pinned session in work once the user allows it', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const { service, client } = createService({
+        ...withSettings({ sessionWorkIncludesPinned: true }), updateSessionMetadata, isWorktreePinned: async () => true,
+      });
+      const pinned = { metadata: { openchamber: { pinned: { at: 1 }, work: { state: 'open' } } } };
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, pinned));
+      client.session.list.mockResolvedValue({ data: [session('a', pinned)], cursor: {} });
+
+      await expect(service.execute('session.track', { sessionId: 'a' })).resolves.toMatchObject({ inWork: true });
+      const { sessions } = await service.execute('session.list', { inWork: true });
+      expect(sessions.map(({ id }) => id)).toEqual(['a']);
     });
 
     it('reports an unknown session and a server that cannot write', async () => {
@@ -1710,6 +1764,21 @@ describe('render.page', () => {
 
       expect(result).toMatchObject({ answer: { answered: false, reason: 'ui-not-drawn' } });
       expect(result.note).toContain('Text /markdown: expects string');
+      expect(result.note).toContain('could not draw this ui');
+    });
+
+    it('tells the agent its html page threw, with the errors, so it does not hear about a ui', async () => {
+      const { service, waitForPage } = createWaitingService();
+      const pending = service.execute('render.page', { html: '<main id="app"></main><script>atob("!")</script>', title: 'Pick', awaitAnswer: true }, '/repo', call);
+      await waitForPage();
+
+      service.answerPage({ sessionId: 'ses_1', callId: 'call_1', notDrawn: ['Uncaught InvalidCharacterError: bad atob'] });
+      const result = await pending;
+
+      expect(result).toMatchObject({ answer: { answered: false, reason: 'ui-not-drawn' } });
+      expect(result.note).toContain("The page's script threw");
+      expect(result.note).toContain('Uncaught InvalidCharacterError: bad atob');
+      expect(result.note).not.toContain('could not draw this ui');
     });
 
     it('waits until the user answers and returns the answer', async () => {

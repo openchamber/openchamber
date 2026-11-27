@@ -1,6 +1,8 @@
 import type { Project as OpenCodeProject, Session } from '@/lib/opencode/model';
 import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
+import { listIntegrateCheckouts } from '@/lib/worktrees/integrateCheckouts';
+import type { ReadOnlySessionAssociation } from '@/lib/worktrees/readOnlySessionAssociation';
 
 type Project = {
   id: string;
@@ -73,6 +75,7 @@ export const createSessionOwnershipIndex = (
   archivedSessions: SessionOwnershipRecord[] = [],
   authoritativeProjects: readonly AuthoritativeOpenCodeProject[] = [],
   spaces: readonly SpaceMark[] = [],
+  nestedSessionOwners?: ReadonlyMap<string, ReadOnlySessionAssociation>,
 ): SessionOwnershipIndex => {
   const ownerByDirectory = new Map<string, DirectoryOwner>();
   const projectByRoot = new Map<string, Project>();
@@ -111,6 +114,17 @@ export const createSessionOwnershipIndex = (
   }
 
   if (!isVSCode) {
+    for (const checkout of listIntegrateCheckouts()) {
+      const project = checkout.projectPaths.flatMap((path) => projectByRoot.get(path) ?? [])[0];
+      const projectRoot = project ? normalizePath(project.normalizedPath) : null;
+      if (!project || !projectRoot) continue;
+      setOwner(ownerByDirectory, checkout.path, {
+        projectId: project.id,
+        projectRoot,
+        scopeDirectory: projectRoot,
+        kind: 'project',
+      });
+    }
     for (const space of spaces) {
       const projectRoot = normalizePath(space.projectDirectory);
       const directory = normalizePath(space.directory);
@@ -204,8 +218,17 @@ export const createSessionOwnershipIndex = (
     scopeTarget?: Map<string, Set<string>>,
   ): void => {
     for (const session of input) {
-      const exactOwner = resolveOwner(resolveSessionDirectory(session));
-      const owner = exactOwner ?? (!isVSCode
+      const sessionDirectory = resolveSessionDirectory(session);
+      const exactOwner = resolveOwner(sessionDirectory);
+      const association = !exactOwner && !isVSCode && !session.time?.archived && !session.parentID
+        ? nestedSessionOwners?.get(session.id)
+        : undefined;
+      const associationOwner = association
+        && sessionDirectory === association.directory
+        && projectByRoot.get(association.projectRoot)?.id === association.projectId
+        ? ownerByDirectory.get(association.projectRoot)
+        : null;
+      const owner = exactOwner ?? associationOwner ?? (!isVSCode
         ? canonicalOwnerByOpenCodeProjectId.get(getOpenCodeProjectId(session) ?? '') ?? null
         : null);
       if (!owner) continue;

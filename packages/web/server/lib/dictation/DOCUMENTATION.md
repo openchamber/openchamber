@@ -78,14 +78,27 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 
 `options` in `start` carries the client-selected provider config:
 `{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey, endpointPath, prompt }, correct? }`. With
+openaiCompatible?: { baseUrl, model, apiKey, endpointPath, keyProvider, prompt }, correct? }`. With
 `correct: true` the final text goes through the correction pass first, and
 `finish_accepted.timeoutMs` includes its budget (`CORRECTION_TIMEOUT_MS`).
-An empty or
-absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path. A
-non-empty `prompt` goes out as the multipart `prompt` field on every committed
-segment; an empty or absent one sends no field. The local provider takes no
-prompt.
+An empty or absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions`
+path. At stream start, the server takes `apiKey` from an older client first,
+then the key typed for transcription. The stream keeps that result, even if
+there is no typed key, together with the server address. Later edits to the
+typed key apply to new streams.
+
+If the stream started without a typed key, each committed segment can use an
+OpenCode provider key. An empty `keyProvider` means None. If the field is absent,
+the server looks for one provider with a key at the same origin. It skips that
+lookup if there is no provider approval for the origin. Before sending the
+provider key, the server checks that the approval still covers the current key.
+Only segments that send a provider key use fixed error text and reject a
+transcript that contains the key (`../tts/DOCUMENTATION.md`). A different
+`keyProvider` is a different stream for resume.
+
+A non-empty `prompt` goes out as the multipart `prompt` field on every
+committed segment. An empty or absent one sends no field. The local provider
+takes no prompt.
 
 ### Resume after a dropped connection
 
@@ -114,6 +127,16 @@ from a small cache: the runtime keeps the last `final` texts for
 `DICTATION_FINAL_CACHE_TTL_MS` (30 s, dropped on access and by an unref'd
 timer). A `start` naming such an id gets `final` with the same text and no new
 stream, so the text is not lost to a reconnect that came too late.
+
+### Release of an abandoned stream
+
+A stream that receives no `start`, `chunk` or `finish` for 5 minutes
+(`DEFAULT_IDLE_RELEASE_MS`) is closed even while its socket lives, with a
+retryable `error` whose `reasonCode` is `stream_released`. A `chunk` naming a
+stream the server does not hold gets the same reason. The client opens a
+stream under a new id when the microphone delivers or the user confirms, and
+replays all of its buffered audio into it. The new id keeps late replies about
+the released stream from touching its replacement. After `finish` the finalization timeout bounds the stream instead.
 
 ## Segmentation
 
@@ -183,6 +206,10 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   error instead of touching the stream.
 - Model files live under `~/.config/openchamber/speech-models`.
 - Model installation verifies required files in staging before promotion because the installed check only tests file presence. Extraction failures remove staging and the cached archive. Partial destination directories are removed before retry; recognized model-load or Protobuf failures remove the installed copy so the next attempt can download clean files.
+- An open stream keeps its worker session, and any open session keeps the
+  worker and about 1 GB of model alive. Closing a session never starts a
+  worker, and a session whose worker is gone fails before a new worker starts,
+  so neither holds the next worker past its idle TTL.
 - Segment byte and peak counters reset when the manager issues a commit. A delayed `committed` event must preserve audio received since that commit, or the tail can be mistaken for silence and discarded.
 - Finalization waits for every commit the manager issues to be acknowledged and for every segment's final transcript. Counting only echoed events can omit a commit still in flight when the client finishes.
 - The correction deadline covers model resolution and generation because the Small Model's own generation budget starts after resolution and cannot bound a stalled lookup. The finalization budget includes the correction pass after transcription.
@@ -313,7 +340,10 @@ off by default because the text then leaves the machine. Its answer replaces
 the text only when it is about as long as the input (0.6 to 1.5 times):
 anything else is a model that answered or summarized instead of fixing. Any
 failure, a missing Small Model or the 10 s cap returns the text as heard, so
-the pass never costs the user the dictation. The prompt names colloquial
+the pass never costs the user the dictation. A transcript from a server that
+was sent an OpenCode provider's key is corrected like any other, because the
+user chose that Small Model for correction, and the literal-key check on the
+transcript (`../tts/DOCUMENTATION.md`) is all that guards it. The prompt names colloquial
 forms ("шо", "gonna") as speech to keep, because small models otherwise
 "correct" them into the literary form.
 
@@ -419,6 +449,15 @@ The native addon depends on shared libraries in its platform package, so the
 loader prepends that directory to the platform's dynamic-loader search path
 before requiring the addon. Finding the addon alone does not make its shared
 libraries discoverable.
+
+### Why idleness is counted in chunks and not in speech
+
+A live recording sends a chunk every second, silence included, so a pause in
+speech of any length keeps the stream. No chunks for 5 minutes means the
+client lost the stream or the system suspended its microphone. The first has
+nobody to notify; the second loses nothing, because the client keeps every
+segment until the final text. Requiring speech instead would cut off someone
+who stopped to think.
 
 ### Why the worker shuts down while idle and not only on server exit
 

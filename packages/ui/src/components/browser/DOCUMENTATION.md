@@ -15,15 +15,24 @@ This module owns the rendered browser panel, its navigation lifecycle, agent-act
 - Desktop history records successful loads and page titles. The display-only iframe records requested addresses because it cannot inspect the page's navigation or title.
 - Agent action callbacks read current viewport state through a ref. Snapshots identify their viewport and include a bounded, per-document warning/error record so page failures and layout differences are visible to the agent.
 - Only the current annotation run changes panel state or attaches its result. Cancellation also reaches an overlay still starting, and leaving the tab clears overlays and live style overrides.
-- Annotation dictation ends with its annotation. Transcript delivery precedes the idle-state message; a failed recording preserves partial text and leaves a waiting submit unsent for review. Model-download status appears in the overlay while recording continues.
+- Annotation dictation belongs to the field recordings (`components/dictation`). Closing the panel finishes it into the overlay, which keeps its page while hidden. A page that navigates or a closed tab finishes it too, and since its comment box is gone, the text becomes an annotation without marks in the chat the annotation was for; with no chat it stays in a notice with Copy. Only the user's own Escape or Annotate toggle discards it. Delivery is confirmed by the overlay, so text sent to a settled one is kept as well. The text has one owner: the overlay takes it and ends the recording in one step, and its reply says whether an Attach was queued. A queued Attach owns the text, and a closing window waits for it, because it carries the marks; only when it did not happen, or when a window closes with no Attach queued, does the text go to the chat by itself. Transcript delivery precedes the idle-state message; a failed recording leaves a waiting submit unsent for review. Model-download status appears in the overlay while recording continues.
 - A frame annotation captures only the visible area clipped by the window and scrolling ancestors, after overlay teardown and repaint. Hosts without desktop capture attach the annotation without an image.
+- A rendered page in a pinned chat attaches its comment and screenshot to that column's composer and returns focus there. The main chat and standalone panels use the published main composer address, including its expanded `/btw` fork.
 - Iframe tunnel resolutions are generation-scoped. A later navigation, return to discovery or teardown invalidates an older resolution so it cannot replace the selected page.
 
 ## Decisions
 
+### Why a pinned chat's annotation reads the column's comment-composer scope
+
+A pinned column never publishes its composer address (`useComposerInlineContext` skips it), so the published address always belongs to the main chat or its `/btw` fork. A rendered page in a pinned chat therefore reads the scope its column's comment composer registers, at attach time, and builds the screenshot's draft identity from the same runtime, directory and session the pinned composer uses. A read-only pinned chat has no composer, so it has no scope and the annotation is refused before the overlay starts.
+
 ### Why the iframe exposes fewer controls than the webview
 
 Cross-origin iframe pages are opaque to the app. Inspection, console and page annotation controls require the Chromium host and stay absent on the display-only fallback.
+
+### Why the iframe's loading strip ends at the frame's `load`
+
+`load` is the only loading signal a cross-origin frame gives the app. The strip blinks from a frame's mount to that event, the browser's signal that the page has loaded; it does not promise that every resource is done, since lazy-loaded images and similar requests do not hold it back. Navigation inside the frame never starts the strip, and a page that keeps working after `load` (dynamic imports, top-level await) shows none, because no event reports either. WebKit fires no `load` for a frame whose load fails (a refused or reset connection), so the blink is bounded: after `FRAME_WAIT_MS` on the shared clock the strip turns static and dim, which says neither loaded nor failed, and the frame keeps loading. The quiet strip stops listening to the clock, so a page that never loads costs no ticks. A late `load` still clears it. The loading state lives in `BrowserFrame`, keyed like the frame, so Reload or a phone tunnel reload mounts a new frame with a fresh wait, and Home unmounts the frame so the next page opened starts one too; comparing the key with the last loaded one would call a frame that remounts at the same address loaded. Reload never turns into Stop here, because a cross-origin frame's window refuses `stop()` from the app. The mobile drawer pauses the shared clock while Preview is hidden, so a waiting strip does not tick in the background; the frame stays mounted and shows its current state when Preview returns. The Chromium webview keeps its own static strip and Stop, driven by the webview's loading events.
 
 ### Why the webview mounts with its resolved source
 

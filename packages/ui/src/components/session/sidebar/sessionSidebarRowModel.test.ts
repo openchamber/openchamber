@@ -3,7 +3,7 @@ import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
-import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarBlock, type SessionSidebarRowModelArgs, type SessionSidebarTimelineEntry, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
 import { deriveSessionRowBulkSelectAll } from './sessions/sessionRowOrder';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
@@ -11,6 +11,9 @@ import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
+import { buildSidebarWorkIndex, buildWorktreeArchiveAnchors } from './works/sidebarWorks';
+import { buildTimelineEntries } from './list/timelineEntries';
+import { getSessionLifecycleOrderValue, orderSessionsByLifecycleScopes, resetSessionOrdering } from '@/sync/session-ordering';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
   node: { session: session(id), children: [], worktree: null },
@@ -21,6 +24,7 @@ const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem>
 });
 
 const sessionWorks = (items: SessionSidebarActivityItem[]): SessionSidebarWorkEntry[] => items.map((item) => ({ kind: 'session', item }));
+const undatedTimeline = (entries: SessionSidebarWorkEntry[]): SessionSidebarTimelineEntry[] => entries.map((entry) => ({ ...entry, activity: { kind: 'lead' } }));
 
 const pinnedIds = (...ids: string[]): Set<string> => new Set(
   ids.flatMap((id) => {
@@ -383,6 +387,27 @@ describe('buildSessionSidebarRowModel', () => {
     expect(order).toEqual(['caption:Clients', 'project:project-b', 'caption:projects', 'project:project-a']);
   });
 
+  test('keeps the Projects caption and its fold when every project is in a group, and only where the caption is drawn', () => {
+    const projectB: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([node('b')], { directory: '/other', folderScopeKey: '/other' })] };
+    const input = args([project([group([node('a')])]), projectB]);
+    const blocks: SessionSidebarBlock[] = [
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-a', 'project-b'], hideWhenEmpty: false, preview: false },
+      { kind: 'projects', excludedProjectIds: new Set(['project-a', 'project-b']) },
+    ];
+    const listed = (overrides: Partial<typeof input>) => buildSessionSidebarRowModel({ ...input, blocks, projectsCaption: true, ...overrides }).rows.flatMap((row) => (
+      row.kind === 'caption' ? [`caption:${row.caption}${row.collapsed ? ':folded' : ''}`]
+        : row.kind === 'project-header' ? [`project:${row.section.project.id}`]
+          : []
+    ));
+    const grouped = ['caption:section:g1', 'project:project-a', 'project:project-b'];
+
+    expect(listed({})).toEqual([...grouped, 'caption:projects']);
+    expect(listed({ blocks: [...blocks].reverse() })).toEqual(['caption:projects', ...grouped]);
+    expect(listed({ collapsedActivities: new Set(['projects']) })).toEqual([...grouped, 'caption:projects:folded']);
+    expect(listed({ projectsCaption: false })).toEqual(grouped);
+    expect(listed({ sections: [], authoritativeSections: [], blocks: [{ kind: 'projects', excludedProjectIds: new Set() }] })).toEqual([]);
+  });
+
   test('a session in work stays in its folder', () => {
     const input = args([project([group([node('in-folder'), node('top-level')])])]);
     input.foldersMap = { '/repo': [{ id: 'outer', name: 'Outer', createdAt: 1, sessionIds: ['in-folder'] }] };
@@ -594,19 +619,22 @@ describe('buildSessionSidebarRowModel', () => {
     expect(model.rows.some((row) => row.kind === 'session')).toBe(false);
   });
 
-  test('sessions inside a folder sit one level deeper than ungrouped sessions', () => {
+  test('a sub-folder sits one level under its parent folder, with its own name and a guide line', () => {
     const child = node('child');
     child.session.parentID = 'in-folder';
     const input = args([project([group([node('in-folder', [child]), node('top-level')])])]);
     input.foldersMap = { '/repo': [
       { id: 'outer', name: 'Outer', createdAt: 1, sessionIds: [] },
       { id: 'inner', name: 'Inner', parentId: 'outer', createdAt: 1, sessionIds: ['in-folder'] },
+      { id: 'deepest', name: 'Deepest', parentId: 'inner', createdAt: 1, sessionIds: [] },
+      { id: 'other', name: 'Other', createdAt: 2, sessionIds: [] },
     ] };
     input.expandedParents = new Set(['project:active:in-folder']);
     const rows = buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'folder-header' || row.kind === 'session');
+    const guides = (row: (typeof rows)[number]) => (row.treeGuides ?? []).map(({ level, end }) => `${level}${end ? '└' : '│'}`).join(' ');
 
-    expect(rows.map((row) => (row.kind === 'session' ? `${row.node.session.id}@${row.depth}` : row.displayName))).toEqual([
-      'Outer', 'Outer / Inner', 'in-folder@1', 'child@2', 'top-level@0',
+    expect(rows.map((row) => `${row.kind === 'session' ? row.node.session.id : row.displayName}@${row.depth}:${guides(row)}`)).toEqual([
+      'Outer@0:', 'Inner@1:1└', 'in-folder@2:2│', 'child@3:2│ 3└', 'Deepest@2:2└', 'Other@0:', 'top-level@0:',
     ]);
   });
 
@@ -891,11 +919,11 @@ describe('buildSessionSidebarRowModel', () => {
       const input = args([project([group([node('root')]), work]), second]);
       input.pinnedItems = [timelineItem('pinned')];
       input.workEntries = sessionWorks([timelineItem('working')]);
-      input.timeEntries = [
+      input.timeEntries = undatedTimeline([
         { kind: 'session', item: timelineItem('b1', { projectId: 'project-b' }) },
         { kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
         { kind: 'session', item: timelineItem('root') },
-      ];
+      ]);
 
       expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
         'zone:pinned', 'mixed-compact:pinned@0', 'zone:work', 'mixed-compact:working@0',
@@ -921,7 +949,7 @@ describe('buildSessionSidebarRowModel', () => {
       expect(statusesOf()).toEqual(['loading:project-a:main', 'load-failed:project-c:main']);
 
       // A project with listed works needs no line, as under its own header.
-      input.timeEntries = sessionWorks([timelineItem('a1')]);
+      input.timeEntries = undatedTimeline(sessionWorks([timelineItem('a1')]));
       expect(statusesOf()).toEqual(['loading:project-b:main', 'load-failed:project-c:main']);
     });
 
@@ -929,7 +957,7 @@ describe('buildSessionSidebarRowModel', () => {
       const input = args([project([group([node('root')])])]);
       input.singleProjectMode = true;
       input.singleProjectId = 'project-a';
-      input.timeEntries = sessionWorks([timelineItem('root')]);
+      input.timeEntries = undatedTimeline(sessionWorks([timelineItem('root')]));
 
       expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual(['project:project-a', 'project:root@0']);
     });
@@ -1135,7 +1163,7 @@ describe('buildSessionSidebarRowModel', () => {
     test('the list by time is a zone of its own, apart from In work above it', () => {
       const input = args([project([group([node('t1'), node('t2')])])]);
       input.workEntries = sessionWorks([timelineItem('working')]);
-      input.timeEntries = sessionWorks([timelineItem('t1'), timelineItem('t2')]);
+      input.timeEntries = undatedTimeline(sessionWorks([timelineItem('t1'), timelineItem('t2')]));
       const model = buildSessionSidebarRowModel(input);
 
       expect(model.selectionEntries.map((entry) => `${entry.id}:${entry.scopeKey}`))
@@ -1206,5 +1234,246 @@ describe('the Pages section', () => {
     input.contentSearchResults = [];
     const rows = buildSessionSidebarRowModel(input).rows;
     expect(rows.some((row) => row.kind === 'page' || (row.kind === 'activity-header' && row.activityKey === 'pages'))).toBe(false);
+  });
+});
+
+describe('date headings in the list by time', () => {
+  const today = new Date(2026, 10, 25).getTime();
+  const at = (month: number, day: number, year = 2026): number => new Date(year, month - 1, day, 12).getTime();
+  type Activity = number | 'lead' | 'unstarted';
+  const activityOf = (value: Activity): SessionSidebarTimelineEntry['activity'] => (
+    value === 'lead' || value === 'unstarted' ? { kind: value } : { kind: 'active', at: value }
+  );
+  const dated = (id: string, activity: Activity, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarTimelineEntry => (
+    { kind: 'session', item: timelineItem(id, overrides), activity: activityOf(activity) }
+  );
+  const worktreeWork = (id: string, sessions: SessionNode[], activity: Activity): SessionSidebarTimelineEntry => ({
+    kind: 'group', groupKey: `project-a:worktree:/${id}`, projectId: 'project-a', activity: activityOf(activity),
+    group: group(sessions, {
+      id: `worktree:/${id}`, label: id, branch: id, isMain: false, directory: `/${id}`, folderScopeKey: `/${id}`,
+      worktree: { path: `/${id}`, projectDirectory: '/repo', branch: id, label: id },
+    }),
+  });
+  const timeline = (entries: SessionSidebarTimelineEntry[], change?: (input: SessionSidebarRowModelArgs) => void) => {
+    const input = args([project([group([])])]);
+    input.timeEntries = entries;
+    input.timelineTodayStart = today;
+    change?.(input);
+    return buildSessionSidebarRowModel(input);
+  };
+  const outline = (model: ReturnType<typeof buildSessionSidebarRowModel>) => model.rows.flatMap((row) => {
+    switch (row.kind) {
+      case 'activity-header': return [`zone:${row.activityKey}`];
+      case 'date-header': return [row.day ? `${row.day.relation}:${row.day.dayKey}` : 'no sessions'];
+      case 'session': return [`${row.node.session.id}@${row.depth}`];
+      case 'run': return [`run:${row.laneNodes.map((lane) => lane.session.id).join('+')}`];
+      case 'group-header': return [`work:${row.group.label}`];
+      default: return [];
+    }
+  });
+
+  test('heads each day once, newest first, with no heading for a day without work', () => {
+    const model = timeline([
+      dated('a', at(11, 25)), dated('b', today + 1),
+      dated('c', at(11, 24)),
+      dated('d', at(3, 3)), worktreeWork('archived', [], at(3, 3)),
+      dated('e', at(12, 31, 2025)),
+    ]);
+    expect(outline(model)).toEqual([
+      'zone:timeline',
+      'today:2026-11-25', 'a@0', 'b@0',
+      'yesterday:2026-11-24', 'c@0',
+      'date:2026-03-03', 'd@0', 'work:archived',
+      'date:2025-12-31', 'e@0',
+    ]);
+    const days = model.rows.flatMap((row) => (row.kind === 'date-header' ? [row.day?.sameYear] : []));
+    expect(days).toEqual([true, true, true, false]);
+    expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
+  });
+
+  test('what leads the list stays above the first day, and works with no session yet trail under their own heading', () => {
+    const model = timeline([
+      dated('pinned', 'lead'), worktreeWork('space', [], 'lead'),
+      dated('a', at(11, 25)),
+      dated('old', at(1, 2)),
+      worktreeWork('fresh', [], 'unstarted'), worktreeWork('stopped', [], 'unstarted'),
+    ]);
+    expect(outline(model)).toEqual([
+      'zone:timeline', 'pinned@0', 'work:space',
+      'today:2026-11-25', 'a@0',
+      'date:2026-01-02', 'old@0',
+      'no sessions', 'work:fresh', 'work:stopped',
+    ]);
+  });
+
+  test('a work ordered above an older day stays under the day above it', () => {
+    expect(outline(timeline([dated('c', at(11, 24)), dated('a', at(11, 25)), dated('d', at(3, 3))]))).toEqual([
+      'zone:timeline', 'yesterday:2026-11-24', 'c@0', 'a@0', 'date:2026-03-03', 'd@0',
+    ]);
+  });
+
+  test('subagent sessions stay under their parent\'s day, and the tree lines end with it', () => {
+    const parent = (): SessionNode => ({ session: session('parent'), children: [{ session: session('child', 'parent'), children: [], worktree: null }], worktree: null });
+    const entries = [dated('parent', at(11, 25), { node: parent() }), dated('q', at(11, 24))];
+    const shown = timeline(entries, (input) => {
+      input.expandedParents = new Set(['mixed-compact:active:parent']);
+    });
+    expect(outline(shown)).toEqual(['zone:timeline', 'today:2026-11-25', 'parent@0', 'child@1', 'yesterday:2026-11-24', 'q@0']);
+    const child = shown.rows.find((row) => row.kind === 'session' && row.node.session.id === 'child');
+    expect(child?.treeGuides).toEqual([{ level: 1, end: true }]);
+    expect(shown.rows.filter((row) => row.kind === 'date-header').every((row) => row.treeGuides === undefined)).toBe(true);
+
+    const hidden = timeline(entries, (input) => {
+      input.expandedParents = new Set(['mixed-compact:active:parent']);
+      input.showSubagentSessions = false;
+    });
+    expect(outline(hidden)).toEqual(['zone:timeline', 'today:2026-11-25', 'parent@0', 'yesterday:2026-11-24', 'q@0']);
+  });
+
+  test('the lanes of a run stay together under the day of the newest one', () => {
+    const lanes = ['lane-1', 'lane-2'];
+    const model = timeline([dated('lane-1', at(11, 25)), dated('x', at(11, 24)), dated('lane-2', at(11, 23))], (input) => {
+      input.runIndex = buildMultiRunIndex(lanes.map((id) => ({
+        ...session(id),
+        metadata: withMultiRunMembership({}, {
+          version: 1, sessionID: id, group: { kind: 'id', id: '9f512893-6e63-4e49-a534-5de733ca103e' },
+          groupSlug: 'fix-auth', role: 'run', providerID: 'anthropic', modelID: 'claude', title: 'Fix auth',
+        }),
+      })), () => '/repo');
+    });
+    expect(outline(model)).toEqual(['zone:timeline', 'today:2026-11-25', 'run:lane-1+lane-2', 'yesterday:2026-11-24', 'x@0']);
+  });
+
+  test('only the list by time is headed by day: Pinned, In work, a custom section and search are not', () => {
+    const model = timeline([dated('a', at(11, 25)), dated('c', at(11, 24))], (input) => {
+      input.pinnedItems = [timelineItem('pinned')];
+      input.workEntries = sessionWorks([timelineItem('working')]);
+      input.blocks = [
+        { kind: 'pinned' }, { kind: 'work' },
+        { kind: 'custom', id: 'mine', name: 'Mine', entries: sessionWorks([timelineItem('custom')]), hideWhenEmpty: false, preview: false },
+        { kind: 'projects' },
+      ];
+    });
+    expect(outline(model)).toEqual([
+      'zone:pinned', 'pinned@0', 'zone:work', 'working@0', 'zone:section:mine', 'custom@0',
+      'zone:timeline', 'today:2026-11-25', 'a@0', 'yesterday:2026-11-24', 'c@0',
+    ]);
+    const searched = timeline([dated('a', at(11, 25))], (input) => {
+      input.mode = 'search';
+      input.contentSearchResults = [];
+    });
+    expect(searched.rows.some((row) => row.kind === 'date-header')).toBe(false);
+    const collapsed = timeline([dated('a', at(11, 25))], (input) => {
+      input.collapsedActivities = new Set(['timeline']);
+    });
+    expect(outline(collapsed)).toEqual(['zone:timeline']);
+  });
+
+  test('a day heading is not selectable or sticky, so Shift and select-all run across days', () => {
+    const model = timeline([dated('a', at(11, 25)), dated('c', at(11, 24)), dated('d', at(3, 3))]);
+    expect(model.selectionEntries.map((entry) => `${entry.id}:${entry.scopeKey}`))
+      .toEqual(['a:activity:timeline', 'c:activity:timeline', 'd:activity:timeline']);
+    expect(deriveSessionRowBulkSelectAll(model.selectionEntries, model.selectionDescendantIds, 'activity:timeline')?.ids).toEqual(['a', 'c', 'd']);
+    expect(model.stickyHeaders.map((header) => `${header.kind}:${header.id}`)).toEqual(['activity:timeline']);
+  });
+
+  test('a worktree archived today stays under Today above a subagent whose parent is gone', () => {
+    // `orphan` is a subagent whose parent is not loaded, so it shows as a top-level row;
+    // `kid` nests under `root`. The worktree's only session was active today and is archived.
+    const kid = session('kid', 'root');
+    const orphan = session('orphan', 'gone');
+    const rootNode: SessionNode = { session: session('root'), children: [{ session: kid, children: [], worktree: null }], worktree: null };
+    const wt = group([], {
+      id: 'worktree:/wt', label: 'wt', branch: 'wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+      worktree: { path: '/wt', projectDirectory: '/repo', branch: 'wt', label: 'wt' },
+    });
+    const workIndex = buildSidebarWorkIndex([project([group([{ session: orphan, children: [], worktree: null }, rootNode]), wt])]);
+    const values = new Map([['wt-old', at(11, 25)], ['orphan', at(11, 24)], ['root', at(11, 20)], ['kid', at(11, 19)]]);
+    const orderValueOf = (entry: Session): number => values.get(entry.id) ?? 0;
+    const orderedSessions = [orphan, rootNode.session, kid];
+    const known = new Set([...orderedSessions.map((entry) => entry.id), 'wt-old']);
+    const archive = buildWorktreeArchiveAnchors({
+      groupWorks: workIndex.groupWorks,
+      archivedSessions: [{ ...session('wt-old'), directory: '/wt' }],
+      orderedSessions,
+      orderValueOf,
+      isPinned: () => false,
+      isTopLevel: (entry) => !(entry.parentID && known.has(entry.parentID)),
+    });
+    const entries = buildTimelineEntries({
+      orderedSessions,
+      workIndex,
+      archive,
+      include: () => true,
+      isExcluded: () => false,
+      isLiveSpace: () => false,
+      orderValueOf,
+      isPinned: () => false,
+      rootDrafts: [],
+      toWorkEntries: (refs) => refs.map((ref): SessionSidebarWorkEntry => (ref.kind === 'group'
+        ? { kind: 'group', groupKey: ref.key, projectId: ref.projectId, group: ref.group }
+        : { kind: 'session', item: timelineItem(ref.rootSessionId, ref.rootSessionId === 'root' ? { node: rootNode } : {}) })),
+    });
+    const model = timeline([...entries], (input) => {
+      input.expandedParents = new Set(['mixed-compact:active:root']);
+    });
+    expect(outline(model)).toEqual([
+      'zone:timeline',
+      'today:2026-11-25', 'work:wt',
+      'yesterday:2026-11-24', 'orphan@0',
+      'date:2026-11-20', 'root@0', 'kid@1',
+    ]);
+  });
+
+  test('a subagent whose parent is gone, promoted today, gets Today above yesterday\'s root', () => {
+    // The lifecycle order compares the orphan with a root by their baseline times (Nov 23 and
+    // Nov 24), so it sorts the orphan below the root although it was active today.
+    resetSessionOrdering();
+    const dayAt = (id: string, day: number, parentID?: string): Session => ({ ...session(id, parentID), time: { created: at(11, day), updated: at(11, day) } });
+    const orphan = dayAt('orphan', 23, 'gone');
+    const root = dayAt('root', 24);
+    const kid = dayAt('kid', 24, 'root');
+    const ranks = new Map([['orphan', at(11, 25)]]);
+    const orderedSessions = orderSessionsByLifecycleScopes([orphan, root, kid], new Set(), ranks);
+    expect(orderedSessions.map((entry) => entry.id)).toEqual(['root', 'kid', 'orphan']);
+    const rootNode: SessionNode = { session: root, children: [{ session: kid, children: [], worktree: null }], worktree: null };
+    const workIndex = buildSidebarWorkIndex([project([group([rootNode, { session: orphan, children: [], worktree: null }])])]);
+    const orderValueOf = (entry: Session): number => getSessionLifecycleOrderValue(entry, ranks);
+    const entries = buildTimelineEntries({
+      orderedSessions,
+      workIndex,
+      archive: buildWorktreeArchiveAnchors({
+        groupWorks: workIndex.groupWorks, archivedSessions: [], orderedSessions, orderValueOf, isPinned: () => false, isTopLevel: (entry) => entry.id !== 'kid',
+      }),
+      include: () => true,
+      isExcluded: () => false,
+      isLiveSpace: () => false,
+      orderValueOf,
+      isPinned: () => false,
+      rootDrafts: [],
+      toWorkEntries: (refs) => refs.map((ref): SessionSidebarWorkEntry => ({
+        kind: 'session',
+        item: timelineItem(ref.kind === 'session' ? ref.rootSessionId : ref.key, ref.kind === 'session' && ref.rootSessionId === 'root' ? { node: rootNode } : {}),
+      })),
+    });
+    const model = timeline([...entries], (input) => {
+      input.expandedParents = new Set(['mixed-compact:active:root']);
+    });
+    expect(outline(model)).toEqual([
+      'zone:timeline',
+      'today:2026-11-25', 'orphan@0',
+      'yesterday:2026-11-24', 'root@0', 'kid@1',
+    ]);
+  });
+
+  test('at midnight today becomes yesterday under the same row key', () => {
+    const entries = [dated('a', at(11, 25)), dated('c', at(11, 24))];
+    const before = timeline(entries);
+    const after = timeline(entries, (input) => {
+      input.timelineTodayStart = new Date(2026, 10, 26).getTime();
+    });
+    expect(outline(after)).toEqual(['zone:timeline', 'yesterday:2026-11-25', 'a@0', 'date:2026-11-24', 'c@0']);
+    const keys = (model: typeof before) => model.rows.flatMap((row) => (row.kind === 'date-header' ? [row.key] : []));
+    expect(keys(after)).toEqual(keys(before));
   });
 });

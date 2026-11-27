@@ -41,7 +41,7 @@ export const calculateResetAfterSeconds = (resetAt: ResetTimestamp | null | unde
 
 const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
 
-export const toUsageWindow = <Input extends UsageWindowInput<unknown, unknown>>({ usedPercent, windowSeconds, resetAt, valueLabel, value, creditsUsed }: Input): UsageWindow<Input['usedPercent'], NonNullable<Input['windowSeconds']> | null> => {
+export const toUsageWindow = <Input extends UsageWindowInput<unknown, unknown>>({ usedPercent, windowSeconds, resetAt, valueLabel, value, creditsUsed, credits }: Input): UsageWindow<Input['usedPercent'], NonNullable<Input['windowSeconds']> | null> => {
   const resetAfterSeconds = calculateResetAfterSeconds(resetAt);
   const resetFormatted = hasResetTimestamp(resetAt) ? formatResetTime(resetAt) : null;
   const hasFiniteUsedPercent = isFiniteNumber(usedPercent);
@@ -57,6 +57,7 @@ export const toUsageWindow = <Input extends UsageWindowInput<unknown, unknown>>(
   if (valueLabel) window.valueLabel = valueLabel;
   if (value) window.value = value;
   if (creditsUsed !== undefined) window.creditsUsed = creditsUsed;
+  if (credits) window.credits = credits;
   return window;
 };
 

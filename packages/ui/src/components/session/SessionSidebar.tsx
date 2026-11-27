@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { useSessionSearchEffects } from './sidebar/shell/useSessionSearchEffects';
+import { useNestedSessionDiscovery } from '@/hooks/useNestedSessionDiscovery';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useKeybinds } from '@/hooks/useKeybind';
@@ -40,7 +41,7 @@ import {
   worktreeMapsEqual,
   type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
-import { resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
+import { getProjectWorktreeDiscovery, resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -200,20 +201,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     info: s.info,
     downloading: s.downloading,
     downloaded: s.downloaded,
-    installing: s.installing,
+    installing: s.installing, idlePhase: s.idlePhase, idleReason: s.idleReason, idleRemainingMs: s.idleRemainingMs,
     progress: s.progress,
     error: s.error,
     downloadUpdate: s.downloadUpdate,
-    restartToUpdate: s.restartToUpdate,
+    restartToUpdate: s.restartToUpdate, queueIdleInstall: s.queueIdleInstall, cancelIdleInstall: s.cancelIdleInstall,
   })));
 
   const runtimeKey = getRuntimeKey();
-  const projectWorktreeDiscoveryKey = React.useMemo(
-    () => `${runtimeKey}|${projects
-      .map((project) => `${project.id}:${normalizePath(project.path) ?? ''}`)
-      .join('|')}`,
-    [projects, runtimeKey],
-  );
+  const projectWorktreeDiscoveryKey = React.useMemo(() => getProjectWorktreeDiscovery(projects, runtimeKey), [projects, runtimeKey]);
   const [resolvedWorktreeTopologyKey, setResolvedWorktreeTopologyKey] = React.useState<string | null>(
     isVSCode ? projectWorktreeDiscoveryKey : null,
   );
@@ -223,6 +219,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const unresolvedWorktreeProjectPathsRef = React.useRef(unresolvedWorktreeProjectPaths);
   unresolvedWorktreeProjectPathsRef.current = unresolvedWorktreeProjectPaths;
   const isConnected = useConfigStore((state) => state.isConnected);
+  useNestedSessionDiscovery(!isVSCode);
   const rawWorktreesByProjectRef = React.useRef<RawWorktreesByProjectScope>({
     runtimeKey: null,
     revision: 0,
@@ -233,7 +230,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     let cancelled = false;
 
     const discoverWorktrees = async () => {
-      const discoveryRuntimeKey = runtimeKey;
       const isCurrent = captureRuntimeInstance();
       const connectedAtStart = useConfigStore.getState().isConnected;
       const projectEntries = useProjectsStore.getState().projects;
@@ -255,7 +251,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       const seededRawScope = ensureRawWorktreesByProjectScope({
         rawWorktreesByProjectRef,
         publishedWorktreesByProject: knownPublishedWorktreesByProject,
-        runtimeKey: discoveryRuntimeKey,
+        runtimeKey,
       });
       const capturedRawRevision = seededRawScope.revision;
       const worktreesByProject = new Map(seededRawScope.worktreesByProject);
@@ -284,7 +280,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         }
       })));
 
-      if (cancelled || !isCurrent() || getRuntimeKey() !== discoveryRuntimeKey) return;
+      if (cancelled || !isCurrent() || getRuntimeKey() !== runtimeKey) return;
 
       const activeProjectPaths = new Set(projectEntries.map((project) => normalizePath(project.path)).filter(Boolean));
       for (const projectPath of worktreesByProject.keys()) {
@@ -294,7 +290,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       }
       const committed = commitDiscoveredRawWorktreesByProject({
         rawWorktreesByProjectRef,
-        runtimeKey: discoveryRuntimeKey,
+        runtimeKey,
         capturedRevision: capturedRawRevision,
         nextRawWorktreesByProject: worktreesByProject,
         publishedWorktreesByProject: knownPublishedWorktreesByProject,
@@ -394,7 +390,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   const handleOpenUpdateDialog = React.useCallback(() => {
     const current = useUpdateStore.getState();
-    if (current.available && current.info) {
+    if ((current.available && current.info) || current.idlePhase === 'waiting' || current.idlePhase === 'counting') {
       setUpdateDialogOpen(true);
       return;
     }
@@ -421,8 +417,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   }, [mobileVariant, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
   const showSidebarUpdateButton =
-    updateStore.available &&
-    (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web');
+    (updateStore.available && (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web')) ||
+    updateStore.idlePhase === 'waiting' || updateStore.idlePhase === 'counting';
 
 
   const normalizedProjects = React.useMemo(() => {
@@ -742,7 +738,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       }}
     />
   );
-  if (phone) return <div className="flex min-h-0 flex-1 flex-col">{collection}</div>;
+  if (phone) return <div className="flex min-h-0 flex-1 flex-col">{collection}<NewPinListDialog /><MobilePinToSheet /></div>;
 
   return (
     <TooltipProvider delay={400} closeDelay={0} timeout={300}>
@@ -787,11 +783,11 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         info={updateStore.info}
         downloading={updateStore.downloading}
         downloaded={updateStore.downloaded}
-        installing={updateStore.installing}
+        installing={updateStore.installing} idlePhase={updateStore.idlePhase} idleReason={updateStore.idleReason} idleRemainingMs={updateStore.idleRemainingMs}
         progress={updateStore.progress}
         error={updateStore.error}
         onDownload={updateStore.downloadUpdate}
-        onRestart={updateStore.restartToUpdate}
+        onRestart={updateStore.restartToUpdate} onInstallWhenIdle={updateStore.queueIdleInstall} onCancelIdleInstall={updateStore.cancelIdleInstall}
         runtimeType={updateStore.runtimeType}
       />
 

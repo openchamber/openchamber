@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { readSettingsFileForUpdateSync } from '../settings/settings-update-read.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 import { isPlainObject, readEnv, readFiniteNumber, readTrimmedString } from './parse.js';
 
 export interface LinearUser {
@@ -281,7 +283,7 @@ function readSettings(): LinearSettings {
   return readJsonFile(settingsFile()) || {};
 }
 
-function writeSettings(settings: LinearSettings) {
+function writeSettings(settings: SettingsDocument) {
   writeJsonFile(settingsFile(), settings);
 }
 
@@ -496,7 +498,7 @@ export function getLinearSessionCommentsEnabled() {
 
 export function setLinearSessionCommentsEnabled(enabled: boolean) {
   const next = enabled === true;
-  const settings = readSettings();
+  const settings = readSettingsFileForUpdateSync(settingsFile());
   settings[SESSION_COMMENTS_SETTING_KEY] = next;
   writeSettings(settings);
   return next;

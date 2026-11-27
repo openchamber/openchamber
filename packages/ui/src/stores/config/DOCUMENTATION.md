@@ -17,6 +17,7 @@ the OpenCode client owns transport and wire-to-domain conversion.
   per-directory reads.
 - Directory snapshots and active fields update together. Persisted catalogs
   provide startup continuity; successful live loads establish catalog readiness.
+- `followModel` moves the selection without making it a manual choice; spaces use it.
 - Manual model, agent and effort choices retain their existing precedence over
   resolved defaults. A failed load preserves the previous catalog.
 - Persistence keeps the existing `config-store` key, version, runtime check and

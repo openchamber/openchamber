@@ -2,12 +2,13 @@
 import type { CatalogKind } from "@/lib/opencode/events";
 import { opencodeClient } from "@/lib/opencode/client";
 import { captureRuntimeInstance } from "@/lib/runtime-switch";
-import { notifyCredentialChanged } from "@/lib/opencode/integration-catalog";
+import { credentialReaderDirectories, notifyCredentialChanged } from "@/lib/opencode/integration-catalog";
 import { getConfigDirectory, invalidateAgentsLoadCache, useAgentsStore } from "@/stores/useAgentsStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
 import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsStore";
 import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
 import { invalidateConfigAgentsLoad, useConfigStore } from "@/stores/useConfigStore";
+import { fromDirectoryKey } from "@/stores/config/directories";
 import { useMcpConfigStore } from "@/stores/useMcpConfigStore";
 import { usePluginsStore } from "@/stores/usePluginsStore";
 import { useQuotaStore } from "@/stores/useQuotaStore";
@@ -15,8 +16,10 @@ import { refreshWebSearchIfLoaded } from "@/stores/useWebSearchStore";
 
 const SOURCE = "catalogRefresh";
 
-const catalogRefreshDirectories = (eventDirectories: readonly string[]): Array<string | null> => {
-  const ambientDirectory = getConfigDirectory();
+const catalogRefreshDirectories = (
+  eventDirectories: readonly string[],
+  ambientDirectory: string | null = getConfigDirectory(),
+): Array<string | null> => {
   const scopedDirectories = Array.from(new Set(
     eventDirectories
       .map((directory) => directory.trim())
@@ -67,20 +70,30 @@ const refreshPlugins = async (): Promise<void> => {
   await loadPlugins({ force: true });
 };
 
-const refreshProviders = async (): Promise<void> => {
+const providerRefreshDirectories = (eventDirectories: readonly string[]): Array<string | null> =>
+  catalogRefreshDirectories(eventDirectories, fromDirectoryKey(useConfigStore.getState().activeDirectoryKey));
+
+const refreshProviders = async (directory: string | null): Promise<void> => {
   const config = useConfigStore.getState();
-  await config.loadProviders({ source: SOURCE, fresh: true });
+  await config.loadProviders({ directory, source: SOURCE, fresh: true });
 };
 
 const PROVIDER_REREAD_AFTER_CREDENTIAL_MS = 5000;
 
-const refreshProvidersAfterCredentialChange = async (): Promise<void> => {
+const refreshProvidersAfterCredentialChange = async (
+  directory: string | null,
+  directories: readonly (string | null)[],
+): Promise<void> => {
   const sdk = opencodeClient.getSdkClient();
   const isCurrent = captureRuntimeInstance();
-  await refreshProviders();
+  await refreshProviders(directory);
   await new Promise((resolve) => setTimeout(resolve, PROVIDER_REREAD_AFTER_CREDENTIAL_MS));
   if (!isCurrent() || sdk !== opencodeClient.getSdkClient()) return;
-  await refreshProviders();
+  const activeDirectory = fromDirectoryKey(useConfigStore.getState().activeDirectoryKey);
+  const delayedDirectories = (directory === directories[0] && !directories.includes(activeDirectory)
+    ? [directory, activeDirectory]
+    : [directory]).filter(target => target !== null);
+  await Promise.allSettled(delayedDirectories.map(refreshProviders));
 };
 
 const refreshUsageAfterCredentialChange = async (): Promise<void> => {
@@ -104,16 +117,21 @@ export function catalogRefreshTasks(
       return [refreshPlugins];
     case "provider":
     case "model":
-      return [refreshProviders];
+      return [async () => {
+        await Promise.allSettled(providerRefreshDirectories(eventDirectories).map(refreshProviders));
+      }];
     case "credential":
       return [
-        refreshProvidersAfterCredentialChange,
+        async () => {
+          const directories = providerRefreshDirectories([...eventDirectories, ...credentialReaderDirectories()]);
+          await Promise.allSettled(directories.map(directory => refreshProvidersAfterCredentialChange(directory, directories)));
+        },
         refreshWebSearchIfLoaded,
         refreshUsageAfterCredentialChange,
         refreshCredentialReaders,
       ];
     case "config":
-      return [() => refreshAgents(eventDirectories), () => refreshCommands(eventDirectories), refreshSkills, refreshMcp, refreshPlugins, refreshProviders, refreshWebSearchIfLoaded];
+      return [() => refreshAgents(eventDirectories), () => refreshCommands(eventDirectories), ...catalogRefreshTasks("provider", eventDirectories), refreshSkills, refreshMcp, refreshPlugins, refreshWebSearchIfLoaded];
     case "project":
       return [];
     case "websearch":
@@ -129,7 +147,7 @@ export async function refreshStoresForCatalogKind(
 }
 
 type RefreshTask = () => Promise<void>;
-type RefreshRequest = { promise: Promise<void>; isCurrent: () => boolean; revision: number };
+type RefreshRequest = { promise: Promise<void>; isCurrent: () => boolean; revision: number; task: RefreshTask };
 const inFlightRefreshes = new WeakMap<object, Map<string | RefreshTask, Map<string, RefreshRequest>>>();
 
 export async function refreshStoresForCatalogKinds(
@@ -141,8 +159,11 @@ export async function refreshStoresForCatalogKinds(
   const tasks = new Map<string | (() => Promise<void>), () => Promise<void>>();
   const agentDirectories = new Set<string>();
   const commandDirectories = new Set<string>();
+  const providerDirectories = new Set<string>();
   let agents = false;
   let commands = false;
+  let providers = false;
+  let credentials = false;
   for (const [kind, directories] of reloads) {
     if (kind === "config" || kind === "agent") {
       agents = true;
@@ -152,8 +173,17 @@ export async function refreshStoresForCatalogKinds(
       commands = true;
       for (const directory of directories) commandDirectories.add(directory);
     }
+    if (kind === "config" || kind === "provider" || kind === "model" || kind === "credential") {
+      providers = true;
+      for (const directory of directories) providerDirectories.add(directory);
+    }
+    if (kind === "credential") {
+      credentials = true;
+      for (const directory of credentialReaderDirectories()) providerDirectories.add(directory);
+    }
     const kindTasks = catalogRefreshTasks(kind, directories);
-    const scopedTasks = kind === "config" ? 2 : kind === "agent" || kind === "command" ? 1 : 0;
+    const scopedTasks = kind === "config" ? 3
+      : kind === "agent" || kind === "command" || kind === "provider" || kind === "model" || kind === "credential" ? 1 : 0;
     for (const task of kindTasks.slice(scopedTasks)) {
       tasks.set(task, task);
     }
@@ -168,7 +198,14 @@ export async function refreshStoresForCatalogKinds(
       tasks.set(JSON.stringify(["commands", directory]), () => refreshCommandDirectory(directory));
     }
   }
-  if (tasks.has(refreshProvidersAfterCredentialChange)) tasks.delete(refreshProviders);
+  if (providers) {
+    const directories = providerRefreshDirectories([...providerDirectories]);
+    for (const directory of directories) {
+      tasks.set(JSON.stringify([credentials ? "credentialProviders" : "providers", directory]), () => credentials
+        ? refreshProvidersAfterCredentialChange(directory, directories)
+        : refreshProviders(directory));
+    }
+  }
   await Promise.allSettled([...tasks].map(([key, task]) => {
     if (task === refreshUsageAfterCredentialChange) return task();
     const scope = key instanceof Function ? JSON.stringify([getConfigDirectory(), useConfigStore.getState().activeDirectoryKey]) : key;
@@ -177,16 +214,18 @@ export async function refreshStoresForCatalogKinds(
     const existing = requests.get(scope);
     if (existing?.isCurrent()) {
       existing.revision += 1;
+      existing.task = task;
       return existing.promise;
     }
     const isCurrent = captureRuntimeInstance();
-    const entry: RefreshRequest = { promise: Promise.resolve(), isCurrent, revision: 0 };
+    const entry: RefreshRequest = { promise: Promise.resolve(), isCurrent, revision: 0, task };
     const request: Promise<void> = (async () => {
       let startedRevision: number;
       do {
         startedRevision = entry.revision;
         try {
-          await task();
+          const refreshTask = entry.task;
+          await refreshTask();
         } catch (error) {
           if (!isCurrent() || entry.revision === startedRevision) throw error;
         }

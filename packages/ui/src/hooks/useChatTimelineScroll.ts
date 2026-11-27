@@ -10,6 +10,7 @@ import {
     ANCHOR_HOLD_MAX_FRAMES,
     ANCHOR_HOLD_STABLE_FRAMES,
     captureMessageViewportAnchor,
+    messageLinkOffsetTop,
     type MessageViewportAnchor,
     type ViewportAnchorAlignment,
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
@@ -45,6 +46,12 @@ import {
     resolveFollowStop,
     resolvePageRevealTarget,
 } from '@/components/chat/lib/scroll/followScroll';
+import {
+    findFollowStops,
+    findStreamingReply,
+    resolveStopLandingTarget,
+    type StopLanding,
+} from '@/components/chat/lib/scroll/followStops';
 import {
     isFollowReleaseKey,
     isMiddleButtonPan,
@@ -106,6 +113,7 @@ interface UseChatTimelineScrollResult {
     onIsAtEndChange: (isAtEnd: boolean) => void;
     onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onManualNavigation: () => void;
+    takeViewport: () => void;
     onTimelineDataChange: () => void;
     showScrollButton: boolean;
     userOwnsScroll: boolean;
@@ -120,9 +128,7 @@ const SHOW_SCROLL_BUTTON_DELAY_MS = 150;
 const ANIMATION_END_CORRECTION_MAX_PX = 64;
 const REMEMBERED_POSITION_REVEAL_WAIT_MS = 800;
 const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
-const MESSAGE_LINK_GAP_PX = 12;
 const MESSAGE_LINK_HIGHLIGHT_MS = 1200;
-const REPLY_START_GAP_PX = 16;
 const SEND_GLIDE_WINDOW_MS = 2000;
 const TURN_END_GLIDE_WINDOW_MS = 1000;
 const LOAD_OLDER_REACH_VIEWPORTS = 2;
@@ -143,77 +149,6 @@ const followScrollBehavior = (): ScrollBehavior => (prefersReducedMotion() ? 'au
 const drawsScrollInWholePixels = (): boolean => (
     globalThis.CSS?.supports?.('-webkit-touch-callout', 'none') === true
 );
-
-const messageLinkOffsetTop = (node: HTMLElement): number => {
-    const fade = Number.parseFloat(getComputedStyle(node).getPropertyValue('--scroll-shadow-size'));
-    return (Number.isFinite(fade) ? fade : 0) + MESSAGE_LINK_GAP_PX;
-};
-
-const lastMatch = (node: HTMLElement, selector: string): HTMLElement | null => {
-    const matches = node.querySelectorAll<HTMLElement>(selector);
-    return matches[matches.length - 1] ?? null;
-};
-
-interface FollowStop {
-    readonly element: HTMLElement;
-    readonly limit: number;
-    readonly bottom: number;
-}
-
-const turnIdOf = (element: HTMLElement): string | undefined => (
-    element.closest<HTMLElement>('[data-turn-row]')?.dataset.turnRow
-        ?? element.closest<HTMLElement>('[data-turn-id]')?.dataset.turnId
-);
-
-const readFollowStop = (node: HTMLElement, element: HTMLElement): FollowStop => {
-    const rect = element.getBoundingClientRect();
-    const offset = node.scrollTop - node.getBoundingClientRect().top;
-    const turnId = turnIdOf(element);
-    const header = turnId
-        ? node.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(turnId)}"] > [data-turn-sticky-header]`)
-        : null;
-    const headerHeight = header ? header.getBoundingClientRect().height : 0;
-    return {
-        element,
-        limit: Math.max(0, rect.top + offset - headerHeight - REPLY_START_GAP_PX),
-        bottom: rect.bottom + offset,
-    };
-};
-
-const findLatestTurnId = (node: HTMLElement): string | undefined => {
-    let latest: HTMLElement | null = null;
-    let latestTop = Number.NEGATIVE_INFINITY;
-    for (const row of node.querySelectorAll<HTMLElement>('[data-turn-id], [data-turn-row]')) {
-        const top = row.getBoundingClientRect().top;
-        if (top > latestTop) {
-            latest = row;
-            latestTop = top;
-        }
-    }
-    return latest ? turnIdOf(latest) : undefined;
-};
-
-const findStreamingReply = (node: HTMLElement): HTMLElement | null => lastMatch(node, '[data-streaming-reply]');
-
-const findFollowStops = (node: HTMLElement, stopAfterUserMessage: boolean, reply: HTMLElement | null): FollowStop[] => {
-    const stops: FollowStop[] = [];
-    const turnId = stopAfterUserMessage ? findLatestTurnId(node) : undefined;
-    let work: HTMLElement | null = null;
-    let workBottom = Number.NEGATIVE_INFINITY;
-    if (turnId) {
-        for (const row of node.querySelectorAll<HTMLElement>(`[data-turn-row="${CSS.escape(turnId)}"]`)) {
-            const rect = row.getBoundingClientRect();
-            if (!work || rect.top < work.getBoundingClientRect().top) work = row;
-            workBottom = Math.max(workBottom, rect.bottom);
-        }
-    }
-    if (work) {
-        const stop = readFollowStop(node, work);
-        stops.push({ ...stop, bottom: workBottom + node.scrollTop - node.getBoundingClientRect().top });
-    }
-    if (reply) stops.push(readFollowStop(node, reply));
-    return stops;
-};
 
 type PositionTarget =
     | { readonly kind: 'remembered'; readonly anchor: MessageViewportAnchor }
@@ -287,10 +222,12 @@ export const useChatTimelineScroll = ({
     const followGlideHeld = () => followGlideRef.current?.isHeld() === true;
     const liveGlideRef = React.useRef<FollowGlide | null>(null);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
-    const stopAfterUserMessageRef = React.useRef(activityRenderMode !== 'summary');
-    stopAfterUserMessageRef.current = activityRenderMode !== 'summary';
+    const stopAfterUserMessageRef = React.useRef(activityRenderMode === 'collapsed');
+    stopAfterUserMessageRef.current = activityRenderMode === 'collapsed';
     const followStopEligibilityRef = React.useRef(new WeakMap<HTMLElement, boolean>());
     const followStoppedAtGenerationRef = React.useRef<number | null>(null);
+    const followStopLandingRef = React.useRef<StopLanding | null>(null);
+    React.useEffect(() => { followStopLandingRef.current = null; }, [currentSessionKey]);
     const rowExpandReleaseRef = React.useRef<{ generation: number; grew: boolean } | null>(null);
     const revealedPagesRef = React.useRef(new Set<string>());
     const pageRevealRef = React.useRef<{ pageId: string | null; block: HTMLElement; generation: number; until: number } | null>(null);
@@ -349,6 +286,7 @@ export const useChatTimelineScroll = ({
         modeRef.current = 'free-scrolling';
         liveFollowGenerationRef.current = null;
         liveGlideRef.current?.stop();
+        followStopLandingRef.current = null;
         setUserOwnsScroll(true);
         const linkRequest = peekMessageFocus(currentSessionIdRef.current);
         if (linkRequest) settleMessageFocus(linkRequest);
@@ -370,6 +308,8 @@ export const useChatTimelineScroll = ({
     const restoredEntryKeyRef = React.useRef<string | null>(null);
     const handledEntryKeyRef = React.useRef<string | null>(null);
     const linkServedRef = React.useRef<{ key: string; serial: number } | null>(null);
+
+    const takeViewport = React.useCallback(() => { restoreRef.current?.cancel(); onManualNavigation(); }, [onManualNavigation]);
 
     const rememberOutgoingPosition = React.useCallback((node: HTMLElement, list: TimelineListHandle | null) => {
         const sessionKey = listSessionKeyRef.current;
@@ -404,6 +344,7 @@ export const useChatTimelineScroll = ({
         liveFollowGenerationRef.current = userGenerationRef.current;
         if (passStops) retireFollowStops();
         followStoppedAtGenerationRef.current = null;
+        followStopLandingRef.current = null;
         hideScrollButton();
     }, [hideScrollButton]);
     const jumpToEnd = React.useCallback((mode: 'instant' | 'smooth', passStops: boolean) => {
@@ -454,6 +395,7 @@ export const useChatTimelineScroll = ({
         modeRef.current = 'free-scrolling';
         liveFollowGenerationRef.current = null;
         liveGlideRef.current?.stop();
+        followStopLandingRef.current = null;
         isAtEndRef.current = false;
         userOwnsScrollRef.current = true;
         setIsPinned(false);
@@ -665,6 +607,7 @@ export const useChatTimelineScroll = ({
             modeRef.current = 'following-end';
             liveFollowGenerationRef.current = userGenerationRef.current;
             retireFollowStops();
+            followStopLandingRef.current = null;
             setUserOwnsScroll(false);
             hideScrollButton();
         } else {
@@ -825,6 +768,7 @@ export const useChatTimelineScroll = ({
                 target = held.target;
                 stopped = true;
                 eligibility.set(stop.element, false);
+                followStopLandingRef.current = { element: stop.element, generation: userGenerationRef.current, aimed: target };
                 releaseFollowAtStop();
             }
             if (Math.abs(target - scroll) <= 1) {
@@ -839,6 +783,11 @@ export const useChatTimelineScroll = ({
     followEndRef.current = followEnd;
 
     const pageRevealFrameRef = React.useRef<number | null>(null);
+    const endStopLanding = React.useCallback((node: HTMLElement) => {
+        followStopLandingRef.current = null;
+        liveGlideRef.current?.stop();
+        if (drawsScrollInWholePixels()) node.scrollTo({ top: node.scrollTop, behavior: 'auto' });
+    }, []);
     const revealWaitingPage = React.useCallback(() => {
         if (pageRevealRef.current === null || pageRevealFrameRef.current !== null) return;
         pageRevealFrameRef.current = window.requestAnimationFrame(() => {
@@ -857,7 +806,11 @@ export const useChatTimelineScroll = ({
             const page = { top: rect.top + offset, bottom: rect.bottom + offset };
             const topGap = messageLinkOffsetTop(node);
             let target = resolvePageRevealTarget(page, scroll, viewportLength - listFooterSizeRef.current, topGap);
-            if (target === null) return;
+            if (target === null) {
+                if (followStopLandingRef.current) endStopLanding(node);
+                return;
+            }
+            followStopLandingRef.current = null;
             const end = node.scrollHeight - viewportLength;
             if (end - target <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX && page.top - topGap >= end) {
                 target = end;
@@ -871,7 +824,7 @@ export const useChatTimelineScroll = ({
             }
             node.scrollTo({ top: target, behavior: followScrollBehavior() });
         });
-    }, [releaseFollowAtStop, resumeFollow]);
+    }, [endStopLanding, releaseFollowAtStop, resumeFollow]);
     const revealWaitingPageRef = React.useRef(revealWaitingPage);
     revealWaitingPageRef.current = revealWaitingPage;
     React.useEffect(() => () => {
@@ -1022,6 +975,10 @@ export const useChatTimelineScroll = ({
             if ((direction === 'up' || !isAtEndRef.current) && canScrollUp()) gesture();
         });
         const stopRowExpand = onRowExpand(scrollNode, () => {
+            if (followStopLandingRef.current) {
+                endStopLanding(scrollNode);
+                return;
+            }
             if (modeRef.current !== 'following-end') return;
             gesture();
             rowExpandReleaseRef.current = { generation: userGenerationRef.current, grew: false };
@@ -1076,7 +1033,7 @@ export const useChatTimelineScroll = ({
             stopTabStep();
             pageRevealRef.current = null;
         };
-    }, [isLiveFollowActive, realContentOverflowsViewport, scrollNode]);
+    }, [endStopLanding, isLiveFollowActive, realContentOverflowsViewport, scrollNode]);
 
     const lastSessionKeyRef = React.useRef<string | null>(null);
     React.useLayoutEffect(() => {
@@ -1182,7 +1139,7 @@ export const useChatTimelineScroll = ({
         };
     }, [scrollNode]);
 
-    const followLandedRef = React.useRef<() => void>(() => {});
+    const followLandedRef = React.useRef<(fromGrowth?: boolean) => void>(() => {});
     const followYieldsRef = React.useRef(0);
     React.useEffect(() => {
         if (!scrollNode) return;
@@ -1192,6 +1149,7 @@ export const useChatTimelineScroll = ({
             shouldContinue: () => scrollRef.current === scrollNode && !followGlideHeld(),
             onSettle: () => followLandedRef.current(),
             onYield: () => {
+                if (followStopLandingRef.current) followStopLandingRef.current.aimed = null;
                 if (followYieldsRef.current >= 2) return;
                 followYieldsRef.current += 1;
                 followLandedRef.current();
@@ -1235,13 +1193,29 @@ export const useChatTimelineScroll = ({
         const grew = () => {
             followYieldsRef.current = 0;
             pin();
+            if (followStopLandingRef.current) followLandedRef.current(true);
         };
         const mutations = new MutationObserver(grew);
         mutations.observe(content, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
         const resizes = globalThis.ResizeObserver ? new ResizeObserver(grew) : null;
         resizes?.observe(content);
         resizes?.observe(scrollNode);
-        followLandedRef.current = () => {
+        followLandedRef.current = (fromGrowth = false) => {
+            const pending = followStopLandingRef.current;
+            if (pending) {
+                const target = resolveStopLandingTarget(scrollNode, pending, userGenerationRef.current, listFooterSizeRef.current, stopAfterUserMessageRef.current);
+                if (target !== null) {
+                    if (fromGrowth && pending.aimed !== null && Math.abs(pending.aimed - target) <= 1) return;
+                    pending.aimed = target;
+                    const state = listRef.current?.getState();
+                    const stateEnd = state ? Math.max(0, (state.contentLength ?? 0) - state.scrollLength) : null;
+                    const end = Math.max(0, scrollNode.scrollHeight - scrollNode.clientHeight);
+                    liveGlideRef.current?.aim(target, stateEnd ?? end, prefersReducedMotion());
+                    return;
+                }
+                if (pending.generation === userGenerationRef.current) endStopLanding(scrollNode);
+                else followStopLandingRef.current = null;
+            }
             if (userOwnsScrollRef.current || !isAtEndRef.current || modeRef.current !== 'following-end') return;
             const remaining = scrollNode.scrollHeight - scrollNode.clientHeight - scrollNode.scrollTop;
             if (remaining <= 1) return;
@@ -1256,7 +1230,7 @@ export const useChatTimelineScroll = ({
             resizes?.disconnect();
             followLandedRef.current = () => {};
         };
-    }, [followEnd, pinEndAtRest, scrollNode]);
+    }, [endStopLanding, followEnd, pinEndAtRest, scrollNode]);
 
     React.useEffect(() => {
         if (!scrollNode) return;
@@ -1400,6 +1374,7 @@ export const useChatTimelineScroll = ({
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,
+        takeViewport,
         onTimelineDataChange,
         showScrollButton,
         userOwnsScroll,

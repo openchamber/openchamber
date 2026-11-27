@@ -1504,10 +1504,28 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.capabilities).toEqual({
       projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
       ci: false, comments: false, commentEdit: false, reviews: false, state: false, labels: false, reviewers: false,
+      reviewThreads: { reply: false, resolve: false },
       changeRequestPatch: false, liveSummaries: true,
     });
-    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, issueAssignees: false, baseChange: false, updateBranch: false, rebase: false });
     expect(parsed && toPublicSourceControl(parsed)).toEqual({ label: 'Teahouse', defaultInstances: ['https://tea.example.com'], custom: true });
+  });
+
+  test('issueAssignees is off unless declared, and a non-boolean reads as off', () => {
+    const declared = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { issueAssignees: true } },
+    });
+    expect(declared.ok).toBe(true);
+    if (declared.ok) {
+      expect(declared.manifest.contributes.sourceControl?.presentation.features).toMatchObject({ issueAssignees: true });
+    }
+    const degraded = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { issueAssignees: 'yes' } },
+    });
+    expect(degraded.ok).toBe(true);
+    if (degraded.ok) {
+      expect(degraded.manifest.contributes.sourceControl?.presentation.features).toMatchObject({ issueAssignees: false });
+    }
   });
 
   test('the role and the contribution come together', () => {
@@ -1547,7 +1565,7 @@ describe('contributes.sourceControl', () => {
     expect(token({ header: 'authorization', scheme: 'none' })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, uploads: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ trackedItems: { batchLimit: 51 } })).toMatchObject({ ok: false, code: 'invalid-service' });
-    // Review threads stay off for an extension's Git host, so the flag is not declarable.
+    // Threads are declared through `capabilities.reviewThreads`; this presentation flag is not declarable.
     expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { startThread: true } } }))
       .toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ presentation: { ...sourceControl.presentation, iconPath: '"/><script>' } }))
@@ -1571,7 +1589,7 @@ describe('contributes.sourceControl', () => {
     expect(parsed?.terminology.changeRequest).toBe('change');
     expect(parsed?.capabilities).toMatchObject({ merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true });
     expect(parsed?.token).toMatchObject({ scheme: 'basic', username: true });
-    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, submitRequirements: true });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, issueAssignees: false, baseChange: false, updateBranch: false, rebase: false, submitRequirements: true });
     expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewModel: 'stars' } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
@@ -1586,6 +1604,69 @@ describe('contributes.sourceControl', () => {
       .toMatchObject({ issueEdit: true, changeRequestEdit: true });
     expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { issueEdit: 'yes' } } }))
       .toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('a host declares baseChange and updateBranch, and a non-boolean reads as off', () => {
+    const declared = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { baseChange: true, updateBranch: true } },
+    });
+    expect(declared.ok).toBe(true);
+    if (declared.ok) {
+      expect(declared.manifest.contributes.sourceControl?.presentation.features)
+        .toMatchObject({ baseChange: true, updateBranch: true });
+    }
+    const degraded = withSourceControl({
+      presentation: { ...sourceControl.presentation, features: { baseChange: 'yes', updateBranch: 1 } },
+    });
+    expect(degraded.ok).toBe(true);
+    if (degraded.ok) {
+      expect(degraded.manifest.contributes.sourceControl?.presentation.features)
+        .toMatchObject({ baseChange: false, updateBranch: false });
+    }
+  });
+
+  test('declares replying to and resolving review threads, and degrades a bad value', () => {
+    const threads = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { reply: true } },
+    });
+    expect(threads).toMatchObject({
+      ok: true,
+      manifest: { contributes: { sourceControl: { capabilities: { reviewThreads: { reply: true, resolve: false } } } } },
+    });
+    const degradedThread = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { reply: 'yes', resolve: true } },
+    });
+    if (!degradedThread.ok) throw new Error(degradedThread.message);
+    expect(degradedThread.manifest.contributes.sourceControl?.capabilities.reviewThreads)
+      .toEqual({ reply: false, resolve: true });
+    // Starting a thread is not declarable.
+    expect(withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewThreads: { start: true, reply: true } },
+    })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('declares review drafts and degrades a bad fileComments value', () => {
+    const drafts = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewDrafts: { fileComments: true } },
+    });
+    expect(drafts).toMatchObject({
+      ok: true,
+      manifest: { contributes: { sourceControl: { capabilities: { reviewDrafts: { fileComments: true } } } } },
+    });
+    const degradedFileComments = withSourceControl({
+      capabilities: { ...sourceControl.capabilities, reviewDrafts: { fileComments: 'yes' } },
+    });
+    if (!degradedFileComments.ok) throw new Error(degradedFileComments.message);
+    expect(degradedFileComments.manifest.contributes.sourceControl?.capabilities.reviewDrafts)
+      .toEqual({ fileComments: false });
+  });
+
+  test('declares review dismissal and degrades a bad value', () => {
+    expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewDismiss: 'others' } }))
+      .toMatchObject({ ok: true, manifest: { contributes: { sourceControl: { capabilities: { reviewDismiss: 'others' } } } } });
+    const degradedDismiss = withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewDismiss: 'mine' } });
+    if (!degradedDismiss.ok) throw new Error(degradedDismiss.message);
+    expect(degradedDismiss.manifest.contributes.sourceControl?.capabilities.reviewDismiss).toBeUndefined();
   });
 
   test('submit is the only merge method when present', () => {
@@ -2039,7 +2120,14 @@ describe('contributes.links', () => {
   });
 
   test('refuses an origin that is not a public https origin', () => {
-    for (const origin of ['http://tasks.example.com', 'javascript:alert(1)', 'https://tasks.example.com/app', 'https://user@tasks.example.com', 'https://localhost', 'https://127.0.0.1', 'https://[::1]', 'https://*.example.com']) {
+    for (const origin of ['http://tasks.example.com', 'javascript:alert(1)', 'https://tasks.example.com/app', 'https://user@tasks.example.com', 'https://localhost', 'https://127.0.0.1', 'https://[::1]']) {
+      expect(parse({ action: 'open', urls: { ...urls, origin } }), origin).toMatchObject({ ok: false, code: 'invalid-links' });
+    }
+  });
+
+  test('a wildcard origin is the whole leftmost label of a domain with two labels or more, with no port', () => {
+    expect(parse({ action: 'open', urls: { ...urls, origin: 'https://*.example.com' } }).ok).toBe(true);
+    for (const origin of ['https://*.com', 'https://a.*.example.com', 'https://*example.com', 'http://*.example.com', 'https://*.example.com/x', 'https://*.example.com:8443', 'https://*.*.example.com', 'https://*.10.0.0.1']) {
       expect(parse({ action: 'open', urls: { ...urls, origin } }), origin).toMatchObject({ ok: false, code: 'invalid-links' });
     }
   });
@@ -2054,6 +2142,8 @@ describe('contributes.links', () => {
     expect(parse({ action: 'attach', identifier: { keys: ['DEMO'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'attach', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'open', identifier: { keys: ['SC'] }, urls: { ...urls, identifier: 'number', item: ['/story/{id}'] } }).ok).toBe(true);
+    expect(parse({ action: 'attach', identifier: { keys: ['DEMO'] }, urls: { ...urls, origin: 'https://*.example.com' } })).toMatchObject({ ok: false, code: 'invalid-links' });
+    expect(parse({ action: 'attach', urls: { ...urls, origin: 'https://*.example.com' } }).ok).toBe(true);
     expect(parse({ action: 'attach', urls: { ...urls, item: ['/{segment}/{id}'] } })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'open', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' })).toMatchObject({ ok: false, code: 'invalid-links' });
     expect(parse({ action: 'attach', urls }, { id: 'tasks', name: 'Tasks', icon: 'task' }).ok).toBe(true);

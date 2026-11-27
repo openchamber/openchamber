@@ -13,9 +13,10 @@ import {
 } from '@/lib/messages/inlineMessageLinks';
 import { findSessionLinks, sessionLinkKey } from '@/lib/sessionLinks';
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
+import { resolveKnownName } from '../../composer/language/prefixTokens';
 import type { SessionMentionChips } from './sessionMentionChips';
 
-export const SKILL_TOKEN_PATTERN = /(^|\s)[$/¥￥＄]([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
+export const SKILL_TOKEN_PATTERN = /(^|\s)[$/¥￥＄]([A-Za-z0-9][A-Za-z0-9_-]*:[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)*|[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 
 const FENCED_CODE_SEGMENT_PATTERN = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
@@ -138,9 +139,12 @@ export const prepareUserMarkdownContent = ({
         content = content.replace(agentMention.token, mentionMarkdown);
     }
 
-    content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string, offset: number, whole: string) => {
-        if (!skillNames.has(skillName)) return match;
-        return `${prefix}[/${skillName}](${buildSkillHref(skillName)})${joinTrailing(whole, offset + match.length)}`;
+    content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, scanned: string, offset: number, whole: string) => {
+        const skillName = resolveKnownName(scanned, (name) => skillNames.has(name));
+        if (!skillName) return match;
+        const rest = scanned.slice(skillName.length);
+        const trailing = rest ? joinTrailing(rest, 0) + rest : joinTrailing(whole, offset + match.length);
+        return `${prefix}[/${skillName}](${buildSkillHref(skillName)})${trailing}`;
     });
 
     return applyHardLineBreaks(content);

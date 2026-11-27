@@ -1,3 +1,4 @@
+import { isServerOffline } from '@/lib/server-offline';
 import type { TerminalAPI } from './api/types';
 import { normalizeTerminalDirectory } from './pathNormalization';
 import { groupTerminalSessionsByDirectory, reconcileTerminalSessionAuthority } from './projectActionTerminal';
@@ -29,7 +30,7 @@ export const observeTerminalSessions = (
     let generation = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let retryDelay = 2000;
-    const active = () => document.visibilityState !== 'hidden' && navigator.onLine !== false;
+    const active = () => document.visibilityState !== 'hidden' && !isServerOffline();
     const refresh = () => {
       if (closed || !active()) return;
       if (retryTimer !== null) { clearTimeout(retryTimer); retryTimer = null; }

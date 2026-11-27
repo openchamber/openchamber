@@ -535,6 +535,19 @@ describe('links on a catalog row', () => {
     expect(parseInstalledGuestJson(JSON.stringify(row(links)))?.links).toEqual({ ...links, action: 'open' });
   });
 
+  test('keeps a wildcard origin in an engine that writes * in a host as %2A, as Chromium does', () => {
+    const native = Object.getOwnPropertyDescriptor(URL.prototype, 'origin');
+    const nativeOrigin = native?.get;
+    if (!native || !nativeOrigin) throw new Error('URL.prototype.origin has no getter here');
+    Object.defineProperty(URL.prototype, 'origin', { ...native, get(this: URL) { return String(nativeOrigin.call(this)).replace('*', '%2A'); } });
+    try {
+      const wildcard = { ...links, urls: { ...links.urls, origin: 'https://*.example.com' } };
+      expect(parseInstalledGuestJson(JSON.stringify(row(wildcard)))?.links?.urls?.origin).toBe('https://*.example.com');
+    } finally {
+      Object.defineProperty(URL.prototype, 'origin', native);
+    }
+  });
+
   test('a links value this build cannot read drops the links, never the row', () => {
     for (const broken of [
       { ...links, keys: ['proj'] },

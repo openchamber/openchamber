@@ -41,7 +41,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { SortableSidebarSection } from './SortableSidebarSection';
 import { sectionDragId, sectionIdOfRow } from './sectionDrag';
 import { sessionDetailedRowPaddingLeft, sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
-import { SessionSidebarActivityHeader, SessionSidebarCaption } from '../sessionSidebarHeaderPresentation';
+import { SessionSidebarActivityHeader, SessionSidebarCaption, SessionSidebarDateHeading } from '../sessionSidebarHeaderPresentation';
 import { useSidebarPages } from '../pages/useSidebarPages';
 import { SidebarPageRow } from '../pages/SidebarPageRow';
 import { isPinnedZoneRowKey, resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
@@ -86,8 +86,7 @@ type GroupProps = Pick<SessionGroupSectionProps,
   | 'editingRowKey'
   | 'folderRename' | 'setFolderRenameDraft' | 'clearFolderRename'
   | 'setEditingId' | 'setEditingRowKey' | 'setEditTitle' | 'toggleParent' | 'allowReselect'
-  | 'onSessionSelected' | 'deleteSessionConfirm'
-  | 'setDeleteSessionConfirm' | 'startFolderRename'
+  | 'onSessionSelected' | 'startFolderRename'
   | 'startSessionWorktreeMenuLoad'
 > & { pinnedSessionIds: Set<string>; sessionOrderIndex: Map<string, number> };
 
@@ -536,6 +535,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         alwaysShowActions={view.alwaysShowActions}
         toggleParent={model.groupProps.toggleParent}
       />;
+    }
+    if (row.kind === 'date-header') {
+      return <SessionSidebarDateHeading day={row.day} inset={row.detailed ? sessionDetailedRowPaddingLeft(0) : sessionTreeTextInset(0)} className="pt-1.5 pb-0.5" />;
     }
     const rowTextInset = row.kind === 'show-control' && row.flat === true
       ? FLAT_TEXT_INSET_PX

@@ -4,12 +4,13 @@ import path from 'path';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import * as nativeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import { killCommandTree, runCommandInDirectory } from './exec-command.js';
 import { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 
 const createRouteRegistry = () => {
@@ -68,8 +69,8 @@ const createMockResponse = () => {
   };
 };
 
-// Fake child process: emits the configured stdout then closes with the given code.
-const createSpawn = ({ stdoutByCommand = {}, exitCode = 0 } = {}) => {
+// Fake child process: emits the configured output then closes with the given code.
+const createSpawn = ({ stdoutByCommand = {}, chunksByCommand = {}, exitCode = 0, scheduleClose = queueMicrotask } = {}) => {
   const calls = [];
   const spawn = vi.fn((_shell, args) => {
     const command = args[args.length - 1];
@@ -78,42 +79,20 @@ const createSpawn = ({ stdoutByCommand = {}, exitCode = 0 } = {}) => {
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.kill = () => {};
-    queueMicrotask(() => {
+    scheduleClose(() => {
       const out = stdoutByCommand[command];
       if (out) child.stdout.emit('data', Buffer.from(out));
+      for (const [stream, chunk] of chunksByCommand[command] ?? []) child[stream].emit('data', chunk);
       child.emit('close', exitCode, null);
-    });
+    }, command);
     return child;
   });
   return { spawn, calls };
 };
 
-const createDeferredSpawn = ({ stdoutByCommand = {}, exitCode = 0 } = {}) => {
-  const calls = [];
-  const pending = [];
-  const spawn = vi.fn((_shell, args) => {
-    const command = args[args.length - 1];
-    calls.push(command);
-    const child = new EventEmitter();
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
-    child.kill = () => {};
-    pending.push({ child, command });
-    return child;
-  });
-  const closeNext = () => {
-    const entry = pending.shift();
-    if (!entry) return;
-    const out = stdoutByCommand[entry.command];
-    if (out) entry.child.stdout.emit('data', Buffer.from(out));
-    entry.child.emit('close', exitCode, null);
-  };
-  return { spawn, calls, closeNext };
-};
-
-const registerExec = ({ spawn }) => {
+const registerExec = ({ spawn, register = registerFsRoutes }) => {
   const { app, getRoute } = createRouteRegistry();
-  registerFsRoutes(app, {
+  register(app, {
     os: { homedir: () => '/home/user' },
     path,
     fsPromises: {
@@ -128,7 +107,14 @@ const registerExec = ({ spawn }) => {
     resolveGitBinaryForSpawn: () => 'git',
     openchamberUserConfigRoot: '/home/user/.config',
   });
-  return getRoute('POST', '/api/fs/exec');
+  return {
+    post: getRoute('POST', '/api/fs/exec'),
+    read(jobId) {
+      const res = createMockResponse();
+      getRoute('GET', '/api/fs/exec/:jobId')({ params: { jobId } }, res);
+      return parseExecResponse(res);
+    },
+  };
 };
 
 const registerWrite = (fsPromises) => {
@@ -300,10 +286,18 @@ const registerReveal = ({ fsPromises, spawn, platform = 'linux' }) => {
   return getRoute('POST', '/api/fs/reveal');
 };
 
-const callExec = async (handler, body) => {
+// A successful exec response is sent as its already-encoded JSON body; parse it
+// so tests read the payload, and keep the raw text for byte-level comparisons.
+const parseExecResponse = (res) => ({
+  statusCode: res.statusCode,
+  raw: typeof res.body === 'string' ? res.body : undefined,
+  body: typeof res.body === 'string' ? JSON.parse(res.body) : res.body,
+});
+
+const callExec = async ({ post }, body) => {
   const res = createMockResponse();
-  await handler({ body }, res);
-  return res;
+  await post({ body }, res);
+  return parseExecResponse(res);
 };
 
 const callWrite = async (handler, body) => {
@@ -563,49 +557,166 @@ describe('fs write', () => {
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
   });
 
-  it('writes a file when content changed', async () => {
-    const fsPromises = {
-      readFile: vi.fn(async () => 'old'),
-      mkdir: vi.fn(async () => undefined),
-      writeFile: vi.fn(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
+  describe('on a real disk', () => {
+    let repo;
+    let route;
+    const write = async (filePath, content) => {
+      const res = createMockResponse();
+      await route({ body: { path: filePath, content } }, res);
+      return res;
     };
-    const handler = registerWrite(fsPromises);
+    beforeEach(async () => {
+      repo = await nativeFs.realpath(await mkdtemp(path.join(tmpdir(), 'oc-fs-write-')));
+      const { app, getRoute } = createRouteRegistry();
+      registerFsRoutes(app, {
+        os: { homedir: () => repo },
+        path,
+        fsPromises: nativeFs,
+        spawn: vi.fn(),
+        crypto: { randomUUID: () => 'job-0' },
+        normalizeDirectoryPath: (p) => p,
+        resolveProjectDirectory: async () => ({ directory: repo }),
+        buildAugmentedPath: () => '/usr/bin',
+        resolveGitBinaryForSpawn: () => 'git',
+        openchamberUserConfigRoot: path.join(repo, '.config'),
+      });
+      route = getRoute('POST', '/api/fs/write');
+    });
+    afterEach(async () => {
+      await rm(repo, { recursive: true, force: true });
+    });
 
-    const res = await callWrite(handler, { path: '/repo/file.txt', content: 'new' });
+    // Watchers on the project (watchexec, dev servers) restart on any create or rename in a
+    // folder, so a save must change the file itself and nothing else in its folder.
+    it('saves into the same file, keeping its identity and mode, with no other entry in the folder', async () => {
+      const file = path.join(repo, 'run.sh');
+      await nativeFs.writeFile(file, 'echo a long first version\n');
+      await nativeFs.chmod(file, 0o755);
+      const before = await nativeFs.stat(file);
 
-    expect(res.body).toEqual({ success: true, path: '/repo/file.txt' });
-    expect(fsPromises.mkdir).toHaveBeenCalledWith('/repo', { recursive: true });
-    const tmp = fsPromises.writeFile.mock.calls[0][0];
-    expect(tmp).toMatch(/^\/repo\/file\.txt\.tmp-/);
-    expect(fsPromises.writeFile).toHaveBeenCalledWith(tmp, 'new', 'utf8');
-    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.txt');
-    expect(fsPromises.unlink).not.toHaveBeenCalled();
-  });
+      for (const content of ['echo short\n', 'echo a longer version than the short one\n']) {
+        const res = await write(file, content);
+        expect(res.body).toEqual({ success: true, path: file });
+        expect(await nativeFs.readFile(file, 'utf8')).toBe(content);
+      }
 
-  it('writes through existing symlinks without replacing the link', async () => {
-    const fsPromises = {
-      realpath: vi.fn(async (targetPath) => {
-        if (targetPath === '/repo/link.txt') return '/repo/target.txt';
-        return targetPath;
-      }),
-      readFile: vi.fn(async () => 'old'),
-      mkdir: vi.fn(async () => undefined),
-      writeFile: vi.fn(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
-    };
-    const handler = registerWrite(fsPromises);
+      const after = await nativeFs.stat(file);
+      expect(after.ino).toBe(before.ino);
+      if (process.platform !== 'win32') expect(after.mode & 0o777).toBe(0o755);
+      expect(await nativeFs.readdir(repo)).toEqual(['run.sh']);
+    });
 
-    const res = await callWrite(handler, { path: '/repo/link.txt', content: 'new' });
+    it.skipIf(process.getuid?.() === 0)('refuses to save over a read-only file and leaves it as it was', async () => {
+      const file = path.join(repo, 'locked.md');
+      await nativeFs.writeFile(file, 'keep');
+      await nativeFs.chmod(file, 0o444);
 
-    expect(res.body).toEqual({ success: true, path: '/repo/link.txt' });
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/target.txt', 'utf8');
-    const tmp = fsPromises.writeFile.mock.calls[0][0];
-    expect(tmp).toMatch(/^\/repo\/target\.txt\.tmp-/);
-    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/target.txt');
-    expect(fsPromises.rename).not.toHaveBeenCalledWith(expect.any(String), '/repo/link.txt');
+      const res = await write(file, 'changed');
+
+      expect(res.statusCode).toBe(403);
+      expect(res.body).toEqual({ error: 'Access denied', reason: 'os-permission' });
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('keep');
+      await nativeFs.chmod(file, 0o644);
+    });
+
+    it('creates a missing file and its folders', async () => {
+      const file = path.join(repo, 'docs', 'new.md');
+      const res = await write(file, 'hello');
+
+      expect(res.body).toEqual({ success: true, path: file });
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('hello');
+    });
+
+    it.skipIf(process.platform === 'win32')('writes through an existing symlink and keeps the link', async () => {
+      const target = path.join(repo, 'target.txt');
+      const link = path.join(repo, 'link.txt');
+      await nativeFs.writeFile(target, 'old');
+      await nativeFs.symlink(target, link);
+
+      const res = await write(link, 'new');
+
+      expect(res.body).toEqual({ success: true, path: link });
+      expect((await nativeFs.lstat(link)).isSymbolicLink()).toBe(true);
+      expect(await nativeFs.readFile(target, 'utf8')).toBe('new');
+      expect((await nativeFs.readdir(repo)).sort()).toEqual(['link.txt', 'target.txt']);
+    });
+
+    it.skipIf(process.platform === 'win32')('refuses a dangling link and creates nothing at its target', async () => {
+      const outside = await nativeFs.realpath(await mkdtemp(path.join(tmpdir(), 'oc-fs-outside-')));
+      try {
+        const link = path.join(repo, 'link.txt');
+        await nativeFs.symlink(path.join(outside, 'escaped.txt'), link);
+
+        const res = await write(link, 'escaped');
+
+        expect(res.statusCode).toBe(403);
+        expect(await nativeFs.readdir(outside)).toEqual([]);
+        expect((await nativeFs.lstat(link)).isSymbolicLink()).toBe(true);
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps a save that returns the file to what is on disk while another save is pending', async () => {
+      const file = path.join(repo, 'notes.md');
+      await nativeFs.writeFile(file, 'original');
+
+      const [changed, undone] = await Promise.all([write(file, 'changed'.repeat(5000)), write(file, 'original')]);
+
+      expect([changed.statusCode, undone.statusCode]).toEqual([200, 200]);
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('original');
+    });
+
+    it('checks the path of a save only after the earlier save of that path has answered', async () => {
+      const file = path.join(repo, 'notes.md');
+      await nativeFs.writeFile(file, 'original');
+      const events = [];
+      const { app, getRoute } = createRouteRegistry();
+      registerFsRoutes(app, {
+        os: { homedir: () => repo },
+        path,
+        fsPromises: nativeFs,
+        spawn: vi.fn(),
+        crypto: { randomUUID: () => 'job-0' },
+        normalizeDirectoryPath: (p) => p,
+        resolveProjectDirectory: async () => {
+          events.push('check');
+          return { directory: repo };
+        },
+        buildAugmentedPath: () => '/usr/bin',
+        resolveGitBinaryForSpawn: () => 'git',
+        openchamberUserConfigRoot: path.join(repo, '.config'),
+      });
+      const save = getRoute('POST', '/api/fs/write');
+      const send = async (content) => {
+        const res = createMockResponse();
+        const json = res.json.bind(res);
+        res.json = (payload) => {
+          events.push(`answer ${content}`);
+          return json(payload);
+        };
+        await save({ body: { path: file, content } }, res);
+        return res;
+      };
+
+      const [first, second] = await Promise.all([send('first'), send('second')]);
+
+      expect([first.statusCode, second.statusCode]).toEqual([200, 200]);
+      expect(events).toEqual(['check', 'answer first', 'check', 'answer second']);
+      expect(await nativeFs.readFile(file, 'utf8')).toBe('second');
+    });
+
+    it('keeps a file whole when several saves arrive at once', async () => {
+      const file = path.join(repo, 'notes.md');
+      await nativeFs.writeFile(file, 'start');
+      const versions = Array.from({ length: 20 }, (_, i) => `v${i}-`.repeat(i % 2 ? 4000 : 3));
+
+      const results = await Promise.all(versions.map((content) => write(file, content)));
+
+      expect(results.every((res) => res.statusCode === 200)).toBe(true);
+      const saved = await nativeFs.readFile(file, 'utf8');
+      expect(versions.includes(saved), `saved ${saved.length} chars: ${JSON.stringify(saved.slice(-20))}`).toBe(true);
+    });
   });
 
   it('rejects existing symlinks that resolve outside the workspace', async () => {
@@ -617,8 +728,7 @@ describe('fs write', () => {
       readFile: vi.fn(async () => 'old'),
       mkdir: vi.fn(async () => undefined),
       writeFile: vi.fn(async () => undefined),
-      rename: vi.fn(async () => undefined),
-      unlink: vi.fn(async () => undefined),
+      open: vi.fn(async () => { throw new Error('must not open'); }),
     };
     const handler = registerWrite(fsPromises);
 
@@ -627,7 +737,7 @@ describe('fs write', () => {
     expect(res.statusCode).toBe(403);
     expect(res.body).toEqual({ error: 'Access denied' });
     expect(fsPromises.writeFile).not.toHaveBeenCalled();
-    expect(fsPromises.rename).not.toHaveBeenCalled();
+    expect(fsPromises.open).not.toHaveBeenCalled();
   });
 });
 
@@ -1508,6 +1618,33 @@ describe('fs reveal', () => {
     expect(child.unref).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    [true, '/code/x’;calc;’'],
+    [false, '/code/x’;calc;’/a.txt'],
+  ])('keeps a Windows path out of the PowerShell command text (directory: %s)', async (isDirectory, target) => {
+    const child = new EventEmitter();
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => child.emit('exit', 0));
+      return child;
+    });
+    const handler = registerReveal({
+      fsPromises: {
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => isDirectory })),
+      },
+      spawn,
+      platform: 'win32',
+    });
+
+    const res = await callReveal(handler, { path: target });
+
+    expect(res.body).toEqual({ success: true, path: target });
+    const [program, args, options] = spawn.mock.calls[0];
+    expect(program).toBe('powershell.exe');
+    expect(args.join(' ')).not.toContain('calc');
+    expect(Object.values(options.env)).toContain(target);
+  });
+
   it('returns a controlled error when the launcher throws synchronously', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const spawnError = Object.assign(new Error('not found'), { code: 'ENOENT' });
@@ -1525,6 +1662,305 @@ describe('fs reveal', () => {
     expect(res.body).toEqual({ error: 'Failed to launch file browser' });
     expect(error).toHaveBeenCalledWith('Failed to reveal path:', expect.objectContaining({ cause: spawnError }));
     error.mockRestore();
+  });
+});
+
+describe('fs exec output and retention', () => {
+  it('caps combined output across commands without splitting UTF-8 or changing exit status', async () => {
+    const letter = Buffer.from('é');
+    const { spawn } = createSpawn({ chunksByCommand: {
+      summary: [['stdout', letter.subarray(0, 1)], ['stdout', letter.subarray(1)], ['stderr', Buffer.from('note')]],
+      report: [['stderr', Buffer.alloc(1_048_569, 'x')], ['stderr', letter], ['stdout', Buffer.from('done')]],
+      finish: [['stdout', Buffer.from('finished')]],
+    } });
+    const routes = registerExec({ spawn });
+
+    const res = await callExec(routes, { commands: ['summary', 'report', 'finish'], cwd: '/repo' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    const [summary, report, finish] = res.body.results;
+    expect(report).toMatchObject({ success: true, exitCode: 0, outputTruncated: true, stdout: '' });
+    expect(Buffer.byteLength(report.stderr)).toBe(1_048_569);
+    expect(/[^x]/u.test(report.stderr)).toBe(false);
+    expect(summary).toEqual({ command: 'summary', success: true, exitCode: 0, stdout: 'é', stderr: 'note' });
+    expect(finish).toMatchObject({ success: true, exitCode: 0, outputTruncated: true, stdout: '', stderr: '' });
+    expect(routes.read(res.body.jobId).raw).toBe(res.raw);
+  });
+
+  it('returns an oversized result from POST without retaining it', async () => {
+    // Blank commands are echoed back as invalid, so the encoded body passes the 16 MiB retention cap.
+    const blank = ' '.repeat(17 * 1024 * 1024);
+    const { spawn, calls } = createSpawn();
+    const routes = registerExec({ spawn });
+
+    const res = await callExec(routes, { commands: [blank], cwd: '/repo' });
+
+    expect(res.statusCode).toBe(200);
+    expect(calls).toEqual([]);
+    expect(Buffer.byteLength(res.raw)).toBeGreaterThan(16 * 1024 * 1024);
+    expect(res.body.results[0]).toEqual({ command: blank, success: false, error: 'Invalid command' });
+    expect(routes.read(res.body.jobId).statusCode).toBe(404);
+
+    const small = await callExec(routes, { commands: ['summary'], cwd: '/repo' });
+    expect(routes.read(small.body.jobId).raw).toBe(small.raw);
+  });
+
+  it('expires completed results on the idle timer without another request', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const routes = registerExec(createSpawn());
+      const { body } = await callExec(routes, { commands: ['summary'], cwd: '/repo' });
+
+      vi.advanceTimersByTime(29 * 60_000);
+      expect(routes.read(body.jobId).statusCode).toBe(200);
+      vi.advanceTimersByTime(29 * 60_000);
+      expect(routes.read(body.jobId).statusCode).toBe(200);
+      vi.advanceTimersByTime(30 * 60_000);
+      expect(routes.read(body.jobId).statusCode).toBe(404);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refuses an expired result when wall time advances before the timer fires', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      const routes = registerExec(createSpawn());
+      const { body } = await callExec(routes, { commands: ['summary'], cwd: '/repo' });
+
+      vi.setSystemTime(Date.now() + 31 * 60_000);
+
+      expect(routes.read(body.jobId).statusCode).toBe(404);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('evicts the least recently used completed result at the entry limit', async () => {
+    const routes = registerExec(createSpawn());
+    const request = { commands: ['summary'], cwd: '/repo' };
+    const first = await callExec(routes, request);
+    const second = await callExec(routes, request);
+    for (let i = 2; i < 64; i += 1) await callExec(routes, request);
+    expect(routes.read(first.body.jobId).statusCode).toBe(200);
+
+    const latest = await callExec(routes, request);
+
+    expect(routes.read(second.body.jobId).statusCode).toBe(404);
+    expect(routes.read(first.body.jobId).statusCode).toBe(200);
+    expect(routes.read(latest.body.jobId).raw).toBe(latest.raw);
+  });
+
+  it('accounts for encoded result bytes before retaining a completed job', async () => {
+    const { spawn } = createSpawn({ chunksByCommand: { report: [['stdout', Buffer.alloc(1_048_576)]] } });
+    const routes = registerExec({ spawn });
+    const request = { commands: ['report'], cwd: '/repo' };
+    const first = await callExec(routes, request);
+    const second = await callExec(routes, request);
+    const third = await callExec(routes, request);
+
+    expect(Buffer.byteLength(third.body.results[0].stdout)).toBe(1_048_576);
+    expect(third.body.results[0].outputTruncated).toBeUndefined();
+    expect(routes.read(first.body.jobId).statusCode).toBe(404);
+    expect(routes.read(second.body.jobId).statusCode).toBe(200);
+    expect(routes.read(third.body.jobId).statusCode).toBe(200);
+  });
+});
+
+describe('fs exec command timeout', () => {
+  beforeEach(() => {
+    process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = '20';
+  });
+
+  afterEach(() => {
+    delete process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS;
+  });
+
+  it('kills the POSIX process group of a timed-out command', () => {
+    const kill = vi.fn();
+    const child = { pid: 4242, kill: vi.fn() };
+
+    killCommandTree(child, vi.fn(), { platform: 'linux', kill });
+
+    expect(kill).toHaveBeenCalledWith(-4242, 'SIGKILL');
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it('kills the Windows process tree with taskkill from System32', () => {
+    const taskkill = new EventEmitter();
+    const spawnProcess = vi.fn(() => taskkill);
+    const child = { pid: 4242, kill: vi.fn() };
+
+    killCommandTree(child, spawnProcess, { platform: 'win32', systemRoot: 'C:\\Windows' });
+
+    expect(spawnProcess).toHaveBeenCalledWith('C:\\Windows\\System32\\taskkill.exe', ['/T', '/F', '/PID', '4242'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    taskkill.emit('exit', 0);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it('falls back to killing the shell when taskkill fails or cannot start', () => {
+    for (const outcome of [['exit', 128], ['exit', null], ['error', new Error('ENOENT')]]) {
+      const taskkill = new EventEmitter();
+      const child = { pid: 4242, kill: vi.fn() };
+
+      killCommandTree(child, vi.fn(() => taskkill), { platform: 'win32', systemRoot: 'C:\\Windows' });
+      expect(child.kill).not.toHaveBeenCalled();
+      taskkill.emit(...outcome);
+
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    }
+  });
+
+  it('kills only the shell when the command has no usable pid', () => {
+    const kill = vi.fn();
+    const spawnProcess = vi.fn();
+
+    for (const pid of [undefined, 0, 1]) {
+      const child = { pid, kill: vi.fn() };
+      killCommandTree(child, spawnProcess, { platform: 'linux', kill });
+      expect(child.kill).toHaveBeenCalled();
+    }
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it('answers with a timeout result when the killed command leaves a child holding its output pipe', async () => {
+    // The shell is killed on the timeout, but a command it started keeps the
+    // inherited stdout pipe open, so the child process never emits 'close'.
+    const childKill = vi.fn();
+    const spawn = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = Object.assign(new EventEmitter(), { destroy: () => {} });
+      child.stderr = Object.assign(new EventEmitter(), { destroy: () => {} });
+      child.kill = childKill;
+      return child;
+    });
+    const handler = registerExec({ spawn });
+
+    const res = await callExec(handler, { commands: ['sleep 600'], cwd: '/repo' });
+
+    expect(spawn.mock.calls[0][1].at(-1)).toBe('sleep 600');
+    // The POSIX group kill reaches the shell's children only because the shell leads its own group.
+    expect(spawn.mock.calls[0][2].detached).toBe(process.platform !== 'win32');
+    expect(childKill).toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(false);
+    expect(res.body.results[0]).toMatchObject({
+      command: 'sleep 600',
+      success: false,
+      error: 'Command timed out after 20ms',
+    });
+  });
+
+  it('keeps the output captured before the timeout within the job limit', async () => {
+    const spawn = vi.fn(() => {
+      const child = new EventEmitter();
+      child.stdout = Object.assign(new EventEmitter(), { destroy: () => {} });
+      child.stderr = Object.assign(new EventEmitter(), { destroy: () => {} });
+      child.kill = () => {};
+      queueMicrotask(() => {
+        child.stdout.emit('data', Buffer.from('partial '));
+        child.stderr.emit('data', Buffer.alloc(1_048_576, 'x'));
+      });
+      return child;
+    });
+    const routes = registerExec({ spawn });
+
+    const res = await callExec(routes, { commands: ['build'], cwd: '/repo' });
+
+    expect(res.body.results[0]).toMatchObject({
+      command: 'build',
+      success: false,
+      stdout: 'partial',
+      outputTruncated: true,
+      error: 'Command timed out after 20ms',
+    });
+    expect(res.body.results[0].exitCode).toBeUndefined();
+    expect(Buffer.byteLength(res.body.results[0].stderr)).toBe(1_048_576 - 'partial '.length);
+    expect(routes.read(res.body.jobId).raw).toBe(res.raw);
+  });
+
+  it.skipIf(process.platform === 'win32')('answers promptly and stops the children of a real timed-out command', async () => {
+    let output = '';
+    const startedAt = performance.now();
+    const result = runCommandInDirectory({
+      shell: '/bin/sh',
+      shellFlag: '-c',
+      command: 'sleep 30 & echo $!; wait',
+      resolvedCwd: process.cwd(),
+      maxOutputBytes: 1024,
+      spawn: (...args) => {
+        const child = nodeSpawn(...args);
+        child.stdout.on('data', (chunk) => { output += chunk; });
+        return child;
+      },
+      execEnv: process.env,
+      commandTimeoutMs: 300,
+    });
+
+    await expect(result).resolves.toMatchObject({ success: false, error: 'Command timed out after 300ms' });
+    expect(performance.now() - startedAt).toBeLessThan(5_000);
+    const grandchild = Number(output.trim());
+    expect(grandchild).toBeGreaterThan(1);
+    await vi.waitFor(() => expect(() => process.kill(grandchild, 0)).toThrow());
+  });
+
+  it('waits for a slow failing taskkill and then kills the shell', async () => {
+    const taskkill = new EventEmitter();
+    const child = { pid: 4242, kill: vi.fn() };
+    let settled = false;
+    vi.useFakeTimers();
+
+    try {
+      const done = killCommandTree(child, vi.fn(() => taskkill), { platform: 'win32', systemRoot: 'C:\\Windows' })
+        .then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(false);
+      taskkill.emit('exit', 1);
+      await done;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
+  it('stops a running command on shutdown, forgets one that finished and starts no later one', async () => {
+    process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS = '60000';
+    // Shutdown closes command admission for the module for good, so this test
+    // runs on its own module instance and leaves the shared one open.
+    vi.resetModules();
+    const { registerFsRoutes: register } = await import('./routes.js');
+    const { stopActiveCommands: stop } = await import('./exec-command.js');
+    const children = [];
+    const spawn = vi.fn((_shell, args) => {
+      const child = new EventEmitter();
+      child.stdout = Object.assign(new EventEmitter(), { destroy: () => {} });
+      child.stderr = Object.assign(new EventEmitter(), { destroy: () => {} });
+      child.kill = vi.fn(() => queueMicrotask(() => child.emit('close', null, 'SIGKILL')));
+      children.push(child);
+      if (args.at(-1) === 'done') queueMicrotask(() => child.emit('close', 0, null));
+      return child;
+    });
+    const routes = registerExec({ spawn, register });
+
+    await callExec(routes, { commands: ['done'], cwd: '/repo' });
+    const running = callExec(routes, { commands: ['serve', 'next'], cwd: '/repo' });
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    expect(children[1].kill).not.toHaveBeenCalled();
+    await stop();
+
+    expect(children[0].kill).not.toHaveBeenCalled();
+    expect(children[1].kill).toHaveBeenCalledWith('SIGKILL');
+    const { results } = (await running).body;
+    expect(results[0]).toMatchObject({ command: 'serve', success: false });
+    expect(results[1]).toMatchObject({ command: 'next', success: false, error: 'Server is shutting down' });
+    expect(spawn).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -1576,23 +2012,78 @@ describe('fs exec git-read cache', () => {
     expect(calls.length).toBe(1);
   });
 
-  it('dedupes concurrent identical git-read requests while the first is in flight', async () => {
+  it('reuses complete git reads when their output fits different job budgets', async () => {
+    const command = 'git rev-parse --show-toplevel';
+    const { spawn, calls } = createSpawn({ stdoutByCommand: { summary: 'note', [command]: '/repo\n' } });
+    const routes = registerExec({ spawn });
+    const batch = { commands: ['summary', command], cwd: '/repo' };
+
+    const first = await callExec(routes, batch);
+    const second = await callExec(routes, { commands: [command], cwd: '/repo' });
+    const third = await callExec(routes, batch);
+
+    expect(first.body.results[1].stdout).toBe('/repo');
+    expect(second.body.results[0]).toEqual(first.body.results[1]);
+    expect(third.body.results[1]).toEqual(first.body.results[1]);
+    expect(calls).toEqual(['summary', command, 'summary']);
+  });
+
+  it('dedupes concurrent git reads only within the same output budget', async () => {
     const command = 'git rev-parse --absolute-git-dir --git-common-dir';
-    const { spawn, calls, closeNext } = createDeferredSpawn({ stdoutByCommand: { [command]: '/repo/.git\n.git\n' } });
+    const pending = [];
+    const { spawn, calls } = createSpawn({
+      stdoutByCommand: { report: 'x'.repeat(1_048_575), [command]: '/repo/.git\n.git\n' },
+      scheduleClose(close, name) {
+        if (name === command) pending.push(close);
+        else queueMicrotask(close);
+      },
+    });
     const handler = registerExec({ spawn });
 
     const first = callExec(handler, { commands: [command], cwd: '/repo' });
     const second = callExec(handler, { commands: [command], cwd: '/repo' });
+    const limited = callExec(handler, { commands: ['report', command], cwd: '/repo' });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls.length).toBe(1);
-
-    closeNext();
-    const [firstRes, secondRes] = await Promise.all([first, second]);
+    await new Promise(setImmediate);
+    const readsStarted = calls.filter((call) => call === command).length;
+    for (const close of pending) close();
+    const [firstRes, secondRes, limitedRes] = await Promise.all([first, second, limited]);
 
     expect(firstRes.body.results[0].stdout).toBe('/repo/.git\n.git');
     expect(secondRes.body.results[0].stdout).toBe('/repo/.git\n.git');
-    expect(calls.length).toBe(1);
+    expect(limitedRes.body.results[1]).toMatchObject({ stdout: '/', outputTruncated: true });
+    expect(readsStarted).toBe(2);
+  });
+
+  it('keeps the newer git read when an older overlapping read finishes last', async () => {
+    const command = 'git rev-parse --absolute-git-dir';
+    const pending = [];
+    const stdoutByCommand = { summary: 'note', [command]: '/old/.git\n' };
+    const { spawn, calls } = createSpawn({
+      stdoutByCommand,
+      scheduleClose(close, name) {
+        if (name === command) pending.push(close);
+        else queueMicrotask(close);
+      },
+    });
+    const routes = registerExec({ spawn });
+
+    const older = callExec(routes, { commands: [command], cwd: '/repo' });
+    await new Promise(setImmediate);
+    const newer = callExec(routes, { commands: ['summary', command], cwd: '/repo' });
+    await new Promise(setImmediate);
+    expect(pending.length).toBe(2);
+    stdoutByCommand[command] = '/new/.git\n';
+    pending[1]();
+    await newer;
+    stdoutByCommand[command] = '/old/.git\n';
+    pending[0]();
+    await older;
+
+    const next = await callExec(routes, { commands: [command], cwd: '/repo' });
+
+    expect(next.body.results[0].stdout).toBe('/new/.git');
+    expect(calls.filter((call) => call === command).length).toBe(2);
   });
 
   it('returns the current request command for normalized cache hits', async () => {
@@ -1640,6 +2131,28 @@ describe('fs exec git-read cache', () => {
     await callExec(handler, { commands: [command], cwd: '/repo/not-a-repo' });
 
     expect(calls.length).toBe(2);
+  });
+
+  it('keeps incomplete git-read output separate from complete cached results', async () => {
+    const command = 'git rev-parse --show-toplevel';
+    const { spawn, calls } = createSpawn({ stdoutByCommand: {
+      report: 'x'.repeat(1_048_575),
+      [command]: '/repo\n',
+    } });
+    const routes = registerExec({ spawn });
+    const batch = { commands: ['report', command], cwd: '/repo' };
+    const single = { commands: [command], cwd: '/repo' };
+
+    const limited = await callExec(routes, batch);
+    const complete = await callExec(routes, single);
+    const limitedAgain = await callExec(routes, batch);
+    const cached = await callExec(routes, single);
+
+    expect(limited.body.results[1]).toMatchObject({ stdout: '/', outputTruncated: true });
+    expect(complete.body.results[0].stdout).toBe('/repo');
+    expect(limitedAgain.body.results[1]).toEqual(limited.body.results[1]);
+    expect(cached.body.results[0]).toEqual(complete.body.results[0]);
+    expect(calls.filter((call) => call === command)).toHaveLength(3);
   });
 
   it('disables caching when TTL is 0', async () => {
@@ -2336,7 +2849,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
+      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search', 'windows-shell-open', 'exec-jobs', 'exec-output', 'exec-command', 'text-write'];
       const require = createRequire(import.meta.url);
       const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
       execFileSync(process.execPath, [
@@ -2345,8 +2858,10 @@ describe('fs stat directory error handling', () => {
         '--outDir', directory,
         ...helpers.map((name) => fileURLToPath(new URL(`./${name}.ts`, import.meta.url))),
         fileURLToPath(new URL('../git/redaction.ts', import.meta.url)),
+        fileURLToPath(new URL('../git/git-launch.ts', import.meta.url)),
          fileURLToPath(new URL('../shared/object-guards.ts', import.meta.url)),
          fileURLToPath(new URL('../path-realpath-cache.ts', import.meta.url)),
+        ...['index', 'probe-process', 'while-reachable'].map((name) => fileURLToPath(new URL(`../directory-reachability/${name}.ts`, import.meta.url))),
       ], { cwd: directory, stdio: 'pipe' });
       await copyFile(new URL('../shared/guards.ts', import.meta.url), path.join(directory, 'shared/guards.js'));
       expect(() => execFileSync('node', [
@@ -2773,6 +3288,90 @@ describe('canonical managed roots with real filesystem aliases', () => {
     expect(outside.body).toEqual({ error: 'Directory parameter or active project is required' });
   });
 
+  describe('with the active project above a linked chats root', () => {
+    const setupLinkedChats = async (context) => {
+      const root = await nativeFs.realpath(await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-linked-chats-')));
+      context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
+      const project = path.join(root, 'home');
+      const config = path.join(project, '.config/openchamber');
+      const realChats = path.join(root, 'other-drive/chats');
+      const outside = path.join(root, 'outside');
+      for (const directory of [config, realChats, outside]) await nativeFs.mkdir(directory, { recursive: true });
+      const chats = path.join(config, 'chats');
+      await nativeFs.symlink(realChats, chats, 'junction');
+      const { app, getRoute } = createRouteRegistry();
+      registerFsRoutes(app, {
+        os: { homedir: () => project }, path, fsPromises: nativeFs,
+        normalizeDirectoryPath: value => value,
+        resolveProjectDirectory: async () => ({ directory: project }),
+        openchamberUserConfigRoot: config, managedChatsRoot: chats,
+      });
+      const post = async (route, body) => {
+        const response = createMockResponse();
+        await getRoute('POST', route)({ body }, response);
+        return response;
+      };
+      return { post, project, config, chats, realChats, outside };
+    };
+
+    it('creates and cleans up the first session folder of a day at the real chats location', async context => {
+      const { post, chats, realChats } = await setupLinkedChats(context);
+      const directory = path.join(chats, '2026-11-25/session-a');
+      const created = await post('/api/fs/mkdir', { path: directory });
+      expect(created.statusCode).toBe(200);
+      expect(created.body.path).toBe(directory);
+      expect(await nativeFs.realpath(directory)).toBe(path.join(realChats, '2026-11-25/session-a'));
+
+      const deleted = await post('/api/fs/delete', { path: directory });
+      expect(deleted.statusCode).toBe(200);
+      expect(await nativeFs.readdir(path.join(realChats, '2026-11-25'))).toEqual([]);
+    });
+
+    it('refuses a session folder whose day folder links outside the chats root', async context => {
+      const { post, chats, realChats, outside } = await setupLinkedChats(context);
+      await nativeFs.symlink(outside, path.join(realChats, '2026-11-25'), 'junction');
+      await nativeFs.mkdir(path.join(outside, 'session-kept'));
+
+      const created = await post('/api/fs/mkdir', { path: path.join(chats, '2026-11-25/session-a') });
+      const deleted = await post('/api/fs/delete', { path: path.join(chats, '2026-11-25/session-kept') });
+
+      expect(created.statusCode).toBe(403);
+      expect(deleted.statusCode).toBe(403);
+      expect(await nativeFs.readdir(outside)).toEqual(['session-kept']);
+    });
+
+    it('keeps allowing a day folder that links elsewhere inside the project', async context => {
+      const { post, project, chats, realChats } = await setupLinkedChats(context);
+      const archive = path.join(project, 'archive');
+      await nativeFs.mkdir(archive);
+      await nativeFs.symlink(archive, path.join(realChats, '2026-11-25'), 'junction');
+      await nativeFs.writeFile(path.join(archive, 'session-notes.md'), 'hi');
+
+      const created = await post('/api/fs/mkdir', { path: path.join(chats, '2026-11-25/session-a') });
+      const deleted = await post('/api/fs/delete', { path: path.join(chats, '2026-11-25/session-notes.md') });
+
+      expect(created.statusCode).toBe(200);
+      expect(deleted.statusCode).toBe(200);
+      expect(await nativeFs.readdir(archive)).toEqual(['session-a']);
+    });
+
+    it('keeps the project as the base for other folders and moves', async context => {
+      const { post, project, config, chats, realChats } = await setupLinkedChats(context);
+      await nativeFs.mkdir(path.join(realChats, 'notes'));
+      await nativeFs.mkdir(path.join(realChats, '2026-11-25/session-a/src'), { recursive: true });
+      for (const target of ['notes', '2026-11-25/session-a/src']) {
+        expect((await post('/api/fs/delete', { path: path.join(chats, target) })).statusCode).toBe(403);
+      }
+
+      await nativeFs.writeFile(path.join(project, 'note.md'), 'hi');
+      const moved = await post('/api/fs/rename', {
+        oldPath: path.join(project, 'note.md'), newPath: path.join(config, 'note.md'),
+      });
+      expect(moved.statusCode).toBe(200);
+      expect(await nativeFs.readFile(path.join(config, 'note.md'), 'utf8')).toBe('hi');
+    });
+  });
+
   it('reports on-disk home casing on a case-insensitive macOS volume', { skip: process.platform !== 'darwin' }, async context => {
     const { getRoute, canonicalChats, rawChats, reportedHome } = await setup(context, { caseAlias: true });
     const response = createMockResponse();
@@ -2828,10 +3427,10 @@ describe('fs html preview grants', () => {
       await mintHandler({ body: { path: pagePath }, query }, res);
       return res;
     };
-    const serve = async (url) => {
+    const serve = async (url, query = {}) => {
       const match = url.match(serveRoute.routePath);
       const res = createMockResponse();
-      await serveRoute.handler({ params: { 0: decodeURIComponent(match[1]), 1: decodeURIComponent(match[2]) }, query: {} }, res);
+      await serveRoute.handler({ params: { 0: decodeURIComponent(match[1]), 1: decodeURIComponent(match[2]) }, query }, res);
       return res;
     };
     return { mint, serve };
@@ -2872,6 +3471,12 @@ describe('fs html preview grants', () => {
 
     const secret = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/guest-auth.json`);
     expect(secret.getHeader('access-control-allow-origin')).toBeUndefined();
+
+    // Inline preview reads enforce readRoot server-side so secret bytes never enter data: URLs.
+    const inlineData = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/projects/p1/canvases/c1/data.json`, { inline: '1' });
+    expect(inlineData.statusCode).toBe(200);
+    const inlineSecret = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/guest-auth.json`, { inline: '1' });
+    expect(inlineSecret.statusCode).toBe(403);
   });
 
   it('refuses unknown grants and files outside the workspace', async () => {
@@ -3047,7 +3652,7 @@ describe('GET /api/fs/search', () => {
   it('reads Git ignores once per repository and preserves nested rules and tracked files', async () => {
     const { spawn } = await import('node:child_process');
     const gitReads = [];
-    const ask = await register({ spawn: (...args) => { gitReads.push(args[2].cwd); return spawn(...args); } });
+    const ask = await register({ spawn: (...args) => { gitReads.push(args[1][1]); return spawn(...args); } });
     for (let index = 0; index < 12; index++) {
       const directory = path.join(repo, `dir-${index}`);
       await mkdir(directory);

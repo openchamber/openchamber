@@ -21,7 +21,7 @@ import { registryDomainsOf } from '@/lib/spaces/registry-domains';
 import { isDomainName } from '@/lib/spaces/space-access';
 import { listSpacePlaces, type SpaceFailure, type SpacePlace, type SpaceStart } from '@/lib/spaces/spaces-api';
 import { startSpaceCreation, type SpaceModelAccess } from '@/lib/spaces/space-creation';
-import { composerModelForSpaceAccess } from '@/lib/spaces/space-model-access';
+import { composerModelForSpaceAccess } from '@/lib/spaces/space-model-offer';
 import { resolveSpaceSetupPlan } from '@/lib/spaces/space-setup';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';

@@ -8,7 +8,7 @@ import { buildContinuationPrompt } from './continuation.js';
 import { createGoalInterruptions, type GoalTick, type PersistSessionGoal } from './interruption.js';
 import {
   buildJevAuditRequest,
-  buildSmallModelAuditPrompt,
+  smallModelAuditRequest,
   decideProgress,
   readJevAnswers,
   readSmallModelAnswers,
@@ -87,7 +87,7 @@ type SessionMetadataInput = SessionMetadata | null | undefined;
 export interface SessionGoalRuntime {
   processPayload: (payload: JsonValue | undefined, directoryHint?: string) => void;
   notifyGoalChanged: (sessionId: string, directory: string, metadata: SessionMetadataInput) => Promise<void>;
-  recoverActiveGoals: () => Promise<void>;
+  recoverActiveGoals: () => Promise<void>; hasLiveWork: () => boolean;
   stop: () => void;
 }
 
@@ -536,7 +536,7 @@ export const createSessionGoalRuntime = ({
     }
     try {
       const generated = await service.generateSmallModelText({
-        prompt: buildSmallModelAuditPrompt({ objective, answer }),
+        ...smallModelAuditRequest({ objective, answer }),
         directory,
         sessionID: isString(lastAssistantInfo.sessionID) ? lastAssistantInfo.sessionID : undefined,
         preferredProviderID: isString(lastAssistantInfo.providerID) ? lastAssistantInfo.providerID : undefined,
@@ -1072,5 +1072,5 @@ export const createSessionGoalRuntime = ({
     interruptions.stop();
   };
 
-  return { processPayload, notifyGoalChanged, recoverActiveGoals, stop };
+  return { processPayload, notifyGoalChanged, recoverActiveGoals, hasLiveWork: () => inflight.size > 0 || timers.size > 0, stop };
 };

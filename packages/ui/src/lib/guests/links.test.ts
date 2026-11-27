@@ -80,6 +80,43 @@ describe('claimGuestUrl', () => {
     expect(claimGuestUrl([tasks], `https://tasks.example.com/tasks/DEMO-1/${'a'.repeat(100)}`)?.identifier).toBe('DEMO-1');
   });
 
+  test('a wildcard origin claims subdomains at any depth, never the domain itself, a look-alike host or another port', () => {
+    const wildcard: GuestLinkRule = { ...tasks, urls: { ...tasks.urls!, origin: 'https://*.example.com', itemTemplate: null } };
+    expect(claimGuestUrl([wildcard], 'https://acme.example.com/tasks/DEMO-1')?.url).toBe('https://acme.example.com/tasks/DEMO-1');
+    expect(claimGuestUrl([wildcard], 'https://acme.enterprise.example.com/tasks/DEMO-1')?.url).toBe('https://acme.enterprise.example.com/tasks/DEMO-1');
+    for (const href of [
+      'https://example.com/tasks/DEMO-1',
+      'https://evil-example.com/tasks/DEMO-1',
+      'https://example.com.evil.com/tasks/DEMO-1',
+      'https://acme.example.com:8443/tasks/DEMO-1',
+      'http://acme.example.com/tasks/DEMO-1',
+      'https://*.example.com/tasks/DEMO-1',
+      'https://team..example.com/tasks/DEMO-1',
+      'https://.example.com/tasks/DEMO-1',
+    ]) {
+      expect(claimGuestUrl([wildcard], href)).toBeNull();
+    }
+  });
+
+  test('an exact origin wins over a wildcard in either catalog order, and the wildcard takes a link the exact templates leave', () => {
+    const wildcard: GuestLinkRule = { ...tasks, urls: { ...tasks.urls!, origin: 'https://*.example.com', itemTemplate: null } };
+    const exact: GuestLinkRule = { ...tasks, guestId: 'acme', urls: { ...tasks.urls!, origin: 'https://acme.example.com', patterns: [tasks.urls!.patterns[0]!] } };
+    for (const rules of [[wildcard, exact], [exact, wildcard]]) {
+      expect(claimGuestUrl(rules, 'https://acme.example.com/tasks/DEMO-1')?.guestId).toBe('acme');
+      expect(claimGuestUrl(rules, 'https://acme.example.com/browse?selectedIssue=DEMO-2')?.guestId).toBe('tasks');
+    }
+  });
+
+  test('catalog order decides within each tier, and identifiers keep plain catalog order', () => {
+    const wildcard: GuestLinkRule = { ...tasks, guestId: 'wild', urls: { ...tasks.urls!, origin: 'https://*.example.com', itemTemplate: null } };
+    const wildcard2: GuestLinkRule = { ...wildcard, guestId: 'wild2' };
+    const exact: GuestLinkRule = { ...tasks, guestId: 'acme', urls: { ...tasks.urls!, origin: 'https://acme.example.com' } };
+    const exact2: GuestLinkRule = { ...exact, guestId: 'acme2' };
+    expect(claimGuestUrl([wildcard2, wildcard, exact2, exact], 'https://acme.example.com/tasks/DEMO-1')?.guestId).toBe('acme2');
+    expect(claimGuestUrl([wildcard2, wildcard, exact2, exact], 'https://beta.example.com/tasks/DEMO-1')?.guestId).toBe('wild2');
+    expect(claimGuestIdentifier([wildcard, exact], 'DEMO-1')).toEqual({ guestId: 'wild', action: 'open', identifier: 'DEMO-1' });
+  });
+
   test('refuses another scheme, host, port, a www spelling, credentials, and a parameter that is not an identifier', () => {
     for (const href of [
       'http://tasks.example.com/tasks/DEMO-1',

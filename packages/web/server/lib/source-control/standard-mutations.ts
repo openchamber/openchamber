@@ -18,8 +18,15 @@ export interface StandardMutationInput {
   commentId?: string;
   state?: string;
   names?: string[];
+  base?: string;
+  expectedHeadSha?: string;
+  reviewId?: string;
+  message?: string;
+  dismissed?: boolean;
   position?: ReturnType<typeof import('./review-position.js').reviewCommentPosition>;
   digest?: Record<string, SourceControlJson | undefined>;
+  threadId?: string;
+  resolved?: boolean;
 }
 
 interface MutationEntry {
@@ -40,8 +47,14 @@ const requestText = (value: SourceControlJson | undefined) => (isString(value) ?
 const TITLE_MAX = 256;
 
 const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const REVIEW_ID_MAX = 256;
+const isControl = (char: string) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f;
+const isReviewId = (value: string) => value.length > 0 && value.length <= REVIEW_ID_MAX && value.trim() === value && !Array.from(value).some(isControl);
 const VOTE_LIMIT = 16;
 const VOTE_RANGE = 10;
+
+const THREAD_ID_RE = /^[A-Za-z0-9_:.=-]{1,200}$/;
+export const isThreadId = (value: string): boolean => THREAD_ID_RE.test(value);
 
 const validVotes = (entries: [string, unknown][]): entries is [string, number][] =>
   !(entries.length > VOTE_LIMIT || entries.some(([label, vote]) => !VOTE_LABEL_RE.test(label)
@@ -64,6 +77,8 @@ const isNameList = (value: unknown, limit: number): value is string[] => !(!Arra
 const includes = <T>(values: readonly T[], value: unknown): value is T => values.some((entry) => entry === value);
 
 export function createStandardMutations(descriptor: ProviderDescriptor) {
+  const reviewDismiss = descriptor.capabilities.reviewDismiss;
+  const reviewUndismiss = descriptor.capabilities.reviewUndismiss === true;
   const commentText = (value: SourceControlJson | undefined, required: boolean) => {
     if (value === undefined && !required) return undefined;
     if (!isString(value) || !value.trim() || value.length > descriptor.limits.commentMaxLength) {
@@ -87,6 +102,11 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
     if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
     return value;
   };
+  const threadIdOf = (value: SourceControlJson | undefined) => {
+    if (!isString(value) || !THREAD_ID_RE.test(value)) throw invalidMutationContext('threadId is invalid');
+    return value;
+  };
+  const reviewThreads = descriptor.capabilities.reviewThreads ?? {};
   const normalizeVotes = (input: SourceControlJsonObject, context: MutationContextInput) => {
     if (input.verdict !== undefined) {
       throw invalidMutationContext(`${descriptor.label} reviews are votes; update the app to review here`);
@@ -170,8 +190,67 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
         return { verdict: input.verdict, body: text, digest: { verdict: input.verdict, body: text ?? null } };
       },
     },
-    ...reviewDraftEntries({ commentText, fail: (message) => { throw invalidMutationContext(message); } }),
+    ...reviewDraftEntries({
+      commentText,
+      fail: (message) => { throw invalidMutationContext(message); },
+      fileComments: descriptor.capabilities.reviewDrafts?.fileComments === true,
+    }),
   };
+  const { baseChange, updateBranch, rebase } = descriptor.presentation.features;
+  const headWrite = (kind: string): MutationEntry => ({
+    kind,
+    normalize: (input, context) => {
+      requireNumber(context);
+      const expectedHeadSha = requestText(input.expectedHeadSha);
+      if (!/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+        throw invalidMutationContext('expectedHeadSha is required and must be a 40-character lowercase hex SHA');
+      }
+      if (context.target.headSha !== undefined && context.target.headSha !== expectedHeadSha) {
+        throw invalidMutationContext('expectedHeadSha does not match the target head');
+      }
+      return { expectedHeadSha, digest: { expectedHeadSha } };
+    },
+  });
+  if (baseChange === true) {
+    entries['/pr/base'] = {
+      kind: 'change-request-base',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const base = requestText(input.base);
+        if (!base || base.length > TITLE_MAX) throw invalidMutationContext(`base is required and must fit ${TITLE_MAX} characters`);
+        return { base, digest: { base } };
+      },
+    };
+  }
+  if (updateBranch === true) entries['/pr/update-branch'] = headWrite('change-request-update-branch');
+  if (rebase === true) entries['/pr/rebase'] = headWrite('change-request-rebase');
+  if (reviewDismiss) {
+    entries['/pr/review/dismiss'] = {
+      kind: 'change-request-review-dismiss',
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (reviewDismiss === 'own') {
+          if (input.reviewId !== undefined || input.message !== undefined) {
+            throw invalidMutationContext(`${descriptor.label} reviews are withdrawn without a review id or message`);
+          }
+          if (input.dismissed === false) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
+          return { dismissed: true, digest: { dismissed: true } };
+        }
+        const id = isString(input.reviewId) || Number.isSafeInteger(input.reviewId) ? String(input.reviewId) : '';
+        if (!isReviewId(id)) throw invalidMutationContext('reviewId is required');
+        if (input.dismissed !== undefined && input.dismissed !== true && input.dismissed !== false) {
+          throw invalidMutationContext('dismissed is invalid');
+        }
+        const dismissed = input.dismissed !== false;
+        if (!dismissed && !reviewUndismiss) throw invalidMutationContext(`${descriptor.label} reviews cannot be undismissed`);
+        const text = commentText(input.message, dismissed);
+        const normalized: StandardMutationInput & { reviewId: string } = { reviewId: id, dismissed };
+        if (text !== undefined) normalized.message = text;
+        normalized.digest = { reviewId: id, dismissed, message: text ?? null };
+        return normalized;
+      },
+    };
+  }
   for (const [route, kind] of [['/pr/comment', 'change-request-comment'], ['/issues/comment', 'issue-comment']] satisfies [string, string][]) {
     entries[route] = {
       kind,
@@ -222,6 +301,28 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
       },
     };
   }
+  if (reviewThreads.reply) {
+    entries['/pr/thread/reply'] = {
+      kind: 'change-request-thread-reply',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = threadIdOf(input.threadId);
+        const text = commentText(input.body, true);
+        return { threadId: id, body: text, digest: { threadId: id, body: text } };
+      },
+    };
+  }
+  if (reviewThreads.resolve) {
+    entries['/pr/thread/resolve'] = {
+      kind: 'change-request-thread-resolve',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = threadIdOf(input.threadId);
+        if (input.resolved !== true && input.resolved !== false) throw invalidMutationContext('resolved is required');
+        return { threadId: id, resolved: input.resolved, digest: { threadId: id, resolved: input.resolved } };
+      },
+    };
+  }
   for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']] satisfies [string, string][]) {
     entries[route] = {
       kind,
@@ -229,6 +330,7 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
         if (!context.target.number || !includes(['open', 'closed'], input.state)) {
           throw invalidMutationContext('target number and state are required');
         }
+        if (input.reason !== undefined) throw invalidMutationContext(`${descriptor.label} closes without a reason`);
         return { state: input.state, digest: { state: input.state } };
       },
     };
@@ -247,6 +349,17 @@ export function createStandardMutations(descriptor: ProviderDescriptor) {
           throw invalidMutationContext('reviewers are invalid');
         }
         return { names, digest: { [field]: names } };
+      },
+    };
+  }
+
+  if (descriptor.presentation.features.issueAssignees === true) {
+    entries['/issues/assignees'] = {
+      kind: 'issue-assignees',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+        return { names, digest: { assignees: names } };
       },
     };
   }

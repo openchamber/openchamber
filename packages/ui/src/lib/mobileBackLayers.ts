@@ -69,3 +69,7 @@ export function closeTopmostBackLayer(): boolean {
   top.close();
   return true;
 }
+
+export function closeAllBackLayers(): void {
+  [...overlayLayers].reverse().forEach((layer) => layer.close());
+}

@@ -22,6 +22,8 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { computeContextUsage, computeLastReplyCacheHit } from './contextUsage';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
+import { SESSION_COST_LEVEL_COLOR, sessionCostLevel } from './sessionCostLevel';
+import { selectSessionCostSettings, useSessionCostSettingsStore } from '@/stores/useSessionCostSettingsStore';
 import {
   WorkStatusCallout,
   WorkStatusMeter,
@@ -233,6 +235,10 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
   const { totalCost, ownCost, subagentCost, subagentCount } = useSubagentCostRollup(sessionId);
   const cost = totalCost !== null && totalCost > 0 ? totalCost : null;
+  const costSettings = useSessionCostSettingsStore(selectSessionCostSettings);
+  const costLevel = cost !== null && costSettings.sessionCostAlertsEnabled
+    ? sessionCostLevel(cost, { warn: costSettings.sessionCostWarnThreshold, critical: costSettings.sessionCostCriticalThreshold })
+    : null;
   const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
   const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(spaceName || branch || changed || prSummary || attentionLabel);
@@ -253,7 +259,13 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   <>
                     <WorkStatusWarmingToggle sessionId={sessionId} directory={directory} />
                     <WorkStatusValue>
-                      {`${usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}${cost !== null ? ` · ${formatCost(cost)}` : ''}`}
+                      {usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}
+                      {cost !== null ? (
+                        <>
+                          {' · '}
+                          <span style={costLevel ? { color: SESSION_COST_LEVEL_COLOR[costLevel] } : undefined}>{formatCost(cost)}</span>
+                        </>
+                      ) : null}
                     </WorkStatusValue>
                   </>
                 )}

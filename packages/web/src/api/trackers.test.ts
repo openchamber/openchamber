@@ -178,6 +178,9 @@ describe('web trackers: the neutral routes', () => {
     expect(lastBody()).toBe(JSON.stringify({ kind: 'started', sessionId: 's1', identifier: 'ENG-12' }));
     await expect(api.preferencesSet('linear', { sessionComments: true })).resolves.toEqual({ sessionComments: true });
     expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('PUT');
+    await api.refreshItemReads('linear', 'ENG-12');
+    expect(lastPath()).toBe('/api/tracker/linear/read-cache/refresh?scope=item&identifier=ENG-12');
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST');
   });
 });
 
@@ -193,7 +196,7 @@ describe('web trackers: a server from before /api/tracker', () => {
       if (path.startsWith('/api/linear/auth/status')) {
         return Response.json({
           connected: true,
-          user: { id: 'u', name: 'ada', displayName: 'Ada', email: 'ada@example.com', avatarUrl: null },
+          user: { id: 'u', name: 'Ada', displayName: 'ada', email: 'ada@example.com', avatarUrl: null },
           organization: { id: 'org-1', name: 'OpenChamber', urlKey: 'oc' },
           workspaces: [{ id: 'org-1', name: 'OpenChamber', urlKey: 'oc', current: true, user: null, authorizedAt: 5 }],
         });
@@ -206,7 +209,7 @@ describe('web trackers: a server from before /api/tracker', () => {
           title: 'Broken login',
           url: 'https://linear.app/openchamber/issue/ENG-12',
           state: { id: 's-started', name: 'In Progress', type: 'started' },
-          assignee: { name: 'ada', displayName: 'Ada', avatarUrl: null },
+          assignee: { name: 'Ada', displayName: 'ada', avatarUrl: null },
           team: { id: 'team-eng', key: 'ENG', name: 'Engineering' },
           priority: 1,
           labels: [],

@@ -13,7 +13,7 @@
     # compiles, then exits on start with "Export named 'extension' not found
     # in module 'ws'" (its ws workaround, anomalyco/opencode#61518), so keep
     # nixpkgs on Bun 1.4.4 or newer.
-    opencode.url = "github:anomalyco/opencode/v2.3.2";
+    opencode.url = "github:anomalyco/opencode/v2.4.2";
   };
 
   outputs =
@@ -75,10 +75,10 @@
                     # so a nixpkgs update in flake.lock can change it.
                     hash =
                       {
-                        "v2.3.2" = {
-                          "x86_64-linux" = "sha256-TZJtdK3IULtOnbeYjrYZy9U47etQ63V7BplXGVstNPI=";
-                          "aarch64-linux" = "sha256-Wc12QabEi5HW9FUGgItsiJOOp0MddyjC/FlNnExyV5U=";
-                          "aarch64-darwin" = "sha256-5ZAz0jWNhW+7zGfqOLUFFFhMUMxo76djVwixfvcMPhY=";
+                        "v2.4.2" = {
+                          aarch64-darwin = "sha256-qCMc3mOY0V3HR6ZPs6r/zNc4Og0AGWL1Kv+m7PGer14=";
+                          aarch64-linux = "sha256-UvH63sMxYgOY9i2FXhSC64cIkRdcF87mrkeS62V7jds=";
+                          x86_64-linux = "sha256-RXrwbOwbYAHuofiv5pgvXCmXlbNhOCrvLmDOT8FjiNs=";
                         };
                       }.${opencodeTag}.${system}
                         or (builtins.fromJSON (builtins.readFile "${opencode}/nix/hashes.json")).nodeModules.${system};

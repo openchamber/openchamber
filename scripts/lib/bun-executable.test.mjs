@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import path from 'node:path';
 import test from 'node:test';
 
 import { resolveBunExecutable } from './bun-executable.mjs';
@@ -35,29 +34,20 @@ test('does not return an extensionless Windows npm shim', () => {
   }), executable);
 });
 
-test('derives bun.exe when Windows PATH exposes only the npm bun.cmd shim', () => {
-  const shim = 'C:\\Users\\dev\\AppData\\Roaming\\npm\\bun.cmd';
-  const executable = path.win32.resolve(
-    path.win32.dirname(shim),
-    'node_modules',
-    'bun',
-    'bin',
-    'bun.exe',
-  );
-  const env = { Path: 'C:\\Users\\dev\\AppData\\Roaming\\npm' };
-  const lookups = [];
-
-  assert.equal(resolveBunExecutable({
-    platform: 'win32',
-    env,
-    fileExists: (candidate) => candidate === executable,
-    findOnPath: (name, lookupEnv) => {
-      assert.equal(lookupEnv, env);
-      lookups.push(name);
-      return name === 'bun.cmd' ? shim : null;
-    },
-  }), executable);
-  assert.deepEqual(lookups, ['bun.exe', 'bun.cmd']);
+test('derives bun.exe when Windows PATH exposes only an npm bun.cmd shim', () => {
+  const shims = [
+    ['C:\\Users\\dev\\AppData\\Roaming\\npm\\bun.cmd', 'C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules\\bun\\bin\\bun.exe'],
+    ['C:\\Dev Projects\\node_modules\\.bin\\bun.cmd', 'C:\\Dev Projects\\node_modules\\bun\\bin\\bun.exe'],
+    ['C:\\Tools\\node_modules\\.bin\\bun.cmd', 'C:\\Tools\\node_modules\\.bin\\node_modules\\bun\\bin\\bun.exe'],
+  ];
+  for (const [shim, executable] of shims) {
+    assert.equal(resolveBunExecutable({
+      platform: 'win32',
+      env: {},
+      fileExists: (candidate) => candidate === executable,
+      findOnPath: (name) => name === 'bun.cmd' ? shim : null,
+    }), executable);
+  }
 });
 
 test('falls back to bun when no directly spawnable executable is available', () => {

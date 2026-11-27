@@ -11,6 +11,7 @@ import {
   removeProviderConfig,
   upsertProviderConfig,
 } from './opencodeConfig';
+import { removeProviderFromAllLayers } from './providerRemoval';
 import { validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
 import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 
@@ -607,6 +608,26 @@ describe('custom provider config persistence (VS Code parity)', () => {
       assert.equal(removeProviderConfig('dots3', projectDir, 'user'), true);
       assert.equal(getProviderSources('dots3', projectDir).user.exists, false);
       assert.deepEqual(readJson(jsonPath), { ...jsonConfig, disabled_providers: ['other'] });
+    } finally {
+      fs.rmSync(jsonPath, { force: true });
+      fs.rmSync(jsoncPath, { force: true });
+    }
+  });
+
+  test('removing a provider everywhere clears both global files and the project config', () => {
+    const jsonPath = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
+    const jsoncPath = path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc');
+    const entry = { name: 'Oops', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'https://oops.example.com/v1' }, models: { m: { name: 'M' } } };
+    writeJson(jsonPath, { providers: { oops: entry, keep: entry } });
+    writeJson(jsoncPath, { providers: { oops: entry } });
+    writeJson(path.join(projectDir, 'opencode.json'), { providers: { oops: entry } });
+
+    try {
+      assert.equal(removeProviderFromAllLayers('oops', projectDir), true);
+      const sources = getProviderSources('oops', projectDir);
+      assert.deepEqual([sources.user.exists, sources.project.exists, sources.custom.exists], [false, false, false]);
+      assert.deepEqual(readJson(jsonPath).providers, { keep: entry });
+      assert.equal(removeProviderFromAllLayers('oops', projectDir), false);
     } finally {
       fs.rmSync(jsonPath, { force: true });
       fs.rmSync(jsoncPath, { force: true });

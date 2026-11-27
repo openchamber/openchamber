@@ -47,7 +47,7 @@ import { useDraftFill } from './useDraftFill';
 import {
   SKILL_LOCATION_OPTIONS,
   locationPartsFrom,
-  locationValueFrom,
+  locationValueFrom, mcpSkillServer,
   type SkillLocationValue,
 } from './skillLocations';
 import { useI18n } from '@/lib/i18n';
@@ -598,7 +598,7 @@ const SkillsInstalledPage: React.FC = () => {
     <>
       <SettingsPageLayout
         title={isNewSkill ? t('settings.skills.page.title.newSkill') : selectedSkillName}
-        description={selectedSkill
+        description={mcpSkillServer(selectedSkill) ? t('settings.skills.page.subtitle.mcpSkill', { server: mcpSkillServer(selectedSkill) }) : selectedSkill
           ? t('settings.skills.page.subtitle.skillLocation', {
               location: locationLabelText(locationValueFrom(selectedSkill.scope, selectedSkill.source)),
             })
@@ -720,7 +720,7 @@ const SkillsInstalledPage: React.FC = () => {
                       content={skillMarkdown}
                       className="typography-markdown-body"
                       frontmatter="hide"
-                      enableFileReferences={false}
+                      enableFileReferences={false} hostsDiagramPreview
                     />
                   </div>
                 </ScrollableOverlay>

@@ -1,7 +1,11 @@
 
-import { WebSocket } from 'ws';
+import { WebSocket, type ClientOptions } from 'ws';
+import http from 'node:http';
+import https from 'node:https';
+import { isIPv4 } from 'node:net';
 import { createRequire } from 'node:module';
 import { webPackagePaths } from '../web-package-paths.js';
+import { resolveOutboundProxyEnv } from '../outbound-proxy.js';
 
 import { RELAY_PROTOCOL_VERSION, RelayCloseCode, createHostHandshake } from './e2ee.js';
 import { createOutboundFrameBatcher, decodeFrameBatch, decodeTunnelFrame, decodeDeliveryAck, encodeFrameBatch, TunnelFrameType } from './tunnel-codec.js';
@@ -88,7 +92,37 @@ const resolveBatchWindowMs = (option: number | undefined) => {
 
 export const describeRelayError = (cause: unknown) => redactSensitiveText(String(((hasErrorMessage(cause) ? cause.message : undefined) ?? cause) || ''));
 
-export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, onShareState, logger = console, createSocket = (url) => new WebSocket(url), batchWindowMs, batch, flowControl }: RelayHostOptions) => {
+const ipv4ToInt = (ip: string) => ip.split('.').reduce((total, part) => total * 256 + Number(part), 0);
+
+export const relayDialBypassesProxy = (url: string, noProxy: string) => {
+  const parsed = new URL(url);
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host === '::1' || (isIPv4(host) && host.startsWith('127.'))) return true;
+  const hostWithPort = `${host}:${parsed.port || (parsed.protocol === 'wss:' ? '443' : '80')}`;
+  return noProxy.split(',').some((raw) => {
+    const entry = raw.trim().toLowerCase();
+    if (entry === '*' || entry === host || entry === hostWithPort) return true;
+    if (entry.startsWith('.') && (host === entry.slice(1) || host.endsWith(entry))) return true;
+    if (entry.startsWith('*.') && host.endsWith(entry.slice(1))) return true;
+    if (!entry.includes('-') || !isIPv4(host)) return false;
+    const [start = '', end = ''] = entry.split('-').map((part) => part.trim());
+    return isIPv4(start) && isIPv4(end) && ipv4ToInt(host) >= ipv4ToInt(start) && ipv4ToInt(host) <= ipv4ToInt(end);
+  });
+};
+
+const defaultRelaySocket = (url: string) => {
+  const proxyEnv = resolveOutboundProxyEnv(process.env);
+  const secure = url.startsWith('wss:');
+  const proxyUrl = secure ? proxyEnv?.HTTPS_PROXY : proxyEnv?.HTTP_PROXY;
+  if (!proxyEnv || !proxyUrl || relayDialBypassesProxy(url, proxyEnv.NO_PROXY)) return new WebSocket(url);
+  if (process.versions.bun) {
+    const options: ClientOptions & { proxy: string } = { proxy: proxyUrl };
+    return new WebSocket(url, options);
+  }
+  return new WebSocket(url, { agent: secure ? https.globalAgent : http.globalAgent });
+};
+
+export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, onShareState, logger = console, createSocket = defaultRelaySocket, batchWindowMs, batch, flowControl }: RelayHostOptions) => {
   const { version }: { version?: unknown } = createRequire(import.meta.url)(webPackagePaths.packageJson);
   const platform = process.env.OPENCHAMBER_RUNTIME || 'web';
   const resolveLocalPort = getLocalPort ?? (() => localPort);

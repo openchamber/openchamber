@@ -47,8 +47,9 @@ the data dir, the `/api/session-todos/:sessionId` route and the
   newer.
 - A (re)connect of OpenCode's stream marks every list unchecked, since calls,
   reverts and config changes during the gap were missed, and announces
-  `sessionId: null, directory: null`, so clients ask again even when their own
-  connection to this server stayed up; the next ask walks back only to
+  `sessionId: null, directory: null`, so clients ask again for the lists they
+  show even when their own connection to this server stayed up, and mark the
+  rest to ask when shown; the next ask walks back only to
   `checkedThrough`. A revert boundary at or before `checkedThrough` makes that
   walk start over, since a missed revert may hide the stored call.
 - A revert (`session.revert.staged`, `cleared`, `committed`) drops

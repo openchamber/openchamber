@@ -1,39 +1,34 @@
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { composerModelForSpace, followSpaceModel, spaceModelRefusal } from './space-model-access';
+import { spaceModelRefusal } from './space-model-access';
+import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
 
-export type PendingSpaceSend = { spaceId: string; directory: string | null; sessionId: string | null; draftKey: string };
+export type SpaceSendModel = { providerId: string; modelId: string };
 
-type PendingSpaceSendStep = 'wait' | 'drop' | 'follow' | 'send';
+export type PendingSpaceSend = { spaceId: string; directory: string | null; draftKey: string; model: SpaceSendModel };
+
+type PendingSpaceSendStep = 'wait' | 'drop' | 'send';
 
 type Composer = { draftKey: string | null; providerId: string; modelId: string };
 
 const takesProvider = (pending: PendingSpaceSend, providerId: string): boolean =>
   pending.directory === null || spaceModelRefusal({ requestId: null, directory: pending.directory }, providerId) === null;
 
-const sessionModelOf = (pending: PendingSpaceSend): { providerId: string; modelId: string } | null => {
-  const model = pending.sessionId ? useGlobalSessionsStore.getState().activeSessions.find((session) => session.id === pending.sessionId)?.model : undefined;
-  const listed = model && useConfigStore.getState().providers.find((provider) => provider.id === model.providerID)?.models.some((entry) => entry.modelID === model.id);
-  return model && listed && takesProvider(pending, model.providerID) ? { providerId: model.providerID, modelId: model.id } : null;
-};
-
 export const pendingSpaceSendStep = (pending: PendingSpaceSend, composer: Composer): PendingSpaceSendStep => {
   const { journey, actions } = useSpacesStore.getState();
   if (composer.draftKey !== pending.draftKey || actions.get(pending.spaceId)?.kind === 'failed') return 'drop';
   if (journey?.get(pending.spaceId)?.state !== 'running' || actions.get(pending.spaceId)?.kind === 'running') return 'wait';
   if (!composer.providerId || !composer.modelId) return 'wait';
-  if (takesProvider(pending, composer.providerId) || composer.providerId !== useConfigStore.getState().currentProviderId) return 'send';
-  const replacement = sessionModelOf(pending) ?? (pending.directory ? composerModelForSpace(pending.directory) : null);
-  return replacement ? 'follow' : 'send';
+  if (takesProvider(pending, pending.model.providerId) && !takesProvider(pending, composer.providerId)) return 'wait';
+  return 'send';
 };
 
-export const followPendingSpaceModel = (pending: PendingSpaceSend): void => {
-  const sessionModel = sessionModelOf(pending);
-  if (sessionModel) {
-    useConfigStore.getState().setProvider(sessionModel.providerId);
-    useConfigStore.getState().setModel(sessionModel.modelId);
-  } else if (pending.directory) {
-    followSpaceModel(pending.directory);
-  }
+export const toSendModel = (model: { providerId?: string; modelId?: string } | null | undefined): SpaceSendModel | null => (
+  model?.providerId && model.modelId ? { providerId: model.providerId, modelId: model.modelId } : null
+);
+
+export const settleShownSpaceModel = (model: SpaceSendModel, spaceId: string): void => {
+  const config = useConfigStore.getState();
+  if (spaceIdOfDirectory(config.activeDirectoryKey) !== spaceId) return;
+  if (config.currentProviderId === model.providerId && config.currentModelId === model.modelId) config.setModel(model.modelId);
 };

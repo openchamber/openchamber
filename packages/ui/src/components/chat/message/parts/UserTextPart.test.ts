@@ -88,6 +88,14 @@ describe('prepareUserMarkdownContent', () => {
         expect(content).toContain('hello  \n[/skill-name]');
     });
 
+    test('links a skill an MCP server serves, named <server>:<skill>', () => {
+        const content = prepareUserMarkdownContent({ textContent: 'use $docs:pdf.', skillNames: new Set(['docs:pdf']) });
+
+        expect(content).toContain('[/docs:pdf](#openchamber-skill:docs%3Apdf)');
+        expect(prepareUserMarkdownContent({ textContent: 'ship $deploy:prod', skillNames: new Set(['deploy']) }))
+            .toBe('ship [/deploy](#openchamber-skill:deploy)⁠:prod');
+    });
+
     test('turns citations of the message attachments into attachment links', () => {
         const content = prepareUserMarkdownContent({
             textContent: 'Look at [OpenChamber_2026@2x.png] and [notes], see [docs](https://example.com)',

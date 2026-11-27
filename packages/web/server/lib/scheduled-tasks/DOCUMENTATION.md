@@ -34,6 +34,28 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 
 ## Decisions
 
+### Why a refresh keeps a run that is about to start
+
+A run starts up to two seconds after it is due, `computeNextRunAt` skips times
+less than five seconds away, and every read of the task list syncs the project
+and replaces its timers. A sync in that gap keeps the run that was armed and not
+claimed yet (`unstartedRunAt`); computing only the next future run moved a
+recurring task to its next time and dropped a one-time task for good.
+
+### Why a one-time task waits for an unreachable folder
+
+A one-time task has one occurrence, so a project whose disk does not answer
+(`../directory-reachability`) keeps it armed: `folder-wait.ts` stores the due
+time in `state.waitingForFolder`, shows the task as queued with the reason, and
+checks again every 15 seconds and after a restart. The occurrence is claimed only
+once the folder answers, through the same conditional state write as every run,
+so it runs once across restarts, two servers and a folder that comes and goes. A
+manual run takes the waiting occurrence. Moving, pausing, deleting or making the
+task recurring drops it, and the field is never taken from a client's save, so an
+old copy cannot bring it back. A folder that drops after the claim but before a
+session exists also returns to waiting. Any other failure uses the task up, and
+recurring tasks run at their next time.
+
 ### Why target discovery caches directory membership and not each session
 
 Many candidate sessions share directories. Resolving ownership once per directory

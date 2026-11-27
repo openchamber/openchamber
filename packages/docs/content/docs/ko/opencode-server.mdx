@@ -29,6 +29,8 @@ OpenChamber는 OpenCode의 `service.json`에서 실행 중인 서비스의 주�
 
 이 옵션을 끄면 공유 서비스를 중지하지 않은 채 OpenChamber의 자체 전용 OpenCode 서버로 되돌아갑니다.
 
+systemd 같은 서비스 관리자가 OpenCode를 실행한다면 이 옵션을 끈 채로 두고 대신 [이미 운영 중인 서버에 연결](#이미-운영-중인-서버에-연결하기)하세요. OpenChamber는 이런 방식으로 연결한 서버를 시작하거나 다시 시작하지 않습니다.
+
 `opencode update` 후에도 실행 중인 서비스는 다시 시작할 때까지 이전 버전을 유지합니다. OpenChamber는 연결할 때 실행 중인 서비스보다 새로운 OpenCode 릴리스가 설치되어 있으면 서비스를 다시 시작합니다(엔터프라이즈 모드 제외). OpenCode 업데이트 알림에서 **업데이트**를 선택하면 `opencode upgrade`가 실행되고, 이어서 **OpenCode 다시 로드**를 선택하면 새 버전으로 서비스가 다시 시작됩니다.
 
 ## 외부 로컬 서버에서 OpenChamber 도구 활성화하기
@@ -41,6 +43,8 @@ OpenChamber가 외부 로컬 서버(**공유 OpenCode 서비스 사용** 또는 
 전역 `opencode.json`이 읽기 전용이거나 조직에서 관리하는 경우, 같은 배너에서 **경로 복사**를 선택해 해당 폴더 경로를 관리되는 OpenCode 설정의 `plugins` 목록에 추가하세요.
 
 등록하면 OpenChamber가 실행 중일 때마다 OpenChamber의 도구, 한도 페일오버, 세션 제목이 자동으로 활성화되며, OpenChamber가 열려 있는 동안 겹치는 내장 OpenCode 도구(예: OpenCode의 내장 브라우저 및 자동화 도구)는 숨겨집니다. OpenChamber를 닫으면 플러그인이 꺼지고 OpenCode는 기본 내장 도구와 프롬프트로 돌아갑니다.
+
+OpenCode가 플러그인을 불러온 폴더의 세션은 이슈를 언제 연결할지, 페이지를 언제 그릴지, 시크릿을 언제 요청할지 같은 OpenChamber 도구 사용 지침도 받으며, 그곳에서는 [리드](/ko/leads/)도 작동합니다. 프로젝트 설정에서 폴더의 플러그인을 끄면 이 지침도 함께 꺼집니다.
 
 OpenChamber 도구는 같은 컴퓨터의 로컬 OpenCode 서버가 필요하며, 원격 서버에 연결된 경우에는 사용할 수 없습니다.
 

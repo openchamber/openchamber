@@ -14,7 +14,7 @@ import { leadWithMatch, splitSnippet, type MessageSearchRole } from '@/lib/messa
 import { useI18n } from '@/lib/i18n';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -66,7 +66,8 @@ export function SidebarConversationRow({ result, context, mobile = false, search
   result: ConversationResult; context: ConversationResultContext; mobile?: boolean; search?: SidebarSearchPresentation; onOpened?: () => void;
 }): React.ReactNode {
   const [expandedKey, setExpandedKey] = React.useState<string | null>(null);
-  const selected = useSessionUIStore((state) => state.currentSessionId === result.sessionId);
+  const isCurrent = useSessionUIStore((state) => state.currentSessionId === result.sessionId);
+  const selected = useUIStore((state) => isCurrent && !isChatCoveredByPage(state));
   const reasoningEnabled = useUIStore((state) => state.messageSearchReasoningEnabled && state.showReasoningTraces);
   const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
   const runtimeKey = React.useSyncExternalStore(subscribeRuntime, getRuntimeKey, getRuntimeKey);

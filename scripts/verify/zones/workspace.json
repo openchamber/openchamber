@@ -185,7 +185,7 @@
           "kind": "path",
           "title": "The palette command hides and shows the Thinking blocks",
           "steps": [
-            {"do": "settings", "values": {"showReasoningTraces": true}},
+            {"do": "settings", "values": {"showReasoningTraces": true, "activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Palette reasoning"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},

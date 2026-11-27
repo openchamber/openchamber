@@ -14,9 +14,9 @@ import type { FormRequest } from '@/lib/opencode/model';
 import type { RecoveredQuestion } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
-import { useScopedBlockingForms, useRecoveredQuestions, useSessions } from '@/sync/sync-context';
+import { useScopedBlockingForms, useRecoveredQuestions } from '@/sync/sync-context';
 import { revealWaitingPage, useRequestReveal } from '@/sync/request-reveal';
-import { useChatSessionSelection } from './chatColumnSession';
+import { useIsRequestFromSubagent } from './requestSource';
 import * as sessionActions from '@/sync/session-actions';
 import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
@@ -152,7 +152,6 @@ const FormDockPanel: React.FC<{
 }> = ({ form, forms, directory, runtimeKey, readingHistory, recovered }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
-    const sessions = useSessions(useChatSessionSelection().directory ?? undefined);
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
 
     const fields = form.fields;
@@ -205,10 +204,7 @@ const FormDockPanel: React.FC<{
         saveFormDraft(draftScope, { fieldsSignature, values, step });
     }, [draftScope, fieldsSignature, step, values]);
 
-    const isFromSubagent = React.useMemo(() => {
-        const source = sessions.find((session) => session.id === form.sessionID);
-        return Boolean(source?.parentID);
-    }, [form.sessionID, sessions]);
+    const isFromSubagent = useIsRequestFromSubagent(form.sessionID);
 
     const shown = React.useMemo(() => visibleFields(fields, values), [fields, values]);
     const missing = React.useMemo(() => missingRequiredKeys(fields, values), [fields, values]);

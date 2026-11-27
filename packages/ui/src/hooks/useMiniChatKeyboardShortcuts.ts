@@ -1,18 +1,19 @@
 import React from 'react';
+import { stopCurrentOperation } from '@/sync/prompt-take-back';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop } from '@/lib/desktop';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { ShortcutDispatcher, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
+import { activeSpaceTarget, providersOfSpaceOffer, spaceModelOffer } from '@/lib/spaces/space-model-offer';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useKeybinds } from './useKeybind';
-import { hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget } from './keyboard-shortcut-dom';
+import { hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, typesOutsidePrefixField } from './keyboard-shortcut-dom';
 import { useComposerAbortEscape } from './useComposerAbortEscape';
 import { useCurrentSessionActivity } from './useSessionActivity';
-import * as sessionActions from '@/sync/session-actions';
 import { dispatchPromptHistorySearch } from '@/components/chat/composer/state/promptHistorySearchRoute';
 
 export const useMiniChatKeyboardShortcuts = () => {
@@ -23,7 +24,7 @@ export const useMiniChatKeyboardShortcuts = () => {
   const { handleKeyDown: handleAbortEscapeKeyDown } = useComposerAbortEscape({
     isBlocked: () => hasOpenDropdown() || Boolean(document.querySelector('[role="dialog"], [role="alertdialog"]')),
     resolveTarget: () => ({ sessionId: currentSessionId, working: sessionPhase !== 'idle' }),
-    abort: (sessionId) => { void sessionActions.abortCurrentOperation(sessionId); },
+    abort: (sessionId) => { void stopCurrentOperation(sessionId); },
   });
 
   if (!dispatcherRef.current) {
@@ -49,7 +50,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     } = useConfigStore.getState();
     const next = getNextFavoriteModel(
       favoriteModels,
-      providers,
+      providersOfSpaceOffer(spaceModelOffer(activeSpaceTarget()), providers),
       hiddenModels,
       { providerID: currentProviderId, modelID: currentModelId },
       delta,
@@ -103,13 +104,12 @@ export const useMiniChatKeyboardShortcuts = () => {
   });
 
   React.useEffect(() => {
+    const handlePrefixPress = (event: PointerEvent) => {
+      if (isEditableEventTarget(event.target)) dispatcher.clear();
+    };
     const handleActivePrefixKeyDownCapture = (event: KeyboardEvent) => {
       if (!dispatcher.hasActivePrefix()) return;
-      if (
-        !event.ctrlKey && !event.metaKey && !event.altKey
-        && isEditableEventTarget(event.target)
-        && dispatcher.getActivePrefixTarget() !== event.target
-      ) {
+      if (typesOutsidePrefixField(event, dispatcher.getActivePrefixTarget())) {
         dispatcher.clear();
         return;
       }
@@ -125,11 +125,13 @@ export const useMiniChatKeyboardShortcuts = () => {
     const handleBlur = () => dispatcher.handleBlur();
 
     window.addEventListener('keydown', handleActivePrefixKeyDownCapture, true);
+    window.addEventListener('pointerdown', handlePrefixPress, true);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keydown', handleAbortEscapeKeyDown);
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleActivePrefixKeyDownCapture, true);
+      window.removeEventListener('pointerdown', handlePrefixPress, true);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keydown', handleAbortEscapeKeyDown);
       window.removeEventListener('blur', handleBlur);

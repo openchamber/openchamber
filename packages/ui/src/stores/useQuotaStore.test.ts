@@ -7,6 +7,7 @@ const fetched: string[] = []
 
 type StubPayload = { usageDropdownProviders: string[] } | { extensions: never[] } | ProviderResult
 let quotaRequestsFail = false
+let savedDropdown = ["claude"]
 let quotaFails = false;
 // What `/api/quota/providers` names; null answers 500, as a restarting OpenCode does.
 let configuredProviders: string[] | null = []
@@ -30,7 +31,7 @@ mock.module("@/lib/runtime-fetch", () => ({
   runtimeFetch: async (path: string) => {
     fetched.push(path)
     if (quotaRequestsFail) throw new Error("network down")
-    if (path.startsWith("/api/config/settings")) return json({ usageDropdownProviders: ["claude"] })
+    if (path.startsWith("/api/config/settings")) return json({ usageDropdownProviders: savedDropdown })
     // The extensions' usage providers, read beside the settings; none installed here.
     if (path === "/api/quota/extensions") return json({ extensions: [] })
     if (path === "/api/quota/providers" && listGate) await listGate
@@ -50,6 +51,7 @@ mock.module("@/stores/useConfigStore", () => ({
 }))
 
 const { useQuotaStore } = await import("./useQuotaStore")
+const { invalidateSettingsCache } = await import("@/lib/persistence")
 
 describe("Usage quotas are loaded once per ready instance", () => {
   beforeEach(() => {
@@ -58,7 +60,20 @@ describe("Usage quotas are loaded once per ready instance", () => {
     fetched.length = 0
     quotaRequestsFail = false
     configuredProviders = ["claude"]
+    savedDropdown = ["claude"]
+    invalidateSettingsCache()
     useQuotaStore.getState().resetForRuntimeSwitch()
+  })
+
+  test("a saved selection of only removed providers loads as empty without a quota request", async () => {
+    savedDropdown = ["google", "antigravity"]
+    await useQuotaStore.getState().ensureLoadedForRuntime({ refresh: true })
+
+    const state = useQuotaStore.getState()
+    expect(state.dropdownProviderIds).toEqual([])
+    expect(state.loadedRuntimeKey).toBe(runtimeKey)
+    expect(state.lastUpdated).not.toBeNull()
+    expect(fetched.filter((path) => path.startsWith("/api/quota/") && path !== "/api/quota/extensions")).toEqual([])
   })
 
   test("nothing is fetched while the instance has not reported itself initialised", async () => {

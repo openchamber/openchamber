@@ -6,7 +6,7 @@ import {
   isSshRemoteUrl,
   proposeIdentityForHost,
   instanceSshHostsFrom,
-  remoteTraits,
+  remoteTraits, repositoryRemoteTraits,
   type RemoteTraits,
   selectableIdentities,
   identityAccountConnected,
@@ -460,7 +460,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const identityRemote = React.useMemo((): RemoteTraits | null => {
     if (isCloneMode) return cloneRemoteUrl.trim() ? remoteTraits(cloneRemoteUrl) : null;
     if (!existingPrimaryRemote) return null;
-    const fetchTraits = remoteTraits(existingPrimaryRemote.fetch.displayUrl);
+    const fetchTraits = repositoryRemoteTraits(existingPrimaryRemote);
     return { ...fetchTraits, https: existingPrimaryRemote.https, ssh: existingPrimaryRemote.ssh };
   }, [isCloneMode, cloneRemoteUrl, existingPrimaryRemote]);
   const identityHost = identityRemote?.host ?? null;

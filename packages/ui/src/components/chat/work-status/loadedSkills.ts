@@ -44,7 +44,7 @@ export const selectLoadedSkills = (messages: readonly Message[], parts: Record<s
   return [...loaded.values()];
 };
 
-const isFilePath = (path: string | undefined): path is string => (
+export const isSkillFilePath = (path: string | undefined): path is string => (
   path !== undefined && path.length > 0 && path !== '<built-in>' && !path.includes('://')
 );
 
@@ -54,9 +54,9 @@ export const resolveLoadedSkillTarget = (
 ): { kind: 'file'; path: string } | { kind: 'settings'; name: string } => {
   const match = installed.find((entry) => entry.id === skill.id) ?? installed.find((entry) => entry.name === skill.name);
   if (match) {
-    return isFilePath(match.path) ? { kind: 'file', path: match.path } : { kind: 'settings', name: match.name };
+    return isSkillFilePath(match.path) ? { kind: 'file', path: match.path } : { kind: 'settings', name: match.name };
   }
-  if (isFilePath(skill.directory)) return { kind: 'file', path: `${skill.directory.replace(/[\\/]+$/, '')}/SKILL.md` };
+  if (isSkillFilePath(skill.directory)) return { kind: 'file', path: `${skill.directory.replace(/[\\/]+$/, '')}/SKILL.md` };
   return { kind: 'settings', name: skill.name };
 };
 

@@ -104,7 +104,8 @@ describe('panel window ui-store persistence', () => {
     expect(record.placement.git).toBe('left');
     expect(record.placement.file).toBe('bottom');
     expect(record.placement.diff).toBe('right');
-    expect(record.panels['owner-0001']?.byDirectory['/panel']?.tabs.map((tab) => tab.id)).toEqual(['git:b']);
+    // The Git surface keeps one tab per directory, whatever id it was stored under.
+    expect(record.panels['owner-0001']?.byDirectory['/panel']?.tabs.map((tab) => tab.id)).toEqual(['git']);
   });
 
   test('a tab change in one panel window keeps the layout another one saved', () => {

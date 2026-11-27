@@ -1,6 +1,7 @@
 
 import { z } from "zod"
 
+import { unwrapBackgroundResult } from "./background-result"
 import type { Message, Metadata, Part, Session, SyntheticMessage, ToolPart } from "./model"
 import { isSubagentTool, subagentDescription, subagentSessionId } from "./tools"
 
@@ -13,7 +14,10 @@ export type SubagentRun = {
   description?: string
   output: string
   reportedAt: number
+  called?: boolean
 }
+
+const calledReports = new WeakSet<Message>()
 
 const runMetadataSchema = z.object({
   source: z.literal("subagent"),
@@ -22,21 +26,20 @@ const runMetadataSchema = z.object({
   state: z.enum(["running", "completed", "error", "cancelled"]),
 })
 
-const ENVELOPE = /^\s*<subagent\b[^>]*>\n?([\s\S]*?)\n?<\/subagent>\s*$/
-
 export function readSubagentRun(message: Message): SubagentRun | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = runMetadataSchema.safeParse(message.metadata ?? {})
   if (!parsed.success) return undefined
-  const envelope = message.text.match(ENVELOPE)
-  return {
+  const run: SubagentRun = {
     childSessionID: parsed.data.childID,
     agent: parsed.data.agent,
     state: parsed.data.state,
     description: message.description,
-    output: envelope ? envelope[1] : message.text,
+    output: unwrapBackgroundResult(message.text, "subagent") ?? message.text,
     reportedAt: message.time.created,
   }
+  if (calledReports.has(message)) run.called = true
+  return run
 }
 
 const RUNNING_ID_PREFIX = "subagent-run:"
@@ -80,13 +83,12 @@ export function readForegroundSubagentRun(part: ToolPart): SubagentRun | undefin
   const parsed = foregroundCallMetadataSchema.safeParse(part.state.metadata ?? {})
   if (!parsed.success) return undefined
   const text = part.state.status === "completed" ? part.state.output : part.state.output || part.state.error
-  const envelope = text.match(ENVELOPE)
   const state = part.state.status === "error" ? "error" : parsed.data.status ?? "completed"
   return {
     childSessionID: parsed.data.sessionID,
     state,
     description: subagentDescription(part.state.input),
-    output: envelope ? envelope[1] : text,
+    output: unwrapBackgroundResult(text, "subagent") ?? text,
     reportedAt: part.state.time.end,
   }
 }
@@ -135,6 +137,10 @@ export function findSubagentCancellation(messages: readonly Message[], childSess
   return false
 }
 
+const endsAnswer = (message: Message): boolean => (
+  message.role === "assistant" && message.finish !== undefined && message.finish !== "tool-calls"
+)
+
 export function keepCommandSubagentReports<T extends { info: Message; parts: Part[] }>(
   records: T[],
   childStartedAt: (childSessionID: string) => number | undefined,
@@ -150,10 +156,15 @@ export function keepCommandSubagentReports<T extends { info: Message; parts: Par
     }
   }
   const loadedSince = records[0]?.info.time.created ?? 0
+  let answered = false
   const kept = records.filter((record) => {
+    if (record.info.role === "assistant" || record.info.role === "user") answered = endsAnswer(record.info)
     const run = readSubagentRun(record.info)
     if (!run) return true
-    if (called.has(run.childSessionID)) return false
+    if (called.has(run.childSessionID)) {
+      if (answered) calledReports.add(record.info)
+      return answered
+    }
     const startedAt = childStartedAt(run.childSessionID)
     return startedAt !== undefined && startedAt >= loadedSince
   })

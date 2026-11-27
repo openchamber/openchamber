@@ -29,6 +29,8 @@ OpenChamber liest Adresse und Passwort des laufenden Dienstes aus der `service.j
 
 Schaltest du die Option aus, wechselt OpenChamber zurück zu seinem eigenen privaten OpenCode-Server, ohne den gemeinsamen Dienst zu stoppen.
 
+Wenn ein Dienstmanager wie systemd OpenCode ausführt, lass diese Option aus und [verbinde dich stattdessen mit dem Server, den du bereits betreibst](#mit-einem-server-verbinden-den-du-bereits-betreibst). OpenChamber startet einen Server, mit dem es sich auf diese Weise verbindet, nie selbst und startet ihn auch nie neu.
+
 Nach `opencode update` läuft der Dienst bis zu seinem Neustart mit der alten Version weiter. Findet OpenChamber beim Verbinden ein installiertes OpenCode-Release, das neuer ist als der laufende Dienst, startet es den Dienst neu, außer im Unternehmensmodus. Wähle in der OpenCode-Update-Benachrichtigung **Aktualisieren**, um `opencode upgrade` auszuführen, und danach **OpenCode neu laden**, um den Dienst mit der neuen Version neu zu starten.
 
 ## OpenChamber-Werkzeuge auf einem externen lokalen Server aktivieren
@@ -41,6 +43,8 @@ Wenn sich OpenChamber mit einem lokalen externen Server verbindet (über **Gemei
 Ist deine globale `opencode.json` schreibgeschützt oder wird von deiner Organisation verwaltet, wähle im selben Banner **Pfad kopieren** und füge diesen Ordnerpfad der Liste `plugins` in deiner verwalteten OpenCode-Konfiguration hinzu.
 
 Nach der Registrierung werden die OpenChamber-Werkzeuge, das Limit-Failover und die Sitzungstitel automatisch aktiv, sobald OpenChamber läuft, und blenden sich überschneidende eingebaute OpenCode-Werkzeuge (wie den eingebauten Browser und die Automatisierungswerkzeuge von OpenCode) aus, solange OpenChamber geöffnet ist. Wenn OpenChamber geschlossen wird, schaltet sich das Plugin ab, und OpenCode kehrt zu seinen standardmäßigen eingebauten Werkzeugen und Prompts zurück.
+
+Sitzungen in einem Ordner, in dem OpenCode das Plugin geladen hat, bekommen außerdem die Anweisungen von OpenChamber für seine Werkzeuge, etwa wann ein Issue verknüpft, eine Seite gezeichnet oder nach einem Secret gefragt wird, und [Leads](/de/leads/) funktionieren dort. Eine Projektkonfiguration, die das Plugin für einen Ordner abschaltet, schaltet auch diese Anweisungen ab.
 
 OpenChamber-Werkzeuge erfordern einen lokalen OpenCode-Server auf demselben Rechner und sind bei Verbindung mit einem entfernten Server nicht verfügbar.
 

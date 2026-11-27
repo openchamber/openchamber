@@ -54,7 +54,7 @@ type SelectionState = {
   followSessionAgent: (sessionId: string, agent: string) => boolean
   isSessionModelSwitched: (sessionId: string, model: string) => boolean
   markSessionModelFollowed: (sessionId: string, model: string) => void
-  captureSessionSelectionSentSettlement: (sessionId: string, providerId: string, modelId: string, agent?: string, variant?: string | null) => () => void
+  captureSessionSelectionSentSettlement: (sessionId: string, providerId: string, modelId: string, agent?: string, variant?: string | null, keep?: { model: boolean; agent: boolean }) => () => void
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
   clearSessionSelections: (sessionId: string) => void
@@ -184,14 +184,14 @@ export const useSelectionStore = create<SelectionState>()(
         return { sessionFollowedModels: followed, sessionFollowedModelRevisions: revisions }
       }),
 
-      captureSessionSelectionSentSettlement: (sessionId, providerId, modelId, agent, variant) => {
+      captureSessionSelectionSentSettlement: (sessionId, providerId, modelId, agent, variant, keep) => {
         const modelRevision = get().sessionFollowedModelRevisions.get(sessionId)
         const agentRevision = get().sessionFollowedAgentRevisions.get(sessionId)
         return () => {
-          if (!isAutoModel(providerId, modelId) && get().sessionFollowedModelRevisions.get(sessionId) === modelRevision) {
+          if (!keep?.model && !isAutoModel(providerId, modelId) && get().sessionFollowedModelRevisions.get(sessionId) === modelRevision) {
             get().markSessionModelFollowed(sessionId, `${providerId}/${modelId}#${variant ?? ''}`)
           }
-          if (agent && get().sessionFollowedAgentRevisions.get(sessionId) === agentRevision) {
+          if (agent && !keep?.agent && get().sessionFollowedAgentRevisions.get(sessionId) === agentRevision) {
             get().followSessionAgent(sessionId, agent)
           }
         }

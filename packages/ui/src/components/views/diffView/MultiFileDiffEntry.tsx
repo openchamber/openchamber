@@ -18,14 +18,16 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from '@/components/icon/Icon';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { ReviewFileMark } from '@/components/review/ReviewFileMark';
+import { FileReviewedButton } from '../FileReviewedButton';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { extractHunkPatch, haveMatchingPatchVersions, getPatchHunkAnchors } from '@/lib/diff/patchFileDiff';
 import { type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment, WholeFileCommentButton } from '@/components/comments';
 import type { FileEntry, DiffContextMode, DiffData, DiffLoadFailure, ComparisonDiffResult, DiffFindReveal } from './types';
-import { toAbsolutePath, createTextDiffDataFromPatch, formatDiffTotals } from './diffData';
+import { toAbsolutePath, createTextDiffDataFromPatch, comparisonResultDiffData, formatDiffTotals } from './diffData';
 import { InlineDiffViewer } from './InlineDiffViewer';
 import { NestedRepositoryChanges } from './NestedRepositoryChanges';
 import { LARGE_DIFF_CHANGED_LINES, FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
@@ -35,9 +37,11 @@ const FILE_ACTIONS_MASK = '[mask-image:linear-gradient(to_left,transparent_calc(
 const FILE_ACTIONS_MASK_CLASS = `${FILE_ACTIONS_MASK} [@media(hover:none)]:![mask-image:none]`;
 const FILE_ACTIONS_MASK_ON_REVEAL_CLASS = [
     'group-hover/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'group-focus-within/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'group-has-[:focus-visible]/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
     'rtl:group-hover/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'rtl:group-focus-within/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'rtl:group-has-[:focus-visible]/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'group-focus-visible/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'rtl:group-focus-visible/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
     '[@media(hover:none)]:![mask-image:none]',
 ].join(' ');
 interface MultiFileDiffEntryProps {
@@ -52,6 +56,8 @@ interface MultiFileDiffEntryProps {
     isMounted: boolean;
     onSelect: (path: string) => void;
     onExpandedChange: (path: string, expanded: boolean) => void;
+    retentionRef?: React.Ref<boolean>;
+    headerRef?: React.Ref<HTMLDivElement>;
     registerSectionRef: (path: string, node: HTMLDivElement | null) => void;
     showOpenInEditorAction?: boolean;
     isOpeningInEditor?: boolean;
@@ -63,6 +69,7 @@ interface MultiFileDiffEntryProps {
     commentOrigin?: DiffCommentOrigin;
     onRetryComparisonDiff?: () => void;
     loadFullComparisonDiff?: (filePath: string) => Promise<ComparisonDiffResult>;
+    fullContext?: boolean;
     readOnlyActions?: boolean;
     hunkActionsEnabled?: boolean;
     contentRevision?: number;
@@ -70,6 +77,11 @@ interface MultiFileDiffEntryProps {
     onFindWordRequest?: (path: string, request: DiffFindWordRequest) => void;
     onFullContextChange?: (path: string, full: boolean) => void;
     findReveal?: DiffFindReveal | null;
+    leadingAction?: React.ReactNode;
+    extraFileActions?: React.ReactNode;
+    hideExpandChevron?: boolean;
+    isReviewed?: boolean;
+    onToggleReviewed?: (path: string, diffData: DiffData | null) => void;
 }
 
 export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
@@ -84,6 +96,8 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     isMounted,
     onSelect,
     onExpandedChange,
+    retentionRef,
+    headerRef,
     registerSectionRef,
     showOpenInEditorAction = false,
     isOpeningInEditor = false,
@@ -95,6 +109,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     commentOrigin,
     onRetryComparisonDiff,
     loadFullComparisonDiff,
+    fullContext = false,
     readOnlyActions = false,
     hunkActionsEnabled = false,
     contentRevision = 0,
@@ -102,10 +117,15 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     onFindWordRequest,
     onFullContextChange,
     findReveal = null,
+    leadingAction,
+    extraFileActions,
+    hideExpandChevron = false,
+    isReviewed = false,
+    onToggleReviewed,
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
-    const wholeFileComment = useWholeFileComment({ fileLabel: file.path, origin: rangeComparisonDiff ? commentOrigin : undefined });
+    const wholeFileComment = useWholeFileComment({ fileLabel: file.path, origin: commentOrigin });
     const cachedDiff = useGitStore(
         React.useCallback((state) => {
             return state.directories.get(directory)?.diffCache.get(file.path) ?? null;
@@ -130,21 +150,37 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const [hunkAction, setHunkAction] = React.useState<HunkBusyState>(null);
     const mutationInFlight = React.useRef(false);
     const [canonicalPatch, setCanonicalPatch] = React.useState<{ scope: string; patch: string; submodule: GitSubmoduleState | null } | null>(null);
-    const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
+    const rangeComparisonDiffRef = React.useRef(rangeComparisonDiff);
+    rangeComparisonDiffRef.current = rangeComparisonDiff;
+    const [forcedLarge, setForcedLarge] = React.useState<{ source: ComparisonDiffResult | undefined } | null>(null);
+    if (forcedLarge?.source?.status === 'loading' && rangeComparisonDiff && rangeComparisonDiff.status !== 'loading') {
+        setForcedLarge({ source: rangeComparisonDiff });
+    }
+    const forceRenderLarge = forcedLarge !== null && forcedLarge.source === rangeComparisonDiff;
+    const [approvedFull, setApprovedFull] = React.useState<ComparisonDiffResult | null>(null);
+    const fullAwaitsApproval = comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status === 'large' && approvedFull !== comparisonDiff;
+    const renderLarge = comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status === 'large' ? !fullAwaitsApproval : forceRenderLarge;
+    const [hasUnsavedComment, setHasUnsavedComment] = React.useState(false);
     const [localDiffData, setLocalDiffData] = React.useState<DiffData | null>(null);
     const [stagedDiffData, setStagedDiffData] = React.useState<DiffData | null>(null);
     const [contextExpansion, setContextExpansion] = React.useState<ContextExpansionRequest | null>(null);
-    const loadFullFiles = loadAllFullFiles || contextExpansion !== null;
+    const loadFullFiles = loadAllFullFiles || contextExpansion !== null || fullContext;
+    const showsFullComparison = comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status !== 'loading' && !fullAwaitsApproval;
+    const findReadsFullContext = loadAllFullFiles || (rangeComparisonDiff
+        ? showsFullComparison && (contextExpansion !== null || fullContext)
+        : contextExpansion !== null || fullContext);
     React.useEffect(() => {
-        if (!loadFullFiles || !onFullContextChange) return;
+        if (!findReadsFullContext || !onFullContextChange) return;
         onFullContextChange(file.path, true);
         return () => onFullContextChange(file.path, false);
-    }, [file.path, loadFullFiles, onFullContextChange]);
+    }, [file.path, findReadsFullContext, onFullContextChange]);
     React.useEffect(() => {
-        if (findReveal?.key === file.path) setForceRenderLarge(true);
+        if (findReveal?.key === file.path) setForcedLarge({ source: rangeComparisonDiffRef.current });
     }, [file.path, findReveal]);
+    const loadsFullComparison = contextExpansion !== null || fullContext;
     React.useEffect(() => {
-        if (!contextExpansion || !loadFullComparisonDiff || !rangeComparisonDiff || rangeComparisonDiff.status !== 'ready') return;
+        if (!loadsFullComparison || !loadFullComparisonDiff || !rangeComparisonDiff) return;
+        if (rangeComparisonDiff.status !== 'ready' && !(rangeComparisonDiff.status === 'large' && forceRenderLarge)) return;
         if (fullComparisonDiff?.source === rangeComparisonDiff) return;
         let cancelled = false;
         void loadFullComparisonDiff(file.path).then((result) => {
@@ -159,7 +195,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         return () => {
             cancelled = true;
         };
-    }, [contextExpansion, file.path, fullComparisonDiff, loadFullComparisonDiff, rangeComparisonDiff]);
+    }, [contextExpansion, file.path, forceRenderLarge, fullContext, fullComparisonDiff, loadFullComparisonDiff, loadsFullComparison, rangeComparisonDiff]);
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -172,14 +208,20 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const actionPatch = canonicalPatch?.scope === patchScope ? canonicalPatch.patch : null;
     const actionSubmodule = canonicalPatch?.scope === patchScope ? canonicalPatch.submodule : null;
 
+    const largePatch = comparisonDiff?.status === 'large' ? comparisonDiff : null;
     const diffData = React.useMemo<DiffData | null>(() => {
-        if (comparisonDiff) return comparisonDiff.status === 'ready' ? comparisonDiff.data : null;
+        if (comparisonDiff) {
+            if (comparisonDiff.status === 'large' && !renderLarge) return null;
+            return comparisonResultDiffData(file.path, comparisonDiff);
+        }
         if (initialDiffData) return initialDiffData;
         if (staged) return stagedDiffData;
         if (localDiffData) return localDiffData;
         if (!cachedDiff) return null;
         return { original: cachedDiff.original, modified: cachedDiff.modified, isBinary: cachedDiff.isBinary, submodule: cachedDiff.submodule, contextMode: 'full' };
-    }, [comparisonDiff, cachedDiff, initialDiffData, localDiffData, staged, stagedDiffData]);
+    }, [comparisonDiff, cachedDiff, file.path, initialDiffData, localDiffData, renderLarge, staged, stagedDiffData]);
+    const changedLineCount = largePatch ? largePatch.changedLines : file.insertions + file.deletions;
+    const isLargeDiff = largePatch !== null || changedLineCount > LARGE_DIFF_CHANGED_LINES;
 
     const diffDataMatchesContextMode = diffData?.contextMode === desiredContextMode;
     const renameOnlyDiff = Boolean(
@@ -397,6 +439,12 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
     const actionsPinned = wholeFileComment.isOpen || isOpeningInEditor;
+    const { hasTouchOnlyPointer } = useDeviceInfo();
+    const [actionsArmed, setActionsArmed] = React.useState(false);
+    const armActions = React.useCallback(() => setActionsArmed(true), []);
+    const contextExpanding = contextExpansion !== null && diffData?.contextMode !== 'full';
+    const keepMounted = actionsPinned || Boolean(wholeFileComment.cards) || hasUnsavedComment || contextExpanding || hunkAction !== null;
+    React.useImperativeHandle(retentionRef, () => keepMounted, [keepMounted]);
     const [fileActionsElement, setFileActionsElement] = React.useState<HTMLSpanElement | null>(null);
     React.useLayoutEffect(() => {
         if (!fileActionsElement) return;
@@ -433,16 +481,32 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     setDiffFileLayout(file.path, nextLayout);
                 }}
             />
+            {onToggleReviewed ? (
+                <FileReviewedButton
+                    reviewed={isReviewed}
+                    onToggle={() => onToggleReviewed(file.path, diffData)}
+                    compact
+                />
+            ) : null}
+            {extraFileActions}
         </>
     );
 
     return (
         <div ref={setSectionRef} className="scroll-mt-9">
-            <div className="sticky top-0 z-30 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
+            <div className={cn(
+                isExpanded
+                    ? 'sticky top-0 z-30 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80'
+                    : 'relative',
+            )}>
                 <div
+                    ref={headerRef}
                     role="button"
                     tabIndex={0}
+                    aria-expanded={isExpanded}
                     onClick={handleToggle}
+                    onPointerEnter={armActions}
+                    onFocus={armActions}
                     onKeyDown={(event) => {
                         if (event.target !== event.currentTarget) return;
                         if (event.key === 'Enter' || event.key === ' ') {
@@ -452,7 +516,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     }}
                     className={cn(
                         'cursor-pointer',
-                        'group/header relative isolate flex min-h-9 w-full min-w-0 items-center overflow-hidden px-3 py-2',
+                        'group/header relative isolate flex min-h-8 w-full min-w-0 items-center overflow-hidden px-3 py-1.5',
                         'bg-transparent',
                         'text-muted-foreground hover:text-foreground',
                         isSelected ? 'bg-[var(--interactive-selection)]/35' : null
@@ -464,13 +528,16 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         actionsPinned ? FILE_ACTIONS_MASK_CLASS : FILE_ACTIONS_MASK_ON_REVEAL_CLASS,
                     )}>
                     <div className="relative flex min-w-0 flex-1 items-center gap-2">
-                        <span className="flex size-5 items-center justify-center opacity-70 group-hover/header:opacity-100">
-                            {isExpanded ? (
-                                <Icon name="arrow-down-s" className="size-4" />
-                            ) : (
-                                <Icon name="arrow-right-s" className="size-4" />
-                            )}
-                        </span>
+                        {leadingAction}
+                        {!hideExpandChevron && (
+                            <span className="flex size-5 items-center justify-center opacity-70 group-hover/header:opacity-100">
+                                {isExpanded ? (
+                                    <Icon name="arrow-down-s" className="size-4" />
+                                ) : (
+                                    <Icon name="arrow-right-s" className="size-4" />
+                                )}
+                            </span>
+                        )}
                         <span
                             className="typography-micro font-semibold leading-none w-4 text-center uppercase"
                             style={{ color: descriptor.color }}
@@ -493,9 +560,17 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         </span>
                     </div>
                     <div className="flex shrink-0 items-center justify-self-end gap-2">
+                        {isReviewed && onToggleReviewed ? (
+                            <FileReviewedButton
+                                reviewed
+                                onToggle={() => onToggleReviewed(file.path, diffData)}
+                                compact
+                                className="size-5"
+                            />
+                        ) : null}
                         <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
-                        <span className="hidden items-center gap-2 [@media(hover:none)]:flex">{fileActions}</span>
+                        {hasTouchOnlyPointer ? <span className="hidden items-center gap-2 [@media(hover:none)]:flex">{fileActions}</span> : null}
                     </div>
                     </div>
                     <span
@@ -504,10 +579,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             'absolute inset-y-0 end-0 z-10 flex items-center gap-2 pe-3 transition-opacity [@media(hover:none)]:hidden',
                             actionsPinned
                                 ? 'opacity-100'
-                                : 'pointer-events-none opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100',
+                                : 'pointer-events-none opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-has-[:focus-visible]/header:pointer-events-auto group-has-[:focus-visible]/header:opacity-100 group-focus-visible/header:pointer-events-auto group-focus-visible/header:opacity-100',
                         )}
                     >
-                        {fileActions}
+                        {actionsArmed || actionsPinned ? fileActions : null}
                     </span>
                 </div>
                 {wholeFileComment.editor}
@@ -577,10 +652,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             {t('diffView.state.loadingDiff')}
                         </div>
                     ) : null}
-                    {isMounted && diffData && !forceRenderLarge && (file.insertions + file.deletions) > LARGE_DIFF_CHANGED_LINES ? (
+                    {isMounted && (diffData || largePatch) && !renderLarge && isLargeDiff ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
-                                {t('diffView.state.largeDiff', { count: file.insertions + file.deletions })}
+                                {largePatch?.contextMode === 'full'
+                                    ? t('diffView.state.largeFile')
+                                    : changedLineCount > LARGE_DIFF_CHANGED_LINES
+                                        ? t('diffView.state.largeDiff', { count: changedLineCount })
+                                        : t('diffView.state.largeDiffLongLines')}
                             </div>
                             <div className="typography-meta text-muted-foreground">
                                 {t('diffView.state.largeDiffDescription')}
@@ -588,7 +667,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             <button
                                 type="button"
                                 className="typography-ui-label text-primary hover:underline"
-                                onClick={() => setForceRenderLarge(true)}
+                                onClick={() => {
+                                    setForcedLarge({ source: rangeComparisonDiff });
+                                    if (comparisonDiff !== rangeComparisonDiff && comparisonDiff?.status === 'large') setApprovedFull(comparisonDiff);
+                                }}
                             >
                                 {t('diffView.actions.renderAnyway')}
                             </button>
@@ -599,12 +681,12 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             {t('diffView.change.renamedFrom', { from: file.previousPath ?? '' })}
                         </div>
                     ) : null}
-                    {isMounted && diffData && !renameOnlyDiff && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
+                    {isMounted && diffData && !renameOnlyDiff && (renderLarge || !isLargeDiff) ? (
                         <>
                             <InlineDiffViewer
                                 filePath={file.path}
                                 diff={diffData}
-                                commentOrigin={rangeComparisonDiff ? commentOrigin : undefined}
+                                commentOrigin={commentOrigin}
                                 staged={staged}
                                 renderSideBySide={renderSideBySide}
                                 wrapLines={wrapLines}
@@ -615,6 +697,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                 contextLoading={contextExpansion !== null && diffData.contextMode !== 'full' && !diffLoadFailure}
                                 viewerRef={setViewerRef}
                                 onFindWordRequest={handleFindWordRequest}
+                                onUnsavedCommentChange={setHasUnsavedComment}
                             />
                         </>
                     ) : null}

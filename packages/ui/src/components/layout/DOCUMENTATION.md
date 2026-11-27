@@ -330,6 +330,9 @@ on every pointer frame; interpolated updates would trail the pointer.
 A window overlay supplies the cursor and intercepts embedded pages that would
 swallow pointer events. Window-level release, cancel and blur handlers end the
 gesture because capture alone can fail over iframes or disappear with a handle.
+The file tree column's own width grip ends the same way: the tree ignores the
+pointer while that grip is held, so a release lost to another window would
+otherwise leave the tree dead until reload.
 
 ### Why settled interactivity and not immediate inert toggles
 
@@ -350,6 +353,9 @@ zone itself activates descendant focus-visible selectors across a large tree.
 The right slot clips both axes so tab reveal cannot scroll its wider hidden
 content and drag the work-status card sideways. A size data attribute conveys
 the target size without an inherited CSS variable that restyles descendants.
+The zone and its card take their size as literal widths for the same reason:
+the zone's size used to be an inherited custom property, and every expand or
+collapse restyled the whole surface inside, 10,000 elements for the Git panel.
 
 ### Why local titlebar width publication and not a root variable
 
@@ -364,6 +370,19 @@ height directly so sidebar animation does not force layout reads.
 Portalled toolbars sit in the header DOM while their React events follow a
 different ancestry. Native listeners cover the header's empty drag regions
 without taking buttons, fields or strips that already own their gestures.
+
+### Why one native no-drag region for the session tabs
+
+Electron can count a tab's no-drag rectangle even where the scroller clips it.
+While the tabs overflow (`data-tabs-overflow`), the scroller supplies one
+bounded native region so hidden tabs cannot block window dragging in the
+sidebar, and every gap that lies inside the viewport (`data-gap-in-view` on the
+slot after it, set on scroll and resize) gets a full-height drag region of its
+own, the slot's `::after`, apart from the separator's `::before`. Gaps move the
+window at the start and after scrolling, next to a clipped tab too. A strip that fits keeps per-tab regions and its gaps
+drag through the header. Tab controls keep their no-drag class for the header's
+gesture handler; open dialogs and menus turn the gap regions off like the
+header's.
 
 ### Why grouped hidden settings and not a visible allowlist
 

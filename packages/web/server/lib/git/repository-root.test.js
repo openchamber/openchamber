@@ -43,43 +43,43 @@ describe('vcsInitRefusal', () => {
 
   const header = (directory) => ({ 'x-opencode-directory': encodeURIComponent(directory) });
 
-  it('lets an ordinary project directory through', () => {
-    expect(vcsInitRefusal('POST', '/api/vcs/init', header(project), home)).toBeNull();
-    expect(vcsInitRefusal('POST', `/api/vcs/init?location%5Bdirectory%5D=${encodeURIComponent(project)}`, {}, home)).toBeNull();
+  it('lets an ordinary project directory through', async () => {
+    expect(await vcsInitRefusal('POST', '/api/vcs/init', header(project), home)).toBeNull();
+    expect(await vcsInitRefusal('POST', `/api/vcs/init?location%5Bdirectory%5D=${encodeURIComponent(project)}`, {}, home)).toBeNull();
   });
 
-  it('refuses the home directory, also through a symlink or a trailing slash', () => {
-    expect(vcsInitRefusal('POST', '/api/vcs/init', header(home), home)).toMatch(/home directory/);
-    expect(vcsInitRefusal('POST', '/api/vcs/init', header(`${home}/`), home)).toMatch(/home directory/);
-    expect(vcsInitRefusal('POST', '/api/vcs/init', header(homeLink), home)).toMatch(/home directory/);
+  it('refuses the home directory, also through a symlink or a trailing slash', async () => {
+    expect(await vcsInitRefusal('POST', '/api/vcs/init', header(home), home)).toMatch(/home directory/);
+    expect(await vcsInitRefusal('POST', '/api/vcs/init', header(`${home}/`), home)).toMatch(/home directory/);
+    expect(await vcsInitRefusal('POST', '/api/vcs/init', header(homeLink), home)).toMatch(/home directory/);
   });
 
-  it('refuses a filesystem root', () => {
-    expect(vcsInitRefusal('POST', '/api/vcs/init', header(path.parse(project).root), home)).toMatch(/root of a disk/);
+  it('refuses a filesystem root', async () => {
+    expect(await vcsInitRefusal('POST', '/api/vcs/init', header(path.parse(project).root), home)).toMatch(/root of a disk/);
   });
 
-  it('refuses a request without a directory, which OpenCode would run in its own working directory', () => {
-    expect(vcsInitRefusal('POST', '/api/vcs/init', {}, home)).toMatch(/project directory/);
+  it('refuses a request without a directory, which OpenCode would run in its own working directory', async () => {
+    expect(await vcsInitRefusal('POST', '/api/vcs/init', {}, home)).toMatch(/project directory/);
   });
 
-  it('reads the location query before the header, as OpenCode does', () => {
+  it('reads the location query before the header, as OpenCode does', async () => {
     const url = `/api/vcs/init?location%5Bdirectory%5D=${encodeURIComponent(home)}`;
-    expect(vcsInitRefusal('POST', url, header(project), home)).toMatch(/home directory/);
+    expect(await vcsInitRefusal('POST', url, header(project), home)).toMatch(/home directory/);
   });
 
-  it('unwraps a header the browser re-encoded once more', () => {
+  it('unwraps a header the browser re-encoded once more', async () => {
     const doubled = { 'x-opencode-directory': encodeURIComponent(encodeURIComponent(home)), 'x-opencode-directory-encoding': 'uri' };
-    expect(vcsInitRefusal('POST', '/api/vcs/init', doubled, home)).toMatch(/home directory/);
+    expect(await vcsInitRefusal('POST', '/api/vcs/init', doubled, home)).toMatch(/home directory/);
   });
 
-  it('matches the route however the path is spelled', () => {
-    expect(vcsInitRefusal('POST', '//api/VCS/init/', header(home), home)).toMatch(/home directory/);
-    expect(vcsInitRefusal('POST', '/api/vcs/%69nit?x=1#frag', header(home), home)).toMatch(/home directory/);
+  it('matches the route however the path is spelled', async () => {
+    expect(await vcsInitRefusal('POST', '//api/VCS/init/', header(home), home)).toMatch(/home directory/);
+    expect(await vcsInitRefusal('POST', '/api/vcs/%69nit?x=1#frag', header(home), home)).toMatch(/home directory/);
   });
 
-  it('ignores other routes and methods', () => {
-    expect(vcsInitRefusal('GET', '/api/vcs/init', header(home), home)).toBeNull();
-    expect(vcsInitRefusal('POST', '/api/vcs', header(home), home)).toBeNull();
-    expect(vcsInitRefusal('POST', '/api/session', {}, home)).toBeNull();
+  it('ignores other routes and methods', async () => {
+    expect(await vcsInitRefusal('GET', '/api/vcs/init', header(home), home)).toBeNull();
+    expect(await vcsInitRefusal('POST', '/api/vcs', header(home), home)).toBeNull();
+    expect(await vcsInitRefusal('POST', '/api/session', {}, home)).toBeNull();
   });
 });

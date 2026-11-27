@@ -257,6 +257,9 @@ export function createDictationRuntime({
       if (socket) {
         sendToSocket(socket, { type, ...payload });
       }
+      if (type === 'error' && payload.reasonCode === 'stream_released') {
+        socketByDictationId.delete(payload.dictationId);
+      }
       if (type === 'final' && 'text' in payload) {
         rememberFinal(payload.dictationId, payload.text);
         clearDetachTimer(payload.dictationId);
@@ -270,6 +273,12 @@ export function createDictationRuntime({
   const attachDictation = (dictationId: string, socket: WebSocket) => {
     clearDetachTimer(dictationId);
     socketByDictationId.set(dictationId, socket);
+  };
+
+  const answerUnknownTo = (dictationId: string, socket: WebSocket) => {
+    if (!manager.streams.has(dictationId)) {
+      socketByDictationId.set(dictationId, socket);
+    }
   };
 
   const detachSocket = (socket: WebSocket) => {
@@ -343,6 +352,7 @@ export function createDictationRuntime({
           ) {
             return;
           }
+          answerUnknownTo(message.dictationId, socket);
           manager.handleChunk({
             dictationId: message.dictationId,
             seq: message.seq,
@@ -354,6 +364,7 @@ export function createDictationRuntime({
           if (!isString(message.dictationId) || !isNumber(message.finalSeq)) {
             return;
           }
+          answerUnknownTo(message.dictationId, socket);
           manager.handleFinish(message.dictationId, message.finalSeq);
           return;
         }

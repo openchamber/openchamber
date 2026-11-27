@@ -1,33 +1,50 @@
 import * as React from 'react';
 
 import type { ComposerReference } from '@/components/chat/composer/composerReferences';
+import { repositoryUrlOfItemLink } from '@/components/sourceBoard/openTrackerItem';
+import { useBoardRepository, useFolderOfRepository, type RepositoryChoice } from '@/components/sourceBoard/boardRepository';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 
+import { linkReadContext } from './acrossRepositories';
 import type { ReferencePickerConfirmFailure } from './ReferencePickerDialog';
 import type { ReferencePickerSelection } from './referencePickerItems';
-import { readTrackerItemDetail, useRepositoryReadContext } from './referenceSources';
+import { readTrackerItemDetail, useRepositoryFolderReadContexts } from './referenceSources';
 import { resolveComposerReferences, resolveReferenceLink, type ReferenceLinkTarget, type ReferenceResolveDeps } from './resolveComposerReferences';
 import { readTrackerDescriptor } from '@/lib/trackers/registry';
 
-function useReferenceResolveDeps(directory: string | null): ReferenceResolveDeps {
+const NO_CHOICE: RepositoryChoice = { path: null, all: undefined };
+const NO_FOLDERS: readonly string[] = [];
+
+export function useReferenceScope(directory: string | null) {
+    const repository = useBoardRepository(directory, NO_CHOICE, { underRepository: false });
+    const directories = repository.all ? repository.repositories : null;
+    const single = repository.directory;
+    const folders = React.useMemo(() => directories ?? (single ? [single] : NO_FOLDERS), [directories, single]);
+    return { directory: single, directories, folders };
+}
+
+function useReferenceResolveDeps(folders: readonly string[]) {
     const { sourceControl, trackers } = useRuntimeAPIs();
-    const repositoryContext = useRepositoryReadContext(directory);
-    return React.useMemo(() => ({
+    const contexts = useRepositoryFolderReadContexts(folders);
+    const deps = React.useMemo((): ReferenceResolveDeps => ({
         sourceControl,
-        context: repositoryContext && repositoryContext !== 'missing' ? repositoryContext : null,
+        context: contexts[0]?.context ?? null,
+        contextOf: (directory) => contexts.find((entry) => entry.directory === directory)?.context ?? null,
         readTrackerDetail: (provider, itemId) => (trackers
             ? readTrackerItemDetail(trackers, provider, itemId)
             : Promise.reject(new Error('Trackers are not available here'))),
         trackerName: (provider) => readTrackerDescriptor(provider).name,
-    }), [repositoryContext, sourceControl, trackers]);
+    }), [contexts, sourceControl, trackers]);
+    return { deps, contexts };
 }
 
 export function useAttachReferences(
-    directory: string | null,
+    folders: readonly string[],
     onAttach: (references: ComposerReference[]) => void,
 ): (selections: ReferencePickerSelection[]) => Promise<ReferencePickerConfirmFailure | null> {
-    const deps = useReferenceResolveDeps(directory);
+    const { deps } = useReferenceResolveDeps(folders);
     const { t } = useI18n();
     return React.useCallback(async (selections) => {
         const resolved = await resolveComposerReferences(selections, deps);
@@ -43,7 +60,15 @@ export function useAttachReferences(
     }, [deps, onAttach, t]);
 }
 
-export function useReadReferenceLink(directory: string | null): (target: ReferenceLinkTarget) => Promise<ComposerReference | null> {
-    const deps = useReferenceResolveDeps(directory);
-    return React.useCallback((target) => resolveReferenceLink(target, deps), [deps]);
+export function useReadReferenceLink(folders: readonly string[]): (target: ReferenceLinkTarget, link: string) => Promise<ComposerReference | null> {
+    const { deps, contexts } = useReferenceResolveDeps(folders);
+    const folderOf = useFolderOfRepository(folders);
+    const urls = useRepositoryUrlMatcher();
+    return React.useCallback((target, link) => {
+        if (target.source === 'tracker') return resolveReferenceLink(target, deps);
+        const repositoryUrl = repositoryUrlOfItemLink(link, urls);
+        const repositoryFolder = repositoryUrl ? folderOf(repositoryUrl) : null;
+        const context = linkReadContext(contexts, repositoryFolder === 'none' ? null : repositoryFolder, target);
+        return resolveReferenceLink(target, { ...deps, context });
+    }, [contexts, deps, folderOf, urls]);
 }

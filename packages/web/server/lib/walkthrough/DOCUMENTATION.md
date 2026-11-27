@@ -208,6 +208,11 @@ so the user can pick a roomier model. A walkthrough written against a silently
 clipped diff is confidently wrong in a way no reader can detect, which is worse
 than no walkthrough.
 
+Readiness and generation hold the prompt to the same limits (`small-model`,
+*Prompt shape*). A provider that still refuses it as too long ends in the same
+`409`, without sizes. That refusal is not a schema refusal: it triggers no
+schema-free retry and is not remembered against the model.
+
 ## Generated files
 
 `generated.js` excludes tool-produced files — lockfiles, minified bundles,
@@ -344,14 +349,18 @@ work.
 Providers that do not declare the capability sometimes reject the schema at
 request time (a plain `400`, or Alibaba/Qwen's "'messages' must contain the word
 'json'"). A rejected request shape is not a dead end, so a `4xx` on a schema
-request triggers exactly one retry with the schema moved into the prompt and the
-tolerant parser handling the result. Only if *that* fails to yield usable JSON is
+request that OpenCode reports as `invalid_request` triggers exactly one retry
+with the schema moved into the prompt and the tolerant parser handling the
+result. Only if *that* fails to yield usable JSON is
 `structured-output-unsupported` reported — at which point it is a real capability
 problem the user can fix by switching model.
 
-The refusal is then remembered per `provider/model` and the fallback goes first
-from then on. Without that, every generation on such a provider pays for a call
-whose failure is already known. The memory is process-lifetime only on purpose:
+Once the fallback yields a walkthrough, the refusal is remembered per `provider/model`
+and the fallback goes first from then on. Without that, every generation on such
+a provider pays for a call whose failure is already known. A rate limit, a
+rejected login or a content filter says nothing about the schema: it fails at
+once and is not remembered, and neither is a request refused with and without
+the schema. The memory is process-lifetime only on purpose:
 a provider that gains structured-output support should not need a settings
 change to be tried again, and one wasted first attempt after a restart is cheap.
 

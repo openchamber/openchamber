@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import type { TerminalServerSession } from '@/lib/api/types';
 
-import { directoryMayHaveActiveProjectAction, useTerminalStore } from './useTerminalStore';
+import { directoryMayHaveActiveProjectAction, runningProjectActionPreviewUrls, useTerminalStore } from './useTerminalStore';
 
 const setup = () => {
   useTerminalStore.getState().clearAll();
@@ -179,6 +179,27 @@ describe('terminal state reconciliation', () => {
     expect(tab.terminalSessionId).toBe('srv-shared');
     expect(tab.lifecycle).toBe('running');
     expect(tab.purpose).toEqual({ type: 'project-action', actionId: 'build', executionId: 'exec-2' });
+  });
+
+  test('a running action\'s preview address counts only for folders on the same network', () => {
+    const space = '/spaces/0123456789ab/repo';
+    useTerminalStore.getState().clearAll();
+    for (const [directory, url] of [['/repo', 'http://dev-host:5173/'], [space, 'http://localhost:5173/app']] as const) {
+      useTerminalStore.getState().ensureDirectory(directory);
+      useTerminalStore.getState().reconcileServerSessions(directory, [{
+        sessionId: `srv-${directory}`,
+        cwd: directory,
+        status: 'running',
+        createdAt: 1,
+        mode: 'command',
+        purpose: { type: 'project-action', actionId: 'dev', executionId: `exec-${directory}` },
+      }]);
+      const tabId = useTerminalStore.getState().getDirectoryState(directory)!.tabs.find((tab) => tab.purpose.type === 'project-action')!.id;
+      useTerminalStore.getState().setTabPreviewUrl(directory, tabId, url, { locked: true });
+    }
+    const { sessions } = useTerminalStore.getState();
+    expect(runningProjectActionPreviewUrls(sessions, '/other-project')).toEqual(['http://dev-host:5173/']);
+    expect(runningProjectActionPreviewUrls(sessions, `${space}/sub`)).toEqual(['http://localhost:5173/app']);
   });
 
   test('activates a rebound running project-action tab when the current active tab is idle and sessionless', () => {

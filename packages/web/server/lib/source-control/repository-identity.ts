@@ -4,6 +4,7 @@ import { getRepositoryRemoteUrls, resolveRepositoryGitPaths } from '../git/servi
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { resolveRepositoryFilesystemId } from './repository-id-storage.js';
+import type { PlannedRemote } from '../git/service-contracts.js';
 import type { RepositoryIdentity, RepositoryResolution } from './binding-service-contracts.js';
 import type { SourceControlRepositoryEndpoint } from './binding-types.js';
 
@@ -50,13 +51,13 @@ const resolveIdentity = async (directory: string, {
   getRepositoryRemotes,
   getTransportRevision,
   includeRawEndpoints,
-}: IdentityDependencies): Promise<RepositoryResolution> => {
+}: IdentityDependencies, plannedRemote?: PlannedRemote): Promise<RepositoryResolution> => {
   const gitPaths = await resolveGitPaths(directory);
   if (!gitPaths.supported) return gitPaths;
 
   const commonDirectory = await fsImpl.realpath(gitPaths.commonDirectory);
   const repositoryId = await resolveRepositoryFilesystemId(commonDirectory, { fsImpl });
-  const remotes = (await getRepositoryRemotes(directory))
+  const remotes = (await getRepositoryRemotes(directory, plannedRemote))
     .map((remote) => ({
       name: remote.name,
       fetchUrl: remote.fetchUrl || '',
@@ -113,9 +114,9 @@ function createRepositoryIdentityResolver({
   resolveGitPaths = resolveRepositoryGitPaths,
   getRepositoryRemotes = getRepositoryRemoteUrls,
 }: RepositoryIdentityResolverOptions = {}) {
-  return (directory: string) => resolveIdentity(directory, {
+  return (directory: string, plannedRemote?: PlannedRemote) => resolveIdentity(directory, {
     fsImpl, resolveGitPaths, getRepositoryRemotes, getTransportRevision: null, includeRawEndpoints: false,
-  });
+  }, plannedRemote);
 }
 
 export function createPrivateRepositoryIdentityResolver({

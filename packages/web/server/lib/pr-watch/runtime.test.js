@@ -10,6 +10,7 @@ const SESSION = 'ses_agent';
 const DIRECTORY = '/repo';
 const URL_7 = 'https://github.com/acme/app/pull/7';
 const URL_8 = 'https://github.com/acme/app/pull/8';
+const ARM_AT = Date.parse('2026-10-01T12:00:00Z');
 
 const temporaryDirectories = [];
 const runtimes = [];
@@ -52,6 +53,8 @@ const pull = (extra = {}) => ({
   owner: 'acme', repo: 'app', number: 7, state: 'open', title: 'Fix it', headSha: 'a1',
   mergeableState: 'clean', checks: { state: 'pending' }, activity: 2, ...extra,
 });
+const greenPull = (extra) => pull({ checks: { state: 'success' }, ...extra });
+const removal = (id, offset, reason) => ({ id, createdAt: new Date(ARM_AT + offset).toISOString(), reason });
 
 /** OpenCode's session routes the runtime uses, with a log of what it admitted. */
 const createOpenCode = () => {
@@ -86,10 +89,13 @@ const createTracked = (read = async () => ({ status: 'ok', pulls: [pull()] })) =
     readers: { sourceControl: vi.fn(read) },
     // A tracked-items answer; `requestedAt` is when the read behind it began.
     move: (state, requestedAt = Date.now() + 1, url = URL_7) => listener([{ key: trackedItemKey(parsePullRequestUrl(url)), state, requestedAt }]),
+    moveBatch: (states, requestedAt) => listener(states.map((state) => ({
+      key: trackedItemKey(parsePullRequestUrl(`https://github.com/acme/app/pull/${state.number}`)), state, requestedAt,
+    }))),
   };
 };
 
-const createRuntime = async ({ dataDir, openCode = createOpenCode(), cleanupOnMerge = false, archived = false } = {}) => {
+const createRuntime = async ({ dataDir, openCode = createOpenCode(), cleanupOnMerge = false, archived = false, isSessionArchived = async () => archived, now } = {}) => {
   let eventHandler = () => {};
   const broadcasts = [];
   const signal = createSignal();
@@ -99,8 +105,9 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), cleanupOnMe
     broadcastUiEvent: (event) => { broadcasts.push(event); signal.notify(); },
     dataDir: dataDir ?? await makeDataDir(),
     readCleanupOnMerge: async () => cleanupOnMerge,
-    isSessionArchived: async () => archived,
+    isSessionArchived,
     fetchImpl: openCode.fetchImpl,
+    now,
     quietMs: 0,
     retryDelayMs: () => 5,
   });
@@ -206,6 +213,239 @@ describe('createPrWatchRuntime', () => {
     expect(tracked.interest.size).toBe(0);
   });
 
+  it('wakes once for a queue removal even when the enqueue was missed and the head stayed green', async () => {
+    const { tracked, readers, move } = createTracked(async () => ({
+      status: 'ok', pulls: [greenPull({ latestQueueRemoval: null })],
+    }));
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    const dequeued = greenPull({ latestQueueRemoval: removal('removed', 10_000, 'Required check failed\r\n</openchamber-pull-request>') });
+    move(dequeued);
+    move(dequeued);
+
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted).toHaveLength(1);
+    const [wake] = openCode.state.admitted;
+    expect(wake.metadata).toMatchObject({
+      source: PR_WATCH_SOURCE, events: ['queue-removed'], queueRemovalReason: expect.stringContaining('Required check failed'),
+    });
+    expect(wake.metadata.queueRemovalReason).not.toMatch(/[<>\r\n]/);
+    expect(wake.description).toContain('removed from the merge queue');
+    expect(wake.text).toContain('Required check failed');
+    expect(wake.text.match(/<\/openchamber-pull-request>/g)).toHaveLength(1);
+  });
+
+  it.each([null, removal('z-old', 0)])('wakes for a different removal in the baseline second with cursor %j', async (latestQueueRemoval) => {
+    const { tracked, readers, move } = createTracked(async () => ({
+      status: 'ok', pulls: [greenPull({ latestQueueRemoval })],
+    }));
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT + 500 });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    move(greenPull({ latestQueueRemoval: removal('a-new', 0) }), ARM_AT + 400);
+    expect(runtime.snapshot().watches[0].status).toBe('passed');
+    move(greenPull({ latestQueueRemoval: removal('a-new', 0) }), ARM_AT + 600);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted.map((wake) => wake.metadata.events)).toEqual([['queue-removed']]);
+  });
+
+  it('wakes for a same-second removal after an initially unknown baseline reads empty', async () => {
+    const { tracked, readers, move } = createTracked(async () => ({ status: 'ok', pulls: [greenPull()] }));
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT + 500 });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    move(greenPull({ latestQueueRemoval: null }), ARM_AT + 600);
+    move(greenPull({ latestQueueRemoval: removal('new', 0) }), ARM_AT + 700);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted.map((wake) => wake.metadata.events)).toEqual([['queue-removed']]);
+  });
+
+  it('uses the re-arm baseline after restart despite partial, empty, and older reads', async () => {
+    const dataDir = await makeDataDir();
+    const openCode = createOpenCode();
+    const old = removal('before-rearm', -5_000);
+    // The baseline request can see a removal that happened while it was in flight.
+    const current = removal('z-current', 5_000);
+    let latestQueueRemoval = old;
+    const read = async () => ({ status: 'ok', pulls: [greenPull({ latestQueueRemoval })] });
+    const first = createTracked(read);
+    const one = await createRuntime({ dataDir, openCode, now: () => ARM_AT });
+    one.runtime.attach({ trackedItems: first.tracked, readers: first.readers });
+    await one.runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    latestQueueRemoval = current;
+    await one.runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    one.runtime.stop();
+    await one.runtime.flush();
+
+    const { tracked, readers, move } = createTracked(read);
+    const { runtime } = await createRuntime({ dataDir, openCode, now: () => ARM_AT + 20_000 });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.load();
+    const { revision } = runtime.snapshot();
+    move(greenPull());
+    move(greenPull({ latestQueueRemoval: null }));
+    move(greenPull({ latestQueueRemoval: removal('out-of-order', 2_000) }));
+    move(greenPull({ latestQueueRemoval: current }));
+    move(greenPull({ latestQueueRemoval: removal('delayed-read', 6_000) }), ARM_AT - 1);
+    expect(runtime.snapshot().watches[0].status).toBe('passed');
+    expect(runtime.snapshot().revision).toBe(revision);
+
+    // GitHub's event IDs are opaque, so an ID that sorts earlier can be newer.
+    move(greenPull({ latestQueueRemoval: removal('a-next', 10_000) }));
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted).toHaveLength(1);
+    expect(openCode.state.admitted[0].metadata.events).toEqual(['queue-removed']);
+    expect(openCode.state.admitted[0].metadata).not.toHaveProperty('queueRemovalReason');
+  });
+
+  it.each(['unavailable', 'partial'])('recovers a removal after a %s arming read without replaying old history', async (initial) => {
+    const { tracked, readers, move } = createTracked(async () => initial === 'unavailable'
+      ? { status: 'unavailable' }
+      : { status: 'ok', pulls: [greenPull()] });
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    move(greenPull({ latestQueueRemoval: removal('historical', -10_000) }));
+    expect(runtime.snapshot().watches[0].status).toBe('passed');
+    move(greenPull({ latestQueueRemoval: removal('still-historical', -5_000) }));
+    expect(runtime.snapshot().watches[0].status).toBe('passed');
+
+    move(greenPull({ latestQueueRemoval: removal('after-arm', 10_000) }));
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted.map((wake) => wake.metadata.events)).toEqual([['queue-removed']]);
+  });
+
+  // No empty poll between the unread arm and the first removal: only GitHub's whole-second
+  // timestamp can tell the removal from history.
+  it.each([
+    ['wakes for a removal stamped in a later second', removal('later', 1_000), [['queue-removed']], false],
+    ['takes a removal from an earlier second as history', removal('earlier', -1_000), [], false],
+    ['takes a removal in the arm second as history and reports the degraded baseline', removal('same-second', 0), [], true],
+  ])('%s when the arming read had no timeline', async (_name, first, wakes, degraded) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { tracked, readers, move } = createTracked(async () => ({ status: 'ok', pulls: [greenPull()] }));
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT + 500 });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    move(greenPull({ latestQueueRemoval: first }), ARM_AT + 600);
+    if (wakes.length > 0) expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    else expect(runtime.snapshot().watches[0].status).toBe('passed');
+    await runtime.flush();
+    expect(openCode.state.admitted.map((wake) => wake.metadata.events)).toEqual(wakes);
+    expect(warn.mock.calls.some(([message]) => String(message).includes('merge queue removal'))).toBe(degraded);
+    warn.mockRestore();
+  });
+
+  it.each([null, removal('old', -5_000)])('keeps the earlier cursor %j when a restarted wait reads no timeline', async (known) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let pulls = [greenPull({ latestQueueRemoval: known })];
+    const { tracked, readers, move } = createTracked(async () => ({ status: 'ok', pulls }));
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT + 500 });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    pulls = [greenPull()];
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    move(greenPull({ latestQueueRemoval: removal('new', 0) }), ARM_AT + 700);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted.map((wake) => wake.metadata.events)).toEqual([['queue-removed']]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('wakes for the next removal in the same second once a read has set the cursor', async () => {
+    const { tracked, readers, move } = createTracked(async () => ({ status: 'ok', pulls: [greenPull()] }));
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT + 500 });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    move(greenPull({ latestQueueRemoval: removal('old', -5_000) }), ARM_AT + 600);
+    move(greenPull({ latestQueueRemoval: removal('new', 0) }), ARM_AT + 700);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted.map((wake) => wake.metadata.events)).toEqual([['queue-removed']]);
+  });
+
+  it('ignores a delayed removal answer after a newer authoritative read', async () => {
+    const current = removal('current', 5_000);
+    const { tracked, readers, move } = createTracked(async () => ({
+      status: 'ok', pulls: [greenPull({ latestQueueRemoval: current })],
+    }));
+    const { runtime } = await createRuntime({ now: () => ARM_AT });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    const { revision } = runtime.snapshot();
+    move(greenPull({ latestQueueRemoval: current }), ARM_AT + 20_000);
+    move(greenPull({ latestQueueRemoval: removal('delayed', 5_000) }), ARM_AT + 10_000);
+    expect(runtime.snapshot()).toMatchObject({ revision, watches: [{ status: 'passed' }] });
+  });
+
+  it('does not replay older checks from a batch delayed by details for another pull request', async () => {
+    const detailsStarted = Promise.withResolvers();
+    const releaseDetails = Promise.withResolvers();
+    const { tracked, readers, move, moveBatch } = createTracked(async ({ details, pulls }) => {
+      if (details) {
+        detailsStarted.resolve();
+        await releaseDetails.promise;
+      }
+      return { status: 'ok', pulls: pulls.map(({ number }) => number === 7 ? pull() : greenPull({ number })) };
+    });
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_8 });
+
+    moveBatch([pull({ checks: { state: 'failure' } }), greenPull({ number: 8 })], ARM_AT + 1);
+    await detailsStarted.promise;
+    move(pull({ number: 8 }), ARM_AT + 2, URL_8);
+    expect(runtime.snapshot().watches.find((watch) => watch.number === 8).status).toBe('pending');
+    releaseDetails.resolve();
+
+    expect(await until(() => runtime.snapshot().watches.every((watch) => watch.number !== 7))).toBe(true);
+    expect(runtime.snapshot().watches).toEqual([expect.objectContaining({ number: 8, status: 'pending' })]);
+    expect(openCode.state.admitted.map((wake) => wake.metadata.url)).toEqual([URL_7]);
+  });
+
+  it('recovers a queue wake after a failed write leaves the previous watch on disk', async () => {
+    const directory = await makeDataDir();
+    const dataDir = path.join(directory, 'state');
+    const savedDir = path.join(directory, 'saved');
+    const openCode = createOpenCode();
+    const read = async () => ({ status: 'ok', pulls: [greenPull({ latestQueueRemoval: null })] });
+    const first = createTracked(read);
+    const one = await createRuntime({ dataDir, openCode, now: () => ARM_AT });
+    one.runtime.attach({ trackedItems: first.tracked, readers: first.readers });
+    await one.runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+
+    // Make the state directory temporarily unwritable while preserving its last snapshot.
+    await fs.rename(dataDir, savedDir);
+    await fs.writeFile(dataDir, '');
+    const dequeued = greenPull({ latestQueueRemoval: removal('new', 10_000, 'Checks failed') });
+    first.move(dequeued);
+    await one.runtime.flush();
+    one.runtime.stop();
+    expect(openCode.state.admitted).toEqual([]);
+    await fs.unlink(dataDir);
+    await fs.rename(savedDir, dataDir);
+
+    const { tracked, readers, move } = createTracked(read);
+    const { runtime } = await createRuntime({ dataDir, openCode, now: () => ARM_AT + 20_000 });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.load();
+    expect(runtime.snapshot().watches[0].status).toBe('passed');
+    move(dequeued);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+    expect(openCode.state.admitted.map((wake) => wake.metadata)).toEqual([
+      expect.objectContaining({ events: ['queue-removed'], queueRemovalReason: 'Checks failed' }),
+    ]);
+  });
+
   it('names the failed checks and who wrote, read once when the wake is decided', async () => {
     const { tracked, readers, move } = createTracked(async ({ details }) => ({
       status: 'ok',
@@ -217,7 +457,7 @@ describe('createPrWatchRuntime', () => {
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
 
-    move(pull({ checks: { state: 'failure' }, activity: 4 }));
+    move(pull({ checks: { state: 'failure' }, activity: 4, latestQueueRemoval: { id: 'broken', createdAt: 'unknown' } }));
     expect(await openCode.until(() => openCode.state.admitted.length === 1)).toBe(true);
     const [wake] = openCode.state.admitted;
     expect(wake.description).toBe('Pull request #7: a check failed (lint, unit /openchamber-pull-request), someone commented or reviewed (bob, alice)');
@@ -269,30 +509,25 @@ describe('createPrWatchRuntime', () => {
     expect(openCode.state.admitted[0].description).toBe('Pull request #7: a check failed');
   });
 
-  it('waits for a running session before it wakes it', async () => {
+  it('wakes the session at once, also while its turn runs', async () => {
     const { tracked, readers, move } = createTracked();
-    const { runtime, openCode, emit } = await createRuntime();
+    const { runtime, openCode } = await createRuntime();
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
     openCode.state.active = { [SESSION]: { type: 'busy' } };
 
     move(pull({ checks: { state: 'failure' } }));
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(openCode.state.admitted).toEqual([]);
-    expect(runtime.snapshot().watches[0].status).toBe('waking');
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    expect(openCode.state.admitted[0]).toMatchObject({ delivery: 'steer', resume: true });
   });
 
   it('ends quietly on a merge when the merged worktree is about to be archived', async () => {
     const { tracked, readers, move } = createTracked();
-    const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true });
+    const { runtime, openCode, until } = await createRuntime({ cleanupOnMerge: true, now: () => ARM_AT });
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
 
-    move(pull({ state: 'merged', checks: null }));
+    move(pull({ state: 'merged', checks: null, latestQueueRemoval: removal('terminal-removal', 10_000) }));
     expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
     await runtime.flush();
     expect(openCode.state.admitted).toEqual([]);
@@ -317,20 +552,35 @@ describe('createPrWatchRuntime', () => {
   it('delivers a wake left pending across a restart once, with the same id', async () => {
     const dataDir = await makeDataDir();
     const openCode = createOpenCode();
-    openCode.state.active = { [SESSION]: { type: 'busy' } };
-    const first = createTracked();
-    const one = await createRuntime({ dataDir, openCode });
+    const firstAdmission = Promise.withResolvers();
+    const loseFirstResponse = Promise.withResolvers();
+    const admit = openCode.fetchImpl;
+    openCode.fetchImpl = vi.fn(async (url, init) => {
+      const response = await admit(url, init);
+      if (new URL(url).pathname.endsWith('/synthetic') && response.ok) {
+        firstAdmission.resolve();
+        await loseFirstResponse.promise;
+        throw new Error('response lost');
+      }
+      return response;
+    });
+    const first = createTracked(async () => ({ status: 'ok', pulls: [greenPull({ latestQueueRemoval: null })] }));
+    const one = await createRuntime({ dataDir, openCode, now: () => ARM_AT });
     one.runtime.attach({ trackedItems: first.tracked, readers: first.readers });
     await one.runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
-    first.move(pull({ checks: { state: 'failure' } }));
-    expect(await one.until(() => one.runtime.snapshot().watches[0]?.status === 'waking')).toBe(true);
+    first.move(greenPull({ latestQueueRemoval: removal('new', 10_000, 'Checks failed') }));
+    await firstAdmission.promise;
     one.runtime.stop();
+    loseFirstResponse.resolve();
     await one.runtime.flush();
+    const [wake] = openCode.state.admitted;
+    expect(wake.metadata).toMatchObject({ events: ['queue-removed'], queueRemovalReason: 'Checks failed' });
 
-    openCode.state.active = {};
     const two = await createRuntime({ dataDir, openCode });
-    expect(await openCode.until(() => openCode.state.admitted.length === 1)).toBe(true);
-    expect(await two.until(() => two.runtime.snapshot().watches.length === 0)).toBe(true);
+    await two.runtime.load();
+    expect(await until(() => two.runtime.snapshot().watches.length === 0)).toBe(true);
+    const attempted = openCode.fetchImpl.mock.calls.filter(([url]) => new URL(url).pathname.endsWith('/synthetic'));
+    expect(attempted.map(([, init]) => JSON.parse(init.body).id)).toEqual([wake.id, wake.id]);
     expect(openCode.state.admitted).toHaveLength(1);
   });
 
@@ -347,75 +597,40 @@ describe('createPrWatchRuntime', () => {
     expect(runtime.snapshot().watches[0].status).toBe('pending');
   });
 
-  it('wakes on a merge even when the pull request was never read before', async () => {
+  it.each(['merged', 'closed'])('wakes only for %s on a terminal snapshot with a queue removal and no baseline', async (state) => {
     const { tracked, readers, move } = createTracked(async () => ({ status: 'unavailable' }));
-    const { runtime, openCode } = await createRuntime();
+    const { runtime, openCode } = await createRuntime({ now: () => ARM_AT });
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
 
-    move(pull({ state: 'merged', checks: null }));
+    move(pull({ state, checks: null, latestQueueRemoval: removal('terminal-removal', 10_000, 'Closed') }));
     expect(await openCode.until(() => openCode.state.admitted.length === 1)).toBe(true);
-    expect(openCode.state.admitted[0].metadata.events).toEqual(['merged']);
+    expect(openCode.state.admitted[0].metadata.events).toEqual([state]);
+    expect(openCode.state.admitted[0].metadata).not.toHaveProperty('queueRemovalReason');
   });
 
   it('does not wake after a stop that lands while the wake is checking the session', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { tracked, readers, move } = createTracked();
-    const openCode = createOpenCode();
     let release = () => {};
     const gate = new Promise((resolve) => { release = resolve; });
-    const fetchImpl = openCode.fetchImpl;
-    openCode.fetchImpl = vi.fn(async (url, init) => {
-      if (new URL(url).pathname === '/api/session/active') await gate;
-      return fetchImpl(url, init);
+    const checking = Promise.withResolvers();
+    const { runtime, openCode } = await createRuntime({
+      isSessionArchived: async () => {
+        checking.resolve();
+        await gate;
+        return false;
+      },
     });
-    const { runtime } = await createRuntime({ openCode });
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
     move(pull({ checks: { state: 'failure' } }));
-    await vi.waitFor(() => expect(openCode.fetchImpl.mock.calls.some(([url]) => new URL(url).pathname === '/api/session/active')).toBe(true));
+    await checking.promise;
 
     await runtime.unwatch(SESSION);
     release();
-    await vi.runAllTimersAsync();
     await runtime.flush();
-    await vi.runAllTimersAsync();
+    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(openCode.state.admitted).toEqual([]);
-  });
-
-  it('keeps an idle event that arrives while a wake is in flight, and wakes once the session is free', async () => {
-    const probeStarted = Promise.withResolvers();
-    const { tracked, readers, move } = createTracked();
-    const openCode = createOpenCode();
-    let release = () => {};
-    let gate = new Promise((resolve) => { release = resolve; });
-    const fetchImpl = openCode.fetchImpl;
-    openCode.fetchImpl = vi.fn(async (url, init) => {
-      if (new URL(url).pathname === '/api/session/active') {
-        probeStarted.resolve();
-        await gate;
-        // The first answer was taken while the turn ran; the next is current.
-        const answer = json({ data: openCode.state.active });
-        openCode.state.active = {};
-        return answer;
-      }
-      return fetchImpl(url, init);
-    });
-    openCode.state.active = { [SESSION]: { type: 'busy' } };
-    const { runtime, emit } = await createRuntime({ openCode });
-    runtime.attach({ trackedItems: tracked, readers });
-    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
-    move(pull({ checks: { state: 'failure' } }));
-    await probeStarted.promise;
-    expect(openCode.fetchImpl.mock.calls.length).toBeGreaterThan(0);
-
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await vi.advanceTimersByTimeAsync(0);
-    vi.useRealTimers();
-    gate = Promise.resolve();
-    release();
-    expect(await openCode.until(() => openCode.state.admitted.length === 1)).toBe(true);
   });
 
   it('stops on request, and when the session is deleted', async () => {
@@ -455,13 +670,7 @@ describe('createPrWatchRuntime', () => {
 
     move(pull({ checks: { state: 'failure' } }));
     move(pull({ number: 8, checks: { state: 'success' } }), undefined, URL_8);
-    expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
-    // The second wake waits for the turn the first one started.
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    expect(openCode.state.admitted).toHaveLength(1);
-
-    openCode.state.active = {};
-    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    // The second wake steers into the turn the first one started.
     expect(await until(() => openCode.state.admitted.length === 2)).toBe(true);
     expect(openCode.state.admitted.map((wake) => wake.metadata.url).sort()).toEqual([URL_7, URL_8]);
     expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);

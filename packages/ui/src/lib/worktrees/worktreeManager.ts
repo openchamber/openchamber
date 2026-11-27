@@ -16,6 +16,8 @@ import {
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
+import { addIntegrateCheckout, publishProjectIntegrateCheckouts } from '@/lib/worktrees/integrateTopology';
+import { toProjectWorktreeListing, type ProjectWorktreeListing } from '@/lib/worktrees/worktreeListing';
 import { checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
 import type {
   CreateGitWorktreePayload,
@@ -29,38 +31,6 @@ import type {
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { generatedBranchPrefix } from '@/lib/git/branchNameGenerator';
-
-type WorktreeListEntry = {
-  path?: string;
-  branch?: string;
-  head?: string;
-  name?: string;
-  prunable?: boolean;
-  title?: string;
-  provenance?: WorktreeMetadata['provenance'];
-};
-
-const deriveHeadStateFromWorktreeEntry = (entry: WorktreeListEntry): 'branch' | 'detached' | 'unborn' => {
-  const branch = (entry.branch || '').trim();
-  const head = (entry.head || '').trim();
-  if (!branch) {
-    if (!head) return 'unborn';
-    return 'detached';
-  }
-  return 'branch';
-};
-
-const deriveCanonicalWorktreeFields = (
-  entry: WorktreeListEntry,
-  worktreePath: string,
-): Pick<WorktreeMetadata, 'worktreeRoot' | 'worktreeStatus' | 'headState' | 'worktreeSource'> => {
-  return {
-    worktreeRoot: worktreePath,
-    worktreeStatus: entry.prunable === true ? 'missing' : 'ready',
-    headState: deriveHeadStateFromWorktreeEntry(entry),
-    worktreeSource: 'existing',
-  };
-};
 
 export type ProjectRef = { id: string; path: string };
 
@@ -194,12 +164,6 @@ const getWorktreeStatusFromBootstrap = (status?: GitWorktreeBootstrapStatus): Wo
     return 'pending';
   }
   return status?.status === 'failed' ? 'invalid' : 'ready';
-};
-
-const deriveSdkWorktreeNameFromDirectory = (directory: string): string => {
-  const normalized = normalizePath(directory);
-  const parts = normalized.split('/').filter(Boolean);
-  return parts[parts.length - 1] ?? normalized;
 };
 
 const joinWorktreeCommands = (args: {
@@ -474,45 +438,15 @@ subscribeRuntimeEndpointChanged(() => {
   invalidateResolvedProjectRootCache();
 });
 
-const readProjectWorktrees = async (projectDirectory: string, isCurrent: () => boolean): Promise<WorktreeMetadata[]> => {
-  const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+export const recordIntegrateCheckout = (project: ProjectRef, repositoryRoot: string, checkout: string): void => {
+  const projectPath = normalizePath(project.path);
+  if (addIntegrateCheckout(projectPath, repositoryRoot, checkout)) invalidateWorktreeList(projectPath);
+};
+
+const readProjectWorktrees = async (projectDirectory: string, isCurrent: () => boolean): Promise<ProjectWorktreeListing> => {
+  const repositoryRoot = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   if (!isCurrent()) throw new Error('Runtime instance changed');
-  const normalizedProjectDirectory = normalizePath(projectDirectory);
-
-  const worktrees = await git.worktree.list(projectDirectory);
-  const results: WorktreeMetadata[] = worktrees
-    .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
-    .map((entry) => {
-      const worktreePath = normalizePath(entry.path);
-      const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
-      const name = (entry.name || '').trim();
-
-      const canonical = deriveCanonicalWorktreeFields(entry, worktreePath);
-
-      return {
-        source: 'sdk' as const,
-        name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-        path: worktreePath,
-        projectDirectory: metadataProjectDirectory,
-        branch: branch,
-        label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-        worktreeRoot: canonical.worktreeRoot,
-        worktreeStatus: canonical.worktreeStatus,
-        headState: canonical.headState,
-        worktreeSource: canonical.worktreeSource,
-        title: entry.title?.trim() || undefined,
-        pinnedAt: (entry.pinnedAt ?? 0) > 0 ? entry.pinnedAt : undefined,
-        pinList: (entry.pinnedAt ?? 0) > 0 ? entry.pinList || undefined : undefined,
-        ...(entry.provenance ? { provenance: entry.provenance } : {}),
-      };
-    })
-    .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
-
-  return results.sort((a, b) => {
-    const aLabel = (a.label || a.branch || a.path).toLowerCase();
-    const bLabel = (b.label || b.branch || b.path).toLowerCase();
-    return aLabel.localeCompare(bLabel);
-  });
+  return toProjectWorktreeListing(await git.worktree.list(projectDirectory), projectDirectory, repositoryRoot);
 };
 
 const readStableProjectWorktrees = async (
@@ -522,11 +456,12 @@ const readStableProjectWorktrees = async (
   const isCurrent = captureRuntimeInstance();
   for (let attempt = 0; attempt < WORKTREE_LIST_MAX_CONVERGENCE_ATTEMPTS; attempt += 1) {
     const generation = getWorktreeListGeneration(projectDirectory);
-    const worktrees = await readProjectWorktrees(projectDirectory, isCurrent);
+    const { repositoryRoot, worktrees, integrateCheckouts } = await readProjectWorktrees(projectDirectory, isCurrent);
     if (!isCurrent()) throw new Error('Runtime instance changed');
 
     if (generation >= minimumGeneration && generation === getWorktreeListGeneration(projectDirectory)) {
       _worktreeListCache.set(projectDirectory, { value: worktrees, at: Date.now() });
+      publishProjectIntegrateCheckouts(projectDirectory, repositoryRoot, integrateCheckouts);
       return worktrees;
     }
   }

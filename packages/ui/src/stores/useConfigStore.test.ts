@@ -142,6 +142,8 @@ environment.respondSettings(async (_url, init) => {
 environment.respond(async (url, init) => {
   const directory = decodeURIComponent(new Headers(init?.headers).get('x-opencode-directory') ?? '') || url.searchParams.get('directory') || DIRECTORY;
   const providerKey = `${url.origin}:${directory}`;
+  // Every location here has activated its plugins.
+  if (url.pathname === '/api/plugin') return Response.json({ data: [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }] });
   if (['/api/model', '/api/model/default', '/api/provider'].includes(url.pathname)) {
     let read = providerReads.get(providerKey);
     if (!read) {
@@ -672,6 +674,7 @@ describe('useConfigStore provider persistence', () => {
     expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['other-stale']);
 
     liveProviderId = 'fresh';
+    liveAgents = [testAgent('build')];
     await hydrated.initializeApp();
 
     const reloaded = useConfigStore.getState();
@@ -1198,65 +1201,61 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
   });
 
-  test('[issue-5933] a manual model pick survives picking an agent that configures a model', () => {
-    const sessionId = 'ses_5933_manual_model_survives_agent';
+  test('[issue-3391] a model picked for one agent stays with it and never replaces another agent\'s pinned model', () => {
+    const sessionId = 'ses_3391_pick_stays_with_agent';
     useSessionUIStore.setState({ currentSessionId: sessionId });
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
-      providers: [
-        provider('openai', 'gpt-5.5', ['low', 'high']),
-        provider('anthropic', 'claude-3', ['low', 'high']),
+      providers: [provider('openai', 'sol'), provider('google', 'terra'), provider('anthropic', 'claude-3')],
+      agents: [
+        testAgent('build', { model: { providerID: 'openai', modelID: 'sol' } }),
+        testAgent('build-terra', { model: { providerID: 'google', modelID: 'terra' } }),
+        testAgent('plan'),
       ],
-      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
-      settingsDefaultModel: 'openai/gpt-5.5',
-      // Restores also mark the model manual; the pending pick records intent.
+      currentAgentName: 'build',
       currentProviderId: 'anthropic',
       currentModelId: 'claude-3',
-      currentVariant: undefined,
+      selectionSource: 'manual',
+      directoryScoped: {},
+    });
+    // The least a pick records (the mobile list and the favorite-model shortcuts write only this).
+    useSelectionStore.getState().saveSessionModelSelection(sessionId, 'anthropic', 'claude-3');
+    useSelectionStore.getState().pickSessionModel(sessionId, 'anthropic', 'claude-3');
+
+    useConfigStore.getState().setAgent('build-terra');
+    expect(useConfigStore.getState().currentModelId).toBe('terra');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'build-terra')).toBe(null);
+    expect(useSelectionStore.getState().getSessionModelPick(sessionId)).toBe(null);
+    expect(useSelectionStore.getState().getSessionModelSelection(sessionId)).toEqual({ providerId: 'google', modelId: 'terra' });
+
+    useConfigStore.getState().setAgent('build');
+    expect(useConfigStore.getState().currentModelId).toBe('claude-3');
+
+    // An agent without a pinned model still carries the manual model (#2531).
+    useConfigStore.getState().setAgent('plan');
+    expect(useConfigStore.getState().currentModelId).toBe('claude-3');
+
+    useConfigStore.getState().setAgent('build-terra');
+    expect(useConfigStore.getState().currentModelId).toBe('terra');
+  });
+
+  test('[issue-3391] a draft model pick does not replace the next agent\'s pinned model', () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('anthropic', 'claude-3'), provider('openai', 'gpt-5.5')],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude-3',
       selectionSource: 'manual',
       directoryScoped: {},
     });
 
-    useSelectionStore.getState().pickSessionModel(sessionId, 'anthropic', 'claude-3');
-    // Picking an agent must not move the session off the model the user chose.
     useConfigStore.getState().setAgent('plan');
 
-    const state = useConfigStore.getState();
-    expect(state.currentProviderId).toBe('anthropic');
-    expect(state.currentModelId).toBe('claude-3');
-    expect(state.selectionSource).toBe('manual');
-    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toEqual({
-      providerId: 'anthropic',
-      modelId: 'claude-3',
-    });
+    expect(useConfigStore.getState().currentModelId).toBe('gpt-5.5');
+    expect(useConfigStore.getState().selectionSource).toBe('auto');
   });
-
-  for (const scenario of ['older override', 'undiscovered pinned model', 'restored selection', 'draft pick']) {
-    test(`[issue-5933] model precedence with ${scenario}`, () => {
-      const sessionId = 'ses_5933_precedence';
-      useSessionUIStore.setState({ currentSessionId: scenario === 'draft pick' ? null : sessionId });
-      useConfigStore.setState({
-        activeDirectoryKey: DIRECTORY,
-        providers: [provider('anthropic', 'claude-3', ['low', 'high']), provider('openai', 'gpt-5.5')],
-        agents: [testAgent('plan', { model: {
-          providerID: 'openai', modelID: scenario === 'undiscovered pinned model' ? 'not-discovered' : 'gpt-5.5',
-        } })],
-        settingsDefaultModel: 'openai/gpt-5.5',
-        currentProviderId: 'anthropic', currentModelId: 'claude-3', selectionSource: 'manual',
-        currentVariant: 'high', currentVariantSelection: { override: 'high', inherited: 'low' },
-      });
-      const selection = useSelectionStore.getState();
-      if (scenario === 'older override') selection.saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
-      if (scenario !== 'restored selection') selection.pickSessionModel(sessionId, 'anthropic', 'claude-3');
-      else selection.saveSessionModelSelection(sessionId, 'anthropic', 'claude-3');
-
-      useConfigStore.getState().setAgent('plan');
-
-      expect(useConfigStore.getState().currentModelId).toBe(scenario === 'restored selection' ? 'gpt-5.5' : 'claude-3');
-      expect(useConfigStore.getState().selectionSource).toBe(scenario === 'restored selection' ? 'auto' : 'manual');
-      expect(useConfigStore.getState().currentVariant).toBe(scenario === 'restored selection' ? undefined : 'high');
-    });
-  }
 
   test('[issue-4601] the settings effort stays with the settings model', () => {
     const sessionId = 'ses_4601_settings_effort';
@@ -1810,6 +1809,154 @@ describe('useConfigStore provider persistence', () => {
     expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toEqual({
       providerId: 'anthropic',
       modelId: 'claude-sonnet',
+    });
+  });
+
+  describe('[issue-6058] keeping the model and level on an agent switch', () => {
+    const SESSION = 'ses_6058_keep_model';
+    const sonnet = provider('anthropic', 'sonnet', ['low', 'high']);
+    const opus = provider('openai', 'opus', ['low', 'medium', 'high']);
+
+    const onPlanWithSonnetLow = (agents: Agent[]) => {
+      useSessionUIStore.setState({ currentSessionId: SESSION });
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [sonnet, opus],
+        agents,
+        settingsDefaultModel: 'openai/opus',
+        settingsDefaultVariant: 'high',
+        currentAgentName: 'plan',
+        currentProviderId: 'anthropic',
+        currentModelId: 'sonnet',
+        currentVariant: 'low',
+        currentVariantSelection: { override: 'low', inherited: undefined },
+        selectionSource: 'manual',
+        directoryScoped: {},
+      });
+    };
+    const shown = () => {
+      const state = useConfigStore.getState();
+      return [state.currentAgentName, `${state.currentProviderId}/${state.currentModelId}`, state.currentVariant];
+    };
+
+    afterEach(() => {
+      useUIStore.setState({ keepModelOnAgentSwitch: false });
+    });
+
+    test('a switch keeps what is on screen even when the session remembers another model for that agent', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      // Build ran on Opus/high earlier in this session.
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'openai', 'opus');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'openai', 'opus', 'high');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet', 'high');
+      useUIStore.setState({ keepModelOnAgentSwitch: true, lastUsedEfforts: {} });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'anthropic/sonnet', 'low']);
+      // Recorded for Build too, so reopening the session or the composer's
+      // per-agent restore shows the same pair instead of Opus/high.
+      const selection = useSelectionStore.getState();
+      expect(selection.getAgentModelForSession(SESSION, 'build')).toEqual({ providerId: 'anthropic', modelId: 'sonnet' });
+      expect(selection.getAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet')).toBe('low');
+      expect(selection.getSessionModelSelection(SESSION)).toEqual({ providerId: 'anthropic', modelId: 'sonnet' });
+      // Carrying a level is not choosing one: the model's memory stays as it was.
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({});
+    });
+
+    test('an agent that pins a model still brings it, and one whose pin is not listed keeps what is on screen', () => {
+      onPlanWithSonnetLow([
+        testAgent('plan'),
+        testAgent('build', { model: { providerID: 'openai', modelID: 'opus' }, variant: 'medium' }),
+        testAgent('review', { model: { providerID: 'gone', modelID: 'removed' } }),
+      ]);
+      // Sonnet was picked on Build earlier in this session; the pin still wins.
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'anthropic', 'sonnet');
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
+      // ModelControls' per-agent restore reads this right after the switch.
+      expect(useSelectionStore.getState().getAgentModelForSession(SESSION, 'build')).toEqual({ providerId: 'openai', modelId: 'opus' });
+
+      useConfigStore.getState().setAgent('review', { pick: true });
+      expect(shown()).toEqual(['review', 'openai/opus', 'medium']);
+    });
+
+    test('back on the session agent after a pinned one, the kept model is what the next send switches to', () => {
+      onPlanWithSonnetLow([
+        testAgent('plan'),
+        testAgent('build', { model: { providerID: 'openai', modelID: 'opus' }, variant: 'medium' }),
+      ]);
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+      useConfigStore.getState().setAgent('plan', { pick: true });
+
+      expect(shown()).toEqual(['plan', 'openai/opus', 'medium']);
+      // Plan is the record's agent, so no agent pick carries the model: the
+      // model pick has to, or the send keeps the session on Sonnet.
+      expect(useSelectionStore.getState().getSessionModelPick(SESSION)).toEqual({ providerId: 'openai', modelId: 'opus' });
+    });
+
+    test('a draft carries the level an agent pinned for its model as a choice on the next agent', () => {
+      useSessionUIStore.setState({ currentSessionId: null });
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [sonnet, opus],
+        agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'opus' }, variant: 'medium' }), testAgent('build')],
+        settingsDefaultModel: 'anthropic/sonnet',
+        settingsDefaultVariant: 'high',
+        currentAgentName: 'plan',
+        currentProviderId: 'openai',
+        currentModelId: 'opus',
+        currentVariant: 'medium',
+        currentVariantSelection: { override: undefined, inherited: 'medium' },
+        selectionSource: 'auto',
+        directoryScoped: {},
+      });
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
+      // Build inherits nothing for Opus, so the level has to travel as a choice.
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: 'medium', inherited: undefined });
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentModelId).toBe('opus');
+    });
+
+    test('a level the next agent inherits anyway stays inherited and replaces the level saved for it', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      useConfigStore.setState({ settingsDefaultModel: 'anthropic/sonnet', settingsDefaultVariant: 'high', currentVariant: 'high', currentVariantSelection: { override: undefined, inherited: 'high' } });
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet', 'low');
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'anthropic/sonnet', 'high']);
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: undefined, inherited: 'high' });
+      expect(useSelectionStore.getState().getAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet')).toBe(undefined);
+    });
+
+    test('restoring an open session is no switch: its agent comes back with its own model', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'openai', 'opus');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'openai', 'opus', 'medium');
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build');
+
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
+    });
+
+    test('with the setting off the agent gets back its own model and level, as before', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'openai', 'opus');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'openai', 'opus', 'medium');
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
     });
   });
 
@@ -2398,8 +2545,18 @@ describe('useConfigStore provider persistence', () => {
     const newAgents = deferred<TestAgent[]>();
     let providerReads = 0;
     let agentReads = 0;
-    getProvidersForConfigImpl = () => ++providerReads === 1 ? providers.promise : newProviders.promise;
-    listAgentsImpl = () => ++agentReads === 1 ? agents.promise : newAgents.promise;
+    const replacementProviderRead = deferred<void>();
+    const replacementAgentRead = deferred<void>();
+    getProvidersForConfigImpl = () => {
+      if (++providerReads === 1) return providers.promise;
+      replacementProviderRead.resolve();
+      return newProviders.promise;
+    };
+    listAgentsImpl = () => {
+      if (++agentReads === 1) return agents.promise;
+      replacementAgentRead.resolve();
+      return newAgents.promise;
+    };
     const providerBefore = getProvidersCalls;
     const agentBefore = listAgentsCalls;
     const triggers = Array.from({ length: 8 }, () => [
@@ -2409,7 +2566,7 @@ describe('useConfigStore provider persistence', () => {
     providers.resolve(providerResponse('old'));
     agents.resolve([{ name: 'build', mode: 'primary' }]);
     await Promise.all(triggers.slice(0, 2));
-    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    await Promise.all([replacementProviderRead.promise, replacementAgentRead.promise]);
     expect(getProvidersCalls - providerBefore).toBe(2);
     expect(listAgentsCalls - agentBefore).toBe(2);
     newProviders.resolve(providerResponse('live'));
@@ -2461,6 +2618,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a worktree left while its catalog was incomplete is read again on return', async () => {
     const worktree = '/workspace/starting-worktree';
+    liveAgents = [testAgent('build')];
     let pluginRegistered = false;
     const requested: Array<string | null | undefined> = [];
     getProvidersForConfigImpl = async (directory) => {
@@ -2484,6 +2642,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a read that began before the catalog changed does not make the worktree fresh', async () => {
     const worktree = '/workspace/slow-worktree';
+    liveAgents = [testAgent('build')];
     const slowRead = deferred<TestProviderResponse>();
     let reads = 0;
     getProvidersForConfigImpl = async (directory) => {
@@ -2618,6 +2777,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a directory activation stops after a runtime switch during its provider wait', async () => {
     const pending = deferred<TestProviderResponse>();
+    liveAgents = [testAgent('build')];
     getProvidersForConfigImpl = () => pending.promise;
     const activation = useConfigStore.getState().activateDirectory(DIRECTORY);
     switchRuntimeEndpoint({ apiBaseUrl: 'https://activation-next.example', runtimeKey: 'activation-next' });
@@ -2628,7 +2788,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers).toEqual([]);
   });
 
-  test('a saved default the live catalog no longer lists gives way without being cleared', async () => {
+  test('a saved default the live catalog no longer lists stands instead of a model nobody chose', async () => {
     liveAgents = [testAgent('build')];
     liveProviderId = 'sidecar';
     persistedOpenChamberSettings = { defaultModel: 'sidecar/default' };
@@ -2638,7 +2798,7 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().settingsDefaultModel).toBe('sidecar/default');
     expect(useConfigStore.getState().currentProviderId).toBe('sidecar');
-    expect(useConfigStore.getState().currentModelId).toBe('sidecar-model');
+    expect(useConfigStore.getState().currentModelId).toBe('default');
   });
 
   test('a live catalog without the project default selects the global default (provider removed)', async () => {
@@ -2698,7 +2858,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'agent', currentModelId: 'pinned' });
   });
 
-  test('with neither configured default in the live catalog the last chat pick and fallback skip missing models too', async () => {
+  test('with every named model gone from the live catalog the first one stands and Big Pickle is not chosen', async () => {
     liveAgents = [testAgent('build')];
     projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'removed/chosen' };
     persistedOpenChamberSettings = { defaultModel: 'removed/global' };
@@ -2707,7 +2867,34 @@ describe('useConfigStore provider persistence', () => {
 
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'removed', currentModelId: 'chosen' });
+  });
+
+  const reloadCases: Array<[string, NonNullable<typeof persistedOpenChamberSettings>, string | undefined, 'chosen' | 'zen' | undefined]> = [
+    ['settings default', { defaultModel: 'perf/chosen' }, undefined, undefined],
+    ['OpenCode config model', {}, 'perf/chosen', undefined],
+    ['last chat pick', {}, undefined, 'chosen'],
+    ['settings default over a Zen last pick', { defaultModel: 'perf/chosen' }, undefined, 'zen'],
+  ];
+  for (const [name, settings, opencodeDefaultModel, lastPick] of reloadCases) test(`a reload that lists only the built-in provider keeps the ${name}`, async () => {
+    liveAgents = [testAgent('build')];
+    persistedOpenChamberSettings = settings;
+    useConfigStore.setState({ opencodeDefaultModel });
+    if (lastPick === 'chosen') useUIStore.getState().setLastSelectedModel('perf', 'chosen');
+    if (lastPick === 'zen') useUIStore.getState().setLastSelectedModel('opencode', 'big-pickle');
+    const full = {
+      providers: [providerInfo('opencode'), providerInfo('perf')],
+      models: [model('opencode', 'big-pickle'), model('perf', 'chosen')],
+      default: { providerID: 'perf', id: 'chosen' },
+    };
+    for (const listing of [full, providerResponse('opencode', 'big-pickle'), full]) {
+      getProvidersForConfigImpl = async () => listing;
+      await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+      await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+      useConfigStore.setState({ opencodeDefaultModel });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'perf', currentModelId: 'chosen' });
+    }
   });
 
   test('an empty live catalog keeps the configured default', async () => {
@@ -5108,5 +5295,48 @@ describe('voice endpoint path settings', () => {
 
     expect(useConfigStore.getState().sttEndpointPath).toBe('/speech_to_text');
     expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
+  });
+});
+
+describe('voice key provider settings', () => {
+  beforeEach(() => {
+    storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: makeStorage() });
+    useConfigStore.setState({ openaiCompatibleKeyProvider: undefined, sttKeyProvider: undefined });
+  });
+
+  test('starts with no choice, so the provider whose address matches can be selected', () => {
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBeUndefined();
+    expect(useConfigStore.getState().sttKeyProvider).toBeUndefined();
+  });
+
+  test('keeps the custom server choice in local storage, and none as a choice of its own', () => {
+    useConfigStore.getState().setOpenaiCompatibleKeyProvider('gateway');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('gateway');
+    expect(localStorage.getItem('openaiCompatibleKeyProvider')).toBe('gateway');
+
+    useConfigStore.getState().setOpenaiCompatibleKeyProvider('');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBe('');
+    expect(localStorage.getItem('openaiCompatibleKeyProvider')).toBe('');
+  });
+
+  test('keeps the stt choice in local storage, apart from the speech choice', () => {
+    useConfigStore.getState().setSttKeyProvider('gateway');
+
+    expect(useConfigStore.getState().sttKeyProvider).toBe('gateway');
+    expect(localStorage.getItem('sttKeyProvider')).toBe('gateway');
+    expect(useConfigStore.getState().openaiCompatibleKeyProvider).toBeUndefined();
+    expect(localStorage.getItem('openaiCompatibleKeyProvider')).toBeNull();
+  });
+
+  test('the stt choice of one instance, including None, does not carry over to an instance with no choice', () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://stt-choice-a.example', runtimeKey: 'stt-choice-a' });
+    useConfigStore.getState().setSttKeyProvider('');
+    expect(useConfigStore.getState().sttKeyProvider).toBe('');
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://stt-choice-b.example', runtimeKey: 'stt-choice-b' });
+
+    expect(useConfigStore.getState().sttKeyProvider).toBeUndefined();
+    expect(localStorage.getItem('sttKeyProvider')).toBeNull();
   });
 });

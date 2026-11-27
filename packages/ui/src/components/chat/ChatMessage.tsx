@@ -1,7 +1,7 @@
 import React from 'react';
 import { MessageSliceContext } from './message/messageSliceContext';
 import { modelVariantNames } from '@/lib/modelVariants';
-import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
+import { findCatalogModel, isWaitingSteer, type Message, type Part } from '@/lib/opencode/model';
 import { readPromptOrigin } from '@/lib/opencode/prompt-origin';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -49,6 +49,8 @@ import { useChatColumnActions } from './chatColumnSession';
 import { MessageSelectionMark } from './messageSelection/MessageSelectionMark';
 import { MESSAGE_SELECT_UNIT_ATTRIBUTE } from './messageSelection/useMessageSelectionClicks';
 import { useMessageSelectionEntry } from './messageSelection/useMessageSelectionEntry';
+import { useShownSteerWait } from '@/hooks/useShownSteerWait';
+import { SteerWaitOutline } from './message/SteerWaitOutline';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -157,14 +159,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         content: '',
     });
 
+    const sliceBounds = slice ? `${sliceName ?? ''}-${slice.to?.partId ?? ''}:${slice.to?.offset ?? ''}` : '';
     React.useEffect(() => {
         setExpandedTools(readExpandedToolsCache(message.info.id));
-    }, [message.info.id]);
+    }, [message.info.id, sliceBounds]);
 
 
 
     const messageRole = React.useMemo(() => deriveMessageRole(message.info), [message.info]);
     const isUser = messageRole.isUser;
+    const isPending = isWaitingSteer(message.info);
     const chatSurfaceMode = useChatSurfaceMode();
 
     const sessionId = message.info.sessionID;
@@ -270,6 +274,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         const timeInfo = message.info.time as { created?: number } | undefined;
         return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
     }, [message.info.time]);
+    const showSteerWait = useShownSteerWait(isPending, messageCreatedAt);
     const { focusInput: focusColumnInput } = useChatColumnActions();
     const isPinnedIntoContext = useGlobalSessionsStore((state) => {
         const session = state.entityById.get(sessionId);
@@ -606,19 +611,25 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 >
                                     <MessageSelectionMark sessionId={sessionId} unitKey={promptUnitKey} kind="prompt" />
                                     <div className={cn('max-w-[85%]', chatSurfaceMode === 'peek' ? 'pb-3' : undefined)}>
+                                        {isPending ? (
+                                            <span role="status" className="sr-only">{showSteerWait ? t('chat.messageBody.status.waitingForAgent') : null}</span>
+                                        ) : null}
                                         <div
                                             style={{
                                                 backgroundColor: 'var(--chat-user-message-bg)',
                                                 borderRadius: userMessageRadius,
                                                 borderBottomRightRadius: 'var(--radius-sm)',
                                             }}
-                                            className="px-5 py-3 shadow-none border border-primary/5"
+                                            className={cn('px-5 py-3 shadow-none border', showSteerWait ? 'relative border-transparent' : 'border-primary/5')}
                                             data-user-message-bubble=""
+                                            data-user-message-waiting={showSteerWait ? '' : undefined}
                                         >
+                                            {showSteerWait ? <SteerWaitOutline /> : null}
                                             <MessageBody
                                                 messageId={message.info.id}
                                                 parts={visibleParts}
                                                 isUser={isUser}
+                                                isPending={isPending}
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
                                                 messageCreatedAt={messageCreatedAt ?? undefined}
@@ -641,11 +652,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onSelectMessages={onSelectMessages}
                                                 showReasoningTraces={showReasoningTraces}
                                                 agentMention={agentMention}
-                                                onRevert={handleRevert}
-                                                onFork={isUser ? handleFork : undefined}
+                                                onRevert={isPending ? undefined : handleRevert}
+                                                onFork={isUser && !isPending ? handleFork : undefined}
                                                 contextPinned={isPinnedIntoContext}
                                                 contextPinPending={pinPending}
-                                                onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
+                                                onToggleContextPin={!isPending && canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorResponseBody={assistantErrorResponseBody}
                                                 extraActions={guestMessageActions}
@@ -657,6 +668,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         messageId={message.info.id}
                                         parts={visibleParts}
                                         isUser={isUser}
+                                        isPending={isPending}
                                         isMessageCompleted={isMessageCompleted}
                                         messageFinish={messageFinish}
                                         messageCreatedAt={messageCreatedAt ?? undefined}
@@ -679,11 +691,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         onSelectMessages={onSelectMessages}
                                         showReasoningTraces={showReasoningTraces}
                                         agentMention={agentMention}
-                                        onRevert={handleRevert}
-                                        onFork={isUser ? handleFork : undefined}
+                                        onRevert={isPending ? undefined : handleRevert}
+                                        onFork={isUser && !isPending ? handleFork : undefined}
                                         contextPinned={isPinnedIntoContext}
                                         contextPinPending={pinPending}
-                                        onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
+                                        onToggleContextPin={!isPending && canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                         errorMessage={assistantErrorText}
                                         errorResponseBody={assistantErrorResponseBody}
                                         userMessagePart="actions"

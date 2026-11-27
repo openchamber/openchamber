@@ -8,7 +8,7 @@ import {
   waitForPendingDraftWorktreeRequest,
 } from '@/lib/worktrees/pendingDraftWorktree';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { noteSpaceModelAccess } from './space-model-access';
+import { noteSpaceModelAccess } from './space-model-offer';
 import type { SpaceSetupPlan } from './space-setup';
 import { forgetSpaceCreationRequest, noteSpaceCreationRequest } from './space-creation-requests';
 

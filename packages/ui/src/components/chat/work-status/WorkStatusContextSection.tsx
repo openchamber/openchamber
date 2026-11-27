@@ -10,6 +10,7 @@ import type { State } from '@/sync/types';
 import type { Message } from '@/lib/opencode/model';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { resolveLoadedSkillTarget, sameLoadedSkills, selectLoadedSkills, type LoadedSkill } from './loadedSkills';
+import { openSkillSettings } from '@/components/sections/skills/openSkillSettings';
 import { getDistinctLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, getRepositoryThreadRef, isLinkedChange, type LinkedIssue, type RepositoryThreadRef } from '@/lib/linkedIssues';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
@@ -198,14 +199,12 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const leaveWorkStatus = useLeaveWorkStatus();
   const openLoadedSkill = (skill: LoadedSkill) => {
     const target = resolveLoadedSkillTarget(skill, installedSkills);
-    const ui = useUIStore.getState();
     if (target.kind === 'settings') {
-      useSkillsStore.getState().setSelectedSkill(target.name);
-      ui.setSettingsPage('skills.installed');
-      ui.setSettingsDialogOpen(true);
+      openSkillSettings(target.name);
       leaveWorkStatus?.();
       return;
     }
+    const ui = useUIStore.getState();
     if (runtimeApis?.editor) {
       void runtimeApis.editor.openFile(target.path);
       return;
@@ -452,8 +451,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           tooltip={entry.title ? renderLinkedLabel(entry) : undefined}
           muted
           onClick={(event) => {
-            openTrackerItem(entry.url, directory, event);
-            leaveWorkStatus?.();
+            if (openTrackerItem(entry.url, directory, event) !== 'guest-panel') leaveWorkStatus?.();
           }}
           className="group/linked"
           value={(

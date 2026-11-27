@@ -6,6 +6,8 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
+import { useComposerRecordingPublication } from '@/hooks/useComposerRecordingPublication';
+import { ComposerPromptReadOnlyContext, ComposerUnderMessageSelectionContext } from '@/lib/dictation/composerRecording';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
@@ -107,6 +109,9 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const { currentTheme } = useThemeSystem();
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const dictationAutoSend = useConfigStore((state) => state.dictationAutoSend);
+    const promptReadOnly = React.useContext(ComposerPromptReadOnlyContext);
+    const selectingMessages = React.useContext(ComposerUnderMessageSelectionContext);
+    const keyConfirmAction = dictationAutoSend && !promptReadOnly && !selectingMessages ? 'send' : 'insert';
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '');
     const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
@@ -148,6 +153,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     } = dictation;
     const recordingBlink = useWaitingBlink(status === 'recording');
 
+    const shown = supported && (dictationEnabled || status !== 'idle');
     const isModelDownloading = status === 'recording' && errorReason === 'model_download_in_progress';
     const downloadPercent = useModelDownloadProgress(isModelDownloading);
 
@@ -196,10 +202,11 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     }, [status, onActiveChange]);
 
     React.useEffect(() => {
-        if (!supported || !dictationEnabled) return;
+        if (!shown) return;
         const marker = composerMarkerRef.current;
         const onToggle = (event: Event) => {
-            const requestedForm = (event as CustomEvent<{ composer?: HTMLFormElement }>).detail?.composer;
+            const detail = (event as CustomEvent<{ composer?: HTMLFormElement; startOnly?: boolean }>).detail;
+            const requestedForm = detail?.composer;
             if (requestedForm && (!marker || !requestedForm.contains(marker))) return;
             const targetForm = requestedForm
                 ?? document.activeElement?.closest('form')
@@ -209,23 +216,23 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             event.stopImmediatePropagation();
             if (statusRef.current === 'idle') {
                 startRecording();
-            } else if (statusRef.current === 'recording') {
-                confirmWith(dictationAutoSend ? 'send' : 'insert');
+            } else if (statusRef.current === 'recording' && !detail?.startOnly) {
+                confirmWith(keyConfirmAction);
             }
         };
         window.addEventListener('openchamber:dictation-toggle', onToggle);
         return () => window.removeEventListener('openchamber:dictation-toggle', onToggle);
-    }, [supported, dictationEnabled, startRecording, confirmWith, dictationAutoSend]);
+    }, [shown, startRecording, confirmWith, keyConfirmAction]);
 
     React.useEffect(() => {
         const marker = composerMarkerRef.current;
         return () => {
             if (recordingOwner === marker) recordingOwner = null;
         };
-    }, [supported, dictationEnabled]);
+    }, [shown]);
 
     React.useEffect(() => {
-        if (status !== 'recording') {
+        if (status !== 'recording' || selectingMessages) {
             return;
         }
         const onKeyDown = (event: KeyboardEvent) => {
@@ -235,7 +242,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
-                confirmWith(dictationAutoSend ? 'send' : 'insert');
+                confirmWith(keyConfirmAction);
                 return;
             }
             if (event.key === 'Escape') {
@@ -246,7 +253,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         };
         window.addEventListener('keydown', onKeyDown, { capture: true });
         return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-    }, [status, confirmWith, cancelDictation, dictationAutoSend]);
+    }, [status, selectingMessages, confirmWith, cancelDictation, keyConfirmAction]);
 
     const overlayRef = React.useRef<HTMLDivElement | null>(null);
     const transcriptAreaRef = React.useRef<HTMLDivElement | null>(null);
@@ -305,6 +312,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             cleanupScroll();
         };
     }, [hasSalvageText, partialTranscript]);
+    useComposerRecordingPublication({ status, duration, error, errorReason, partialTranscript }, {
+        finish: () => confirmWith('insert'),
+        cancel: () => { void cancelDictation(); },
+        retry: () => {
+            pendingActionRef.current = 'insert';
+            void retryFailedDictation();
+        },
+        discard: discardFailedDictation,
+        acceptPartial: () => {
+            pendingActionRef.current = 'insert';
+            acceptPartialTranscript();
+        },
+        subscribeLevel,
+    });
+
     React.useEffect(() => () => {
         if (hasReportedHeightRef.current) {
             hasReportedHeightRef.current = false;
@@ -321,7 +343,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         }
     }, [isActiveStatus]);
 
-    if (!supported || !dictationEnabled) {
+    if (!shown) {
         return null;
     }
 

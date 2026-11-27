@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { EMPTY_SIDEBAR_SECTION_FILTER, type CustomSidebarSection, type SidebarWorkFacts } from '@/lib/sidebarSections';
 import type { SidebarWorkRef } from '../works/sidebarWorks';
-import { resolveSidebarSectionMembership, resolveVisibleSidebarSections, type VisibleSidebarSection } from './sectionMembership';
+import { isChatListedInPinSections, resolveSidebarSectionMembership, resolveVisibleSidebarSections, type VisibleSidebarSection } from './sectionMembership';
 
 const ref = (id: string, projectId = 'p1'): SidebarWorkRef => ({ kind: 'session', key: `session:${id}`, projectId, rootSessionId: id });
 
 const facts = (overrides: Partial<SidebarWorkFacts> = {}): SidebarWorkFacts => ({
   kind: 'session', projectId: 'p1', folderId: null, pin: null, inWork: false, done: false, running: false, needsAnswer: false,
-  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], scheduled: false, ...overrides,
+  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], lead: false, scheduled: false, ...overrides,
 });
 
 const section = (id: string, overrides: Partial<CustomSidebarSection> = {}): CustomSidebarSection => ({
@@ -23,7 +23,7 @@ describe('resolveSidebarSectionMembership', () => {
     projectId: work.projectId,
   });
   const resolve = (sections: VisibleSidebarSection[], pinned: SidebarWorkRef[] = [], work: SidebarWorkRef[] = []) => resolveSidebarSectionMembership({
-    sections, pinned, work, all: [ref('a'), ref('b'), ref('c', 'p2')], projectIds: new Set(['p1', 'p2']), factsOf, now: 1_000,
+    sections, pinned, work, isPinned: (entry) => pinned.some((pin) => pin.key === entry.key), all: [ref('a'), ref('b'), ref('c', 'p2')], projectIds: new Set(['p1', 'p2']), factsOf, now: 1_000,
   });
 
   test('a section that takes its works out of their projects still leaves them to the other sections', () => {
@@ -56,6 +56,51 @@ describe('resolveSidebarSectionMembership', () => {
     expect(result.pinned.map((work) => work.key)).toEqual(['session:a']);
     expect(result.work.map((work) => work.key)).toEqual(['session:b']);
     expect([...result.claimedKeys]).toEqual(['session:b']);
+  });
+
+  test('a pinned work in work shows in both, and only Pinned decides whether it leaves its project', () => {
+    const workFirst = resolve([{ kind: 'work', claims: true }, { kind: 'pinned', claims: false }], [ref('a')], [ref('a'), ref('b')]);
+    expect(workFirst.pinned.map((work) => work.key)).toEqual(['session:a']);
+    expect(workFirst.work.map((work) => work.key)).toEqual(['session:a', 'session:b']);
+    expect([...workFirst.claimedKeys]).toEqual(['session:b']);
+    const pinnedClaims = resolve([{ kind: 'pinned', claims: true }, { kind: 'work', claims: false }], [ref('a')], [ref('a'), ref('b')]);
+    expect([...pinnedClaims.claimedKeys]).toEqual(['session:a']);
+  });
+
+  test('a pinned Chat leaves Chats exactly when a pinned project work leaves its project', () => {
+    const chat: SidebarWorkRef = { kind: 'session', key: 'session:chat', projectId: null, rootSessionId: 'chat', chat: true };
+    expect(resolve([{ kind: 'pinned', claims: false }], [chat]).claimedKeys.size).toBe(0);
+    expect([...resolve([{ kind: 'pinned', claims: true }], [chat]).claimedKeys]).toEqual(['session:chat']);
+  });
+
+  test('In work lists what no shown section of the user\'s own lists, wherever it stands in the order', () => {
+    const inWork = { kind: 'work', claims: true } as const;
+    const client = custom(section('client', { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, projectIds: ['p2'] } }));
+    for (const sections of [[inWork, client], [client, inWork]]) {
+      const result = resolve(sections, [], [ref('a'), ref('c', 'p2')]);
+      expect(result.work.map((work) => work.key)).toEqual(['session:a']);
+      expect(result.custom.get('client')?.map((work) => work.key)).toEqual(['session:c']);
+      expect([...result.claimedKeys]).toEqual(['session:a']);
+    }
+    expect(resolve([inWork], [], [ref('a'), ref('c', 'p2')]).work.map((work) => work.key)).toEqual(['session:a', 'session:c']);
+  });
+
+  test('a section filtered by state leaves its works in In work, also with other conditions', () => {
+    const result = resolve([
+      custom(section('running', { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'], projectIds: ['p1'] } })),
+      { kind: 'work', claims: true },
+    ], [], [ref('a')]);
+    expect(result.custom.get('running')?.map((work) => work.key)).toEqual(['session:a', 'session:b']);
+    expect(result.work.map((work) => work.key)).toEqual(['session:a']);
+  });
+
+  test('a section that asks for nothing takes nothing from In work, and a group of projects neither', () => {
+    const result = resolve([
+      custom(section('blank')),
+      custom(section('clients', { grouping: 'project', filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, projectIds: ['p1'] } })),
+      { kind: 'work', claims: true },
+    ], [], [ref('a')]);
+    expect(result.work.map((work) => work.key)).toEqual(['session:a']);
   });
 
   test('a group of projects takes its projects from Projects only', () => {
@@ -107,5 +152,30 @@ describe('resolveVisibleSidebarSections', () => {
     expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: true })).toEqual([{ kind: 'pages' }, { kind: 'projects' }]);
     expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: ['pages'], pages: true })).toEqual([{ kind: 'projects' }]);
     expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: false })).toEqual([{ kind: 'projects' }]);
+  });
+});
+
+describe('isChatListedInPinSections', () => {
+  const pinSection = (pins: string[], overrides: Partial<CustomSidebarSection> = {}) => custom(section(pins.join(','), { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, pins }, ...overrides }));
+  const listed = (sections: VisibleSidebarSection[], pin: string | null, extra: Partial<SidebarWorkFacts> = {}) => (
+    isChatListedInPinSections(sections, pin, () => facts({ projectId: null, pin, ...extra }), 1_000)
+  );
+
+  test('Pinned lists a Chat on the default list only', () => {
+    expect(listed([{ kind: 'pinned', claims: false }], 'pinned')).toBe(true);
+    expect(listed([{ kind: 'pinned', claims: false }], 'later')).toBe(false);
+    expect(listed([{ kind: 'pinned', claims: false }], null)).toBe(false);
+  });
+
+  test('a section with a Pins condition lists a Chat whose list and other conditions match', () => {
+    expect(listed([pinSection(['later'])], 'later')).toBe(true);
+    expect(listed([pinSection(['elsewhere'])], 'later')).toBe(false);
+    expect(listed([pinSection(['later'], { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, pins: ['later'], states: ['running'] } })], 'later')).toBe(false);
+    expect(listed([pinSection(['later'], { grouping: 'project' })], 'later')).toBe(false);
+  });
+
+  test('a section without a Pins condition never lists a Chat', () => {
+    expect(listed([custom(section('running', { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } }))], 'pinned', { running: true })).toBe(false);
+    expect(listed([{ kind: 'chats' }, { kind: 'work', claims: false }], 'pinned')).toBe(false);
   });
 });

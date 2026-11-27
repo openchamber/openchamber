@@ -6,6 +6,7 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectFolderMissing } from '@/components/session/sidebar/projects/useProjectFolderMissing';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
+import { useSelectedNestedSessionFolder } from '@/sync/session-admission';
 import { abortCurrentOperation } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
@@ -17,6 +18,9 @@ import { PermissionDock } from '../PermissionDock';
 import { FormDock } from '../FormDock';
 import { MessageSelectionBar } from '../messageSelection/MessageSelectionBar';
 import { ReadOnlyPromptBanner } from './ReadOnlyPromptBanner';
+import { DictationStatusControls } from '@/components/dictation/DictationStatusControls';
+import { buttonVariants } from '@/components/ui/button-variants';
+import { ComposerPromptReadOnlyContext, ComposerRecordingSlotContext, useSlotComposerRecording, useSlotHasComposerRecording } from '@/lib/dictation/composerRecording';
 
 const ComposerRiders: React.FC<{
     showScrollToBottom: boolean;
@@ -60,14 +64,17 @@ const ReadOnlyComposer: React.FC<{
     permissionCount: number;
     spaceArchiveName: string | null;
     sessionStatusType: string;
-}> = ({ sessionId, directory, permissionCount, spaceArchiveName, sessionStatusType }) => {
+    recordingSlot: string;
+}> = ({ sessionId, directory, permissionCount, spaceArchiveName, sessionStatusType, recordingSlot }) => {
     const { t } = useI18n();
+    const recording = useSlotComposerRecording(recordingSlot);
     const listedSession = useGlobalSessionsStore((state) => (sessionId ? state.entityById.get(sessionId) : undefined));
     const session = useSession(sessionId, directory) ?? listedSession;
     const projects = useProjectsStore((state) => state.projects);
     const worktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
     const ownDirectory = session ? resolveGlobalSessionDirectory(session) : null;
-    const outsideFolder = ownDirectory && !isSessionDirectoryAdmitted(ownDirectory, projects, worktrees) ? ownDirectory : null;
+    const selectedNestedFolder = useSelectedNestedSessionFolder(sessionId, ownDirectory);
+    const outsideFolder = ownDirectory && !selectedNestedFolder && !isSessionDirectoryAdmitted(ownDirectory, projects, worktrees) ? ownDirectory : null;
     const folderMissing = useProjectFolderMissing(outsideFolder ?? undefined);
     const sessionText = outsideFolder
         ? t(folderMissing ? 'chat.container.readOnlyFolderMissingBanner' : 'chat.container.readOnlyFolderOutsideBanner', { name: formatDirectoryName(outsideFolder) })
@@ -94,6 +101,13 @@ const ReadOnlyComposer: React.FC<{
                     ? () => void abortCurrentOperation(sessionId)
                     : undefined}
                 stopLabel={t('chat.chatInput.actions.stopGeneratingAria')}
+                leading={recording ? (
+                    <DictationStatusControls
+                        view={recording.view}
+                        actions={recording.actions}
+                        buttonClassName={buttonVariants({ variant: 'ghost', size: 'icon', className: '-my-1.5 text-muted-foreground hover:text-foreground' })}
+                    />
+                ) : null}
             />
         </>
     );
@@ -147,55 +161,69 @@ export const ComposerSlot: React.FC<{
     active,
     scrollToBottomOnSend,
     resumeToLatestInstant,
-}) => (
-    <div
-        ref={attachComposerSlot}
-        data-composer-slot={floatingComposer ? 'floating' : 'flow'}
-        className={cn(
-            'z-10 flex min-h-0',
-            floatingComposer
-                ? 'absolute inset-x-0 bottom-0'
-                : 'relative',
-            isDesktopExpandedInput
-                ? 'flex-1 min-h-0 bg-background'
-                : draftLayoutVisible && !useCompactDraftLayout
-                    ? 'flex-1 items-center justify-center bg-background pb-[6vh]'
-                : !floatingComposer && 'bg-background'
-        )}
-    >
-        {showRiders && (
-            <ComposerRiders
-                showScrollToBottom={showScrollToBottom}
-                sessionIsWorking={sessionIsWorking}
-                onResumeToLatest={onResumeToLatest}
-                userOwnsScroll={userOwnsScroll}
-                onStatusOverlayNode={onStatusOverlayNode}
-            />
-        )}
-        {promptReadOnly && messageSelectionActive && currentSessionId ? (
-            <div className="chat-input-column w-full pb-4">
-                <MessageSelectionBar
-                    sessionId={currentSessionId}
-                    directory={directory ?? null}
-                    isMobile={isMobile}
-                    radius={isMobile ? '1.25rem' : 'var(--radius-xl)'}
+}) => {
+    const recordingSlot = React.useId();
+    const keepComposerMounted = useSlotHasComposerRecording(recordingSlot);
+    return (
+        <div
+            ref={attachComposerSlot}
+            data-composer-slot={floatingComposer ? 'floating' : 'flow'}
+            className={cn(
+                'z-10 flex min-h-0',
+                floatingComposer
+                    ? 'absolute inset-x-0 bottom-0'
+                    : 'relative',
+                isDesktopExpandedInput
+                    ? 'flex-1 min-h-0 bg-background'
+                    : draftLayoutVisible && !useCompactDraftLayout
+                        ? 'flex-1 items-center justify-center bg-background pb-[6vh]'
+                    : !floatingComposer && 'bg-background'
+            )}
+        >
+            {showRiders && (
+                <ComposerRiders
+                    showScrollToBottom={showScrollToBottom}
+                    sessionIsWorking={sessionIsWorking}
+                    onResumeToLatest={onResumeToLatest}
+                    userOwnsScroll={userOwnsScroll}
+                    onStatusOverlayNode={onStatusOverlayNode}
                 />
-            </div>
-        ) : promptReadOnly ? (
-            <ReadOnlyComposer
-                sessionId={currentSessionId}
-                directory={directory}
-                permissionCount={permissionCount}
-                spaceArchiveName={spaceArchiveName}
-                sessionStatusType={sessionStatusType}
-            />
-        ) : (
-            <ChatInput
-                active={active}
-                scrollToBottom={scrollToBottomOnSend}
-                scrollToLatest={resumeToLatestInstant}
-                draftPresentationExiting={draftPresentationExiting}
-            />
-        )}
-    </div>
-);
+            )}
+            {promptReadOnly && messageSelectionActive && currentSessionId ? (
+                <div className="chat-input-column w-full pb-4">
+                    <ComposerRecordingSlotContext.Provider value={recordingSlot}>
+                        <MessageSelectionBar
+                            sessionId={currentSessionId}
+                            directory={directory ?? null}
+                            isMobile={isMobile}
+                            radius={isMobile ? '1.25rem' : 'var(--radius-xl)'}
+                        />
+                    </ComposerRecordingSlotContext.Provider>
+                </div>
+            ) : promptReadOnly ? (
+                <ReadOnlyComposer
+                    sessionId={currentSessionId}
+                    directory={directory}
+                    permissionCount={permissionCount}
+                    spaceArchiveName={spaceArchiveName}
+                    sessionStatusType={sessionStatusType}
+                    recordingSlot={recordingSlot}
+                />
+            ) : null}
+            {!promptReadOnly || keepComposerMounted ? (
+                <ComposerRecordingSlotContext.Provider value={recordingSlot}>
+                    <ComposerPromptReadOnlyContext.Provider value={promptReadOnly}>
+                        <div className={promptReadOnly ? 'hidden' : 'contents'}>
+                            <ChatInput
+                                active={active}
+                                scrollToBottom={scrollToBottomOnSend}
+                                scrollToLatest={resumeToLatestInstant}
+                                draftPresentationExiting={draftPresentationExiting}
+                            />
+                        </div>
+                    </ComposerPromptReadOnlyContext.Provider>
+                </ComposerRecordingSlotContext.Provider>
+            ) : null}
+        </div>
+    );
+};

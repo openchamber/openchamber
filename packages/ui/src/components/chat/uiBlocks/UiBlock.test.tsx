@@ -20,6 +20,7 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
   requestAnimationFrame: browser.requestAnimationFrame, cancelAnimationFrame: browser.cancelAnimationFrame });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 const { UiBlock } = await import('./UiBlock');
+const { STRAY_QUOTE_ERROR } = await import('./strayQuote');
 const { onTabStep } = await import('../lib/scroll/timelineScrollIntent');
 const { I18nProvider } = await import('@/lib/i18n');
 const { ThemeSystemContext } = await import('@/contexts/theme-system-context');
@@ -130,6 +131,35 @@ test('a block that cannot be drawn says why and folds its source', async () => {
   const toggle = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Source');
   await act(async () => toggle?.click());
   expect(source?.hidden).toBe(false);
+});
+
+test('a quote hint is drawn in the interface language with a literal escape, and the agent gets it in English', async () => {
+  const reported: string[][] = [];
+  const { I18nContext } = await import('@/lib/i18n/react-context');
+  const { useI18n } = await import('@/lib/i18n');
+  const { SHARE_DOCUMENT_MESSAGES } = await import('@/share-document/messages.generated');
+  const hint = SHARE_DOCUMENT_MESSAGES.uk['chat.uiBlock.strayQuote'];
+  function Ukrainian({ children }: { children: React.ReactNode }) {
+    const i18n = useI18n();
+    return <I18nContext.Provider value={{ ...i18n, t: (key, params) => (key === 'chat.uiBlock.strayQuote' ? hint : i18n.t(key, params)) }}>{children}</I18nContext.Provider>;
+  }
+  const show = (key: string, source: string, blockHost: React.ComponentProps<typeof UiBlock>['host']) => act(() => root.render(
+    <I18nProvider>
+      <Ukrainian>
+        <ThemeSystemContext.Provider value={themeSystem}>
+          <UiBlock key={key} source={source} complete host={blockHost} onNotDrawn={(errors) => { reported.push(errors); }} />
+        </ThemeSystemContext.Provider>
+      </Ukrainian>
+    </I18nProvider>,
+  ));
+  await show('page', 'root = Stack([a])\na = Text("ein „X". Das war so.")', { kind: 'page', submit: null, answered: null });
+  expect(host.textContent).toContain(hint);
+  expect(hint).toContain('\\"');
+  expect(reported).toEqual([[STRAY_QUOTE_ERROR]]);
+  await show('reply', 'root = Stack([Text("Press "Save" now"), Badge("draft", "info")])', { kind: 'reply', submit: null, answered: null });
+  expect(host.textContent).toContain('draft');
+  expect(host.textContent).toContain(hint);
+  expect(host.textContent).not.toContain(STRAY_QUOTE_ERROR);
 });
 
 const tabbedForm = 'root = Stack([tabs])\ntabs = Tabs([Tab("Editor", [Choice("editor", ["Zed"])]), Tab("Why", [Input("why", "Why?")])])';

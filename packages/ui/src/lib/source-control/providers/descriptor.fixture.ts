@@ -28,8 +28,8 @@ export const acmeDescriptor = (overrides: Partial<SourceControlProviderDescripto
   },
   features: {
     referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-    startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: true,
-    issueEdit: true, changeRequestEdit: true,
+    startThread: false, reviewDrafts: false, reviewDraftFileComments: false, reviews: true, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: true,
+    issueAssignees: true, issueCloseReasonWrite: false, issueEdit: true, baseChange: true, updateBranch: true, rebase: false, changeRequestEdit: true,
     changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
     submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: true, commentEdit: true,
   },
@@ -49,7 +49,7 @@ export const githubLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
     changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'],
     discussion: ['/{owner}/{repo}/discussions/{number}'], commit: ['/{owner}/{repo}/commit/{sha}'], user: ['/{user}'],
   },
-  features: { ...acmeDescriptor().features, discussions: true, absoluteProjectUploads: true },
+  features: { ...acmeDescriptor().features, issueCloseReasonWrite: true, discussions: true, absoluteProjectUploads: true },
 });
 
 export const gitlabLikeDescriptor = (): SourceControlProviderDescriptor => acmeDescriptor({

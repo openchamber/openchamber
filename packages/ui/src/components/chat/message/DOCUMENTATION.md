@@ -55,8 +55,21 @@ turn projection and scroll-follow policy.
   their context identity and stay client-only; their backing data stays outside
   the ordinary file shape. Provider descriptor changes refresh chip labels.
 - Message comparison includes assistant error identity, tool output, synthetic
-  shell-action state and compaction summaries, so error-only and streamed changes
-  reach memoized rows.
+  shell-action state, pending inbox state and compaction summaries, so
+  error-only, delivery-only and streamed changes reach memoized rows.
+- A steered prompt (Steer, or Send now from the queue) that OpenCode still
+  holds in the inbox (`isWaitingSteer`: `pending` with the client-only `steer`
+  mark from the optimistic send or the inbox item's `steer` delivery) hides
+  history-only actions (revert, fork, context pin) and the enqueue timestamp
+  until delivery, and keeps local actions (copy, save as snippet, selection)
+  available. Once the steer has waited past 1.5 seconds, counted
+  from the creation time the row first rendered with (`useShownSteerWait`), its
+  bubble gets a dashed border and its live region, mounted while the steer is
+  pending, says it is waiting; after a reload a long-held steer gets both at
+  once. A later echo with a server-stamped time does not move the deadline, so
+  clock skew cannot skip or restart the grace period.
+  Delivery clears both in the same render. An ordinary Send keeps its usual
+  bubble however long the inbox holds it: `pending` alone never changes it.
 - Image preview measurements belong to their URL. An effect-based reset can
   race the load event of a cached image and leave the viewer incorrectly sized.
 - A quote popover's shadow belongs to the outer box that hugs its card. Keeping
@@ -67,6 +80,24 @@ turn projection and scroll-follow policy.
   in [message parts](parts/DOCUMENTATION.md#turn-footer-copy-and-image).
 
 ## Decisions
+
+### Why a steer's wait shows after a grace period and on the bubble
+
+Most steers reach the agent at its next step, within a second, so marking every
+steer at once flashed a status on nearly every follow-up. The mark waits out
+1.5 seconds and then changes the bubble's border to dashed. The
+earlier text row under the bubble added a line that came and went, and a border
+change moves nothing in the layout.
+
+### Why the waiting outline is an SVG path and not border-style: dashed
+
+A 1px `dashed` border draws dashes a few pixels long, which read as dots, and the
+browser fits them to each side separately. `SteerWaitOutline` draws one path
+around the bubble with its measured corner radii, the small tail corner
+included, and sets `pathLength` to a whole number of dash-and-gap tiles, so the
+dashes run continuously around the corners and the pattern closes without a
+seam. A CSS mask over a solid border was tried first; it can only stripe each
+side on its own.
 
 ### Why HTTP Mermaid sources use runtime URL classification
 

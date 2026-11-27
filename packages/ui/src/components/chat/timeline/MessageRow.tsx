@@ -2,6 +2,7 @@ import React from 'react';
 
 import ChatMessage from '../ChatMessage';
 import { TimelineNotice } from '../message/TimelineNotice';
+import { readShellCompletion } from '@/lib/opencode/background-shell';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { isSkippedTimelineMessage, isBackgroundReportEntry, isTimelineNoticeRole } from '../lib/timelineRoles';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from '../message/renderCompare';
@@ -39,8 +40,8 @@ export const MessageRow = React.memo<MessageRowProps>(({
 }) => {
     const role = message.info.role;
     if (readSessionNotice(message.info)) return <TimelineNotice message={message.info} />;
-    if (isSkippedTimelineMessage(message.info)) return null;
-    if (isTimelineNoticeRole(role) || isBackgroundReportEntry(message.info)) {
+    if (isSkippedTimelineMessage(message.info) && !readShellCompletion(message.info)) return null;
+    if (readShellCompletion(message.info) || isTimelineNoticeRole(role) || isBackgroundReportEntry(message.info)) {
         return <TimelineNotice message={message.info} isFirstRow={isFirstRow} />;
     }
 

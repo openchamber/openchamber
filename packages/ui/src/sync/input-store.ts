@@ -309,6 +309,7 @@ export type InputState = {
   pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
   pendingDraftSubmit: { draftId: number; text: string } | null
   pendingDraftContent: PendingDraftContent | null
+  pendingDraftDictation: { draftId: number } | null
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
@@ -329,6 +330,8 @@ export type InputState = {
   consumePendingDraftSubmit: (draftId: number | null) => string | null
   requestDraftContent: (draftId: number, content: { files: File[]; text?: string | null; rejected?: RejectedSharedFile[]; accept?: () => void }) => void
   consumePendingDraftContent: (draftId: number | null) => Omit<PendingDraftContent, "draftId"> | null
+  requestDraftDictation: (draftId: number) => void
+  consumePendingDraftDictation: (draftId: number) => boolean
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
@@ -381,6 +384,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
   pendingDraftContent: null,
+  pendingDraftDictation: null,
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -477,6 +481,14 @@ export const useInputStore = create<InputState>()((set, get) => ({
       rejected: pendingDraftContent.rejected,
       accept: pendingDraftContent.accept,
     }
+  },
+
+  requestDraftDictation: (draftId) => set({ pendingDraftDictation: { draftId } }),
+
+  consumePendingDraftDictation: (draftId) => {
+    if (get().pendingDraftDictation?.draftId !== draftId) return false
+    set({ pendingDraftDictation: null })
+    return true
   },
 
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),

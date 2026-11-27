@@ -20,6 +20,8 @@ import {
   remoteTraits,
   instanceHost,
   defaultSourceControlIdentities,
+  gitRemoteOf,
+  withRepositorySshHostNames,
 } from './identity';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './providers/descriptor.fixture';
 
@@ -91,6 +93,25 @@ describe('source-control identity resolution', () => {
     expect(resolveSourceControlIdentity(remote('https://gitea.example.com/team/repo.git'), [identity])).toBe(identity);
     expect(resolveSourceControlIdentity(remote('git@giteassh.example.com:team/repo.git'), [identity])).toBeNull();
     expect(resolveSourceControlIdentity(remote('ssh://git@giteassh.example.com:2200/team/repo.git'), [identity])).toBeNull();
+  });
+
+  test('matches a remote on an SSH alias by the host the server resolved it to', () => {
+    const expected = { provider: 'github', instance: 'github.com' };
+    const aliased = { ...remote('git@gh-work:team/repo.git'), sshHostName: 'github.com' };
+    expect(resolveSourceControlIdentity(aliased, defaults)).toEqual(expected);
+    expect(resolveSourceControlIdentity({ ...aliased, sshHostName: 'example.invalid' }, defaults)).toBeNull();
+    expect(resolveSourceControlIdentity(remote('git@gh-work:team/repo.git'), defaults)).toBeNull();
+    expect(resolveSourceControlIdentity({ ...remote('gh-work:team/repo.git'), sshHostName: 'github.com' }, defaults)).toEqual(expected);
+  });
+
+  test('carries a resolved alias host only onto the same remote addresses', () => {
+    const read = { remotes: [{ name: 'origin', sshHostName: 'github.com',
+      fetch: { displayUrl: 'git@gh-work:team/repo.git', fingerprint: 'f' }, push: { displayUrl: 'git@gh-work:team/repo.git', fingerprint: 'p' } }] };
+    const origin = { name: 'origin', fetchUrl: 'git@gh-work:team/repo.git', pushUrl: 'git@gh-work:team/repo.git' };
+    expect(withRepositorySshHostNames([origin], read)).toEqual([{ ...origin, sshHostName: 'github.com' }]);
+    const moved = { ...origin, fetchUrl: 'git@gh-other:team/repo.git', pushUrl: 'git@gh-other:team/repo.git' };
+    expect(withRepositorySshHostNames([moved], read)).toEqual([moved]);
+    expect(gitRemoteOf(read.remotes[0])).toEqual({ ...origin, sshHostName: 'github.com' });
   });
 
   test('normalizes the default SSH port on a separate SSH address', () => {

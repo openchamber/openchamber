@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { workStatusAccountsI18n } from './work-status-accounts.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
@@ -62,10 +63,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { diffReviewedI18n } from './diff-reviewed.i18n';
 import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
+import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
@@ -116,21 +120,24 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Small Model gerekir. Bir model sağlayıcısına giriş yapın veya Ayarlar → Oturumlar\'dan birini seçin.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Çekme isteği seçin',
+  'pullRequestComparison.searchShort': 'Pull request ara',
   'pullRequestComparison.pickAbove': 'Yukarıdan bir çekme isteği seçin',
   'pullRequestComparison.diffUnavailable': "{provider} çekme isteklerinin farklarını sunmuyor, bu yüzden burada gösterilemez veya adım adım incelenemez",
   'pullRequestComparison.partial': 'Bazı çekme istekleri yüklenemedi',
   'commitComparison.select': 'Commit seç',
+  'commitComparison.branchDividerSingle': 'Yukarıda: yalnızca {branch} içinde olan commit. Aşağıda: zaten {base} içinde.',
+  'commitComparison.branchDividerPlural': 'Yukarıda: yalnızca {branch} içinde olan {count} commit. Aşağıda: zaten {base} içinde.',
+  'commitComparison.backToList': 'Commit listesine dön',
   'commitComparison.search': 'Commit ara...',
   'commitComparison.loadError': 'Commitler yüklenemedi',
   'commitComparison.noCommits': 'Commit bulunamadı',
   'commitComparison.emptyDiff': 'Bu committe değişiklik yok',
-  'chat.liveActivity.title': 'Etkinlik',
-  'chat.liveActivity.moreRows': '+{count} daha',
   'chat.liveActivity.changedFile': '{count} dosya değiştirildi',
   'chat.liveActivity.changedFiles': '{count} dosya değiştirildi',
-  'chat.liveActivity.explored': 'Kod tabanı incelendi',
+  'chat.liveActivity.working': 'Çalışıyor…',
   'chat.liveActivity.ranCommand': '{count} komut çalıştırıldı',
   'chat.liveActivity.ranCommands': '{count} komut çalıştırıldı',
+  'chat.liveActivity.explored': 'Kod tabanı incelendi',
   'chat.liveActivity.researched': 'Web araştırması yapıldı',
   'chat.liveActivity.usedSubagent': '{count} alt agent kullanıldı',
   'chat.liveActivity.usedSubagents': '{count} alt agent kullanıldı',
@@ -152,7 +159,7 @@ export const dict = {
   ...htmlRenderI18n.tr,
   ...documentToolbarI18n.tr,
   ...uiBlocksI18n.tr,
-  ...updateDialogCanaryI18n.tr,
+  ...updateDialogCanaryI18n.tr, ...updateIdleI18n.tr,
   ...aboutReleaseNotesI18n.tr,
   ...updateCheckErrorsI18n.tr,
   ...secretRequestI18n.tr,
@@ -162,6 +169,7 @@ export const dict = {
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
   ...sessionWarmingI18n.tr,
+  ...sessionCostI18n.tr,
   ...connectionHeartbeatI18n.tr,
   ...workStatusAccountsI18n.tr,
   ...compactionSettingsI18n.tr,
@@ -199,10 +207,13 @@ export const dict = {
   ...pluginsGridI18n.tr,
   ...integrationsCatalogI18n['tr'],
   ...diffFindI18n['tr'],
+  ...diffReviewedI18n['tr'],
   ...contextWindowI18n['tr'],
   ...markdownOutlineI18n['tr'],
   ...markdownGithubI18n['tr'],
   ...autocompleteScopeI18n['tr'],
+  ...chatExchangeI18n['tr'],
+  ...integrateConflictI18n['tr'],
   ...workflowsI18n['tr'],
   ...subagentsI18n['tr'],
   ...sessionReferencesI18n['tr'],
@@ -347,10 +358,6 @@ export const dict = {
   'mobile.menu.update': 'Güncelle',
   'mobile.menu.settings': 'Ayarlar',
   'mobile.sessions.newChatCta': '{project} içinde yeni sohbet',
-  'mobile.sessions.dateGroup.today': 'Bugün',
-  'mobile.sessions.dateGroup.yesterday': 'Dün',
-  'mobile.sessions.dateGroup.thisWeek': 'Bu haftanın önceki günleri',
-  'mobile.sessions.dateGroup.older': 'Daha eski',
   'mobile.sessions.section.worktrees': 'Worktree\'ler',
   'mobile.sessions.section.otherProjects': 'Proje değiştir',
   'mobile.sessions.section.projects': 'Projeler',
@@ -627,6 +634,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Devam eden bölümünü göster',
   'sessions.sidebar.header.displayMode.showPinned': 'Sabitlenenler bölümünü göster',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Alt ajan oturumlarını göster',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ayrıntılı satırlar',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Worktree’leri dala göre adlandır',
   'sessions.sidebar.activity.pinnedTitle': 'Sabitlenenler',
@@ -794,6 +802,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Session yeni bir worktree\'ye taşınıyor',
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',
   'sessions.sidebar.session.status.questionPending': 'Bekleyen soru',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'İzin gerekiyor. İsteyen oturumu açar',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Bekleyen soru. İsteyen oturumu açar',
   'sessions.sidebar.session.status.activeFor': '{duration} süredir aktif',
   'sessions.sidebar.session.status.lastTurnDuration': 'Son tur {duration} sürdü',
   'sessions.sidebar.session.subsessions.collapse': 'Alt session\'ları daralt',
@@ -1477,6 +1487,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'Bu kapsamda henüz değişiklik yok.',
   'walkthrough.blocked.contextTooSmall.title': 'Bu diff, geçerli model için çok büyük',
   'walkthrough.blocked.contextTooSmall.description': '{model} yaklaşık {available}K karakter alabiliyor; bu diff ise yaklaşık {required}K gerektiriyor. Hiçbir şey kırpılmaz — bunun yerine daha büyük bağlam alanı olan bir model seç.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model}, çok uzun olduğu için bu diff\'i reddetti. Daha büyük bağlam alanı olan bir model seç veya daha dar bir kapsamı incele.',
   'walkthrough.blocked.structuredOutput.title': 'Bu model yapılandırılmış çıktı üretemiyor',
   'walkthrough.blocked.structuredOutput.description': '{model}, bir inceleme turunun ihtiyaç duyduğu yapılandırılmış yanıtları desteklemiyor.',
   'walkthrough.blocked.chooseModel': 'Küçük modeli seç',
@@ -1553,6 +1564,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Bu, uygulama içi tarayıcıdan alınmış açıklamalı bir seçimdir.',
   'contextPanel.browser.annotate.attached': 'Açıklama sohbete eklendi',
   'contextPanel.browser.annotate.noSession': 'Açıklama eklemeden önce bir sohbet session\'ı aç',
+  'contextPanel.browser.annotate.readOnly': 'Bu sohbet salt okunur, bu yüzden açıklama eklenemez',
   'contextPanel.browser.annotate.noPage': 'Açıklama eklemeden önce bir sayfa yükle',
   'contextPanel.browser.annotate.failed': 'Bu sayfaya açıklama eklenemedi',
   'contextPanel.browser.annotate.tool.element': 'Öğe',
@@ -1874,6 +1886,8 @@ export const dict = {
   'diffView.state.loadingDiff': 'Diff yükleniyor...',
   'diffView.state.loadingChanges': 'Değişiklikler yükleniyor...',
   'diffView.state.largeDiff': 'Büyük diff ({count} değiştirilen satır)',
+  'diffView.state.largeDiffLongLines': 'Büyük diff (çok uzun satırlar)',
+  'diffView.state.largeFile': 'Büyük dosya',
   'diffView.state.largeDiffDescription': 'Görüntüleme yavaş olabilir. Aşağıya tıklayarak diff\'i yine de görüntüleyebilirsiniz.',
   'diffView.summary.changedFilesSingle': '{count} dosya değişti',
   'diffView.summary.changedFilesPlural': '{count} dosya değişti',
@@ -1891,6 +1905,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Yan yana görünüm',
   'diffView.actions.wrapLines': 'Satır kaydırma',
   'diffView.actions.moreActions': 'Diğer işlemler',
+  'diffView.actions.viewOptions': 'Fark görünümü seçenekleri',
+  'gitView.sidebar.resizeAria': 'Git kenar çubuğunu yeniden boyutlandır',
+  'gitView.commit.stagedCountSummary': '{count} hazırlandı',
+  'gitView.commit.collapseAria': 'Commit formunu daralt',
   'diffView.actions.openFileInEditorAtChange': 'Bu dosyayı değişiklik konumunda editörde aç',
   'diffView.actions.openFileAtFirstChangedLine': 'Bu dosyayı ilk değişen satırda aç',
   'diffView.actions.reviewAria': 'Değişiklikleri incele',
@@ -2280,6 +2298,9 @@ export const dict = {
   'session.githubPrPicker.empty.noPullRequestsFound': 'Pull request bulunamadı',
   'session.githubPrPicker.loading.pullRequests': 'Pull request\'ler yükleniyor...',
   'session.githubPrPicker.actions.loadMore': 'Daha fazla yükle',
+  'session.githubPrPicker.filter.group.repository': 'Depo',
+  'session.githubPrPicker.filter.group.author': 'Yazar',
+  'session.githubPrPicker.filter.clearAll': 'Filtreleri temizle',
   'session.newWorktree.title': 'Yeni Worktree',
   'session.newWorktree.mode.newBranch': 'Yeni Branch',
   'session.newWorktree.mode.existingBranch': 'Mevcut Branch',
@@ -2419,6 +2440,7 @@ export const dict = {
   'chat.revert.toast.undo': 'Geri alındı: {preview}',
   'chat.revert.toast.redo': 'Yinelendi',
   'chat.revert.toast.restored': 'Tüm mesajlar geri yüklendi',
+  'chat.revert.toast.filesUnchanged': 'Sohbet geri alındı. Dosyalar değiştirilmedi.',
   'chat.toast.opencodeRestartInterrupted.title': 'Sohbet kesildi',
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',
@@ -2523,6 +2545,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'Seçili metni notlara kaydet',
   'chat.messageBody.actions.revertAria': 'Bu mesaja geri al',
   'chat.messageBody.actions.revert': 'Buradan geri al',
+  'chat.messageBody.status.waitingForAgent': 'Ajan bekleniyor',
   'chat.messageBody.actions.forkAria': 'Bu mesajdan fork\'la',
   'chat.messageBody.actions.fork': 'Buradan fork\'la',
   'chat.messageBody.actions.copyMessageAria': 'Mesaj metnini kopyala',
@@ -2623,6 +2646,7 @@ export const dict = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'Ekler gönderilemedi. Daha az dosya veya daha küçük görseller deneyin.',
   'chat.chatInput.toast.messageSendFailed': 'Mesaj gönderilemedi. Ekler geri yüklendi.',
   'chat.chatInput.toast.agentUnavailable': '"{agent}" agent\'ı bu session\'ın klasöründe yok. Başka bir agent seçip yeniden gönder.',
+  'chat.chatInput.toast.skillLoadFailed': '"{skill}" skill\'i MCP sunucusundan yüklenemedi. Ayarlar\'da sunucunun bağlı olduğunu kontrol edip yeniden gönder.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Panodan görsel eklenemedi',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'Yapıştırılan metin dosya olarak eklenemedi',
   'chat.chatInput.largeTextPaste.title': 'Büyük metin algılandı',
@@ -2960,6 +2984,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Yolu Kopyala',
   'openInApp.actions.refreshApps': 'Uygulamaları Yenile',
   'openInApp.toast.pathCopied': 'Yol panoya kopyalandı',
+  'openInApp.toast.sshOpenFailed': '{app} açılamadı. Bu bilgisayarda yüklü olduğundan emin olun.',
+  'openInApp.toast.sshInstanceChanged': '{app} açılmadan önce bu pencere başka bir örneğe geçti. Tekrar deneyin.',
+  'openInApp.toast.sshSettingsMismatch': '{app} bu örnekle aynı şekilde bağlanmaz: SSH komutu {settings} ayarlıyor ve {app} bunları okumuyor. Bunları ~/.ssh/config içindeki ana bilgisayar girdisine taşıyın.',
+  'openInApp.toast.sshUnresolved': 'Bu örneğin SSH ayarları okunamadı, bu yüzden {app} açılmadı. SSH komutunu kontrol edin.',
+  'openInApp.toast.sshUnsupported': '{app} bu projeyi SSH üzerinden açamıyor.',
   'projectActions.actions.addActionAria': 'Eylem ekle',
   'projectActions.actions.addAction': 'Eylem ekle',
   'projectActions.actions.addNewAction': 'Yeni eylem ekle',
@@ -3618,6 +3647,7 @@ export const dict = {
   'settings.mcp.page.connection.hintCommand': 'Bu makinede çalışır. Komutun tamamını yapıştır; her satıra bir argüman olacak şekilde bölünür.',
   'settings.mcp.page.connection.hintLink': 'Başka birinin barındırdığı sunucuya bağlanır. Sunucunun https adresini yapıştır.',
   'sessions.sidebar.activity.chatsEmpty': 'Henüz sohbet yok.',
+  'sessions.sidebar.timeline.noSessionsYet': 'Henüz session yok',
   'diffView.scope.branch': 'Branch',
   'diffView.branch.resolvingBase': 'Base branch algılanıyor...',
   'diffView.branch.noBaseTitle': 'Base branch yok',

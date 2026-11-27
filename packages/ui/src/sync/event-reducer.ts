@@ -18,6 +18,7 @@ import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 import {
   findMessageIndex,
   insertMessageInEventOrder,
+  isSameCompletedCompaction,
 } from "./message-ordering"
 
 type DedupeMetadata = {
@@ -146,6 +147,23 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   return messages.some((message) => message.id === messageID)
 }
 
+const isInboxRole = (message: Message): message is Extract<Message, { role: "user" | "synthetic" }> =>
+  message.role === "user" || message.role === "synthetic"
+
+const isEnqueueOlderThanDelivery = (existing: Message, incoming: Message): boolean => (
+  isInboxRole(incoming)
+  && incoming.pending === true
+  && existing.role === incoming.role
+  && isInboxRole(existing)
+  && existing.pending !== true
+  && existing.time.created >= incoming.time.created
+)
+
+const isHeldAsDelivered = (draft: State, sessionID: string, messageID: string): boolean => {
+  const message = draft.message[sessionID]?.find((candidate) => candidate.id === messageID)
+  return message !== undefined && isInboxRole(message) && message.pending !== true
+}
+
 const findRunningCompactionIndex = (messages: readonly Message[]): number => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -215,7 +233,8 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
   }
   if (patch.time?.created !== undefined) {
     const next = { ...message, time: { ...message.time, created: patch.time.created } }
-    if (next.role === "synthetic") delete next.pending
+    if (next.role === "synthetic" || next.role === "user") delete next.pending
+    if (next.role === "user") delete next.steer
     return next
   }
   return message
@@ -436,13 +455,18 @@ export function applyDirectoryEvent(
       const runningCompaction = info.role === "compaction" && info.status !== "running"
         ? findRunningCompactionIndex(messages)
         : -1
-      if (runningCompaction >= 0) {
-        const running = messages[runningCompaction]
+      const running = messages[runningCompaction]
+      if (running && running.time.created <= info.time.created) {
         info = { ...info, id: running.id, time: { ...running.time } }
+      } else if (info.role === "compaction" && findMessageIndex(messages, info.id) < 0) {
+        const settled = info
+        const twin = messages.find((message) => isSameCompletedCompaction(message, settled))
+        if (twin) info = { ...twin, ...info, id: twin.id, time: { ...twin.time } }
       }
       const messageIndex = findMessageIndex(messages, info.id)
       if (messageIndex >= 0) {
         const existing = messages[messageIndex]
+        if (isEnqueueOlderThanDelivery(existing, info)) return false
         if (areJsonEquivalent(existing, info)) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, undefined, undefined)
           return false
@@ -567,6 +591,7 @@ export function applyDirectoryEvent(
 
     case "message.parts.replaced": {
       const { sessionID, messageID, parts } = event.properties
+      if (event.properties.whilePending && isHeldAsDelivered(draft, sessionID, messageID)) return false
       const missingOwningMessage = !hasMessage(draft, sessionID, messageID)
       const existing = draft.part[messageID]
       if (existing && areJsonEquivalent(existing, parts)) return false

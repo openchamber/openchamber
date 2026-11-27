@@ -17,6 +17,7 @@ export const browserTabRequestSchema = z.object({
   url: z.string().min(1),
   background: z.boolean(),
   referrer: z.object({ url: z.string(), policy: z.string() }).optional(),
+  sessionId: z.string().min(1).optional(),
 });
 
 const ERR_ABORTED = -3;

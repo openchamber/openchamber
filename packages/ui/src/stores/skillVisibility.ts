@@ -1,7 +1,6 @@
 
 type ExternalSkillFlags = {
   claudeDisabled: boolean;
-  allDisabled: boolean;
 };
 
 type SkillLike = { name: string; path: string };
@@ -24,13 +23,7 @@ export const filterSkillsByRuntimeFlags = <T extends SkillLike>(
 ): T[] => {
   if (!flags) return [...skills];
 
-  const allowed = skills.filter((skill) => {
-    const root = resolveSkillRoot(skill.path);
-    if (root === 'opencode') return true;
-    if (flags.allDisabled) return false;
-    if (root === 'claude') return !flags.claudeDisabled;
-    return true;
-  });
+  const allowed = skills.filter((skill) => !flags.claudeDisabled || resolveSkillRoot(skill.path) !== 'claude');
 
   const byName = new Map<string, T>();
   for (const skill of allowed) {

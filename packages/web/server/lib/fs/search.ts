@@ -1,3 +1,4 @@
+import { GIT_LAUNCH_DIRECTORY, gitArgsIn } from '../git/git-launch.js';
 import type nodeFsPromises from 'node:fs/promises';
 import type nodePath from 'node:path';
 import type { spawn as nodeSpawn } from 'node:child_process';
@@ -142,8 +143,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
         const args = workspaceSearch
           ? ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']
           : ['check-ignore', '--stdin', '-z'];
-        const child = spawn(resolveGitBinaryForSpawn(), args, {
-          cwd: directory,
+        const child = spawn(resolveGitBinaryForSpawn(), gitArgsIn(directory, args), {
+          cwd: GIT_LAUNCH_DIRECTORY,
           windowsHide: true,
           stdio: [workspaceSearch ? 'ignore' : 'pipe', 'pipe', 'ignore'],
         });

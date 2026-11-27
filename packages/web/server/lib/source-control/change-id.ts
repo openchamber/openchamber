@@ -1,3 +1,4 @@
+import { GIT_LAUNCH_DIRECTORY, gitArgsIn } from '../git/git-launch.js';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,8 +27,8 @@ const refArgument = (value: string, name: string) => {
 };
 
 export const runGit: GitCommand = (directory, args, { input = '', env = {} } = {}) => new Promise<string>((resolve, reject) => {
-  const child = execFile('git', args, {
-    cwd: directory,
+  const child = execFile('git', gitArgsIn(directory, args), {
+    cwd: GIT_LAUNCH_DIRECTORY,
     windowsHide: true,
     timeout: 10_000,
     maxBuffer: 8 * 1024 * 1024,

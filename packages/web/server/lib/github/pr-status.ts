@@ -391,14 +391,13 @@ export const invalidateRepoPullsCache = (owner: string, repo: string, octokitOrC
       repoPullsCache.delete(key);
     }
   }
-  const repoNameLower = normalizeText(repo).toLowerCase();
   for (const key of _searchMissCache.keys()) {
-    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoNameLower)) && matchesIdentity(key)) {
+    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoKey)) && matchesIdentity(key)) {
       _searchMissCache.delete(key);
     }
   }
   for (const [token, key] of pendingSearchMissWrites) {
-    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoNameLower)) && matchesIdentity(key)) {
+    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoKey)) && matchesIdentity(key)) {
       pendingSearchMissWrites.delete(token);
     }
   }
@@ -459,7 +458,7 @@ const parseRepoFromApiUrl = (value: string | undefined) => {
   }
   try {
     const url = new URL(normalized);
-    const parts = url.pathname.replace(/^\/+/, '').split('/').filter(Boolean);
+    const parts = url.pathname.replace(/^\/+(?:api\/v3\/)?/, '').split('/').filter(Boolean);
     if (parts.length < 2 || parts[0] !== 'repos') {
       return null;
     }
@@ -493,8 +492,9 @@ const rememberSearchMiss = (key: string) => {
   }
 };
 
-const searchFallbackPr = async ({ octokit, branch, repoNames, host }: { octokit: Octokit; branch: string; repoNames: string[]; host: string | null | undefined }) => {
-  const repoKey = scopedCacheKey(octokit, `${normalizeLower(host) || 'github.com'}::${[...repoNames].sort().join(',').toLowerCase()}`);
+const searchFallbackPr = async ({ octokit, branch, repoKeys, host }: { octokit: Octokit; branch: string; repoKeys: string[]; host: string | null | undefined }) => {
+  const networkRepos = new Set(repoKeys.filter(Boolean));
+  const repoKey = scopedCacheKey(octokit, `${normalizeLower(host) || 'github.com'}::${[...networkRepos].sort().join(',')}`);
 
   const disabledAt = repoKey ? _searchApiDisabledRepos.get(repoKey) : null;
   if (disabledAt && Date.now() - disabledAt < SEARCH_API_RETRY_MS) {
@@ -511,8 +511,6 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }: { octokit:
   if (writeToken) pendingSearchMissWrites.set(writeToken, missKey);
 
   try {
-    const normalizedRepoNames = new Set(repoNames.map((name) => normalizeLower(name)).filter(Boolean));
-
     let response;
     try {
       response = await octokit.rest.search.issuesAndPullRequests({
@@ -521,7 +519,7 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }: { octokit:
       });
       if (repoKey) _searchApiDisabledRepos.delete(repoKey);
     } catch (error) {
-      noteIfGitHubRateLimit(error);
+      noteIfGitHubRateLimit(error, host);
       if (hasProperty(error, 'status') && error.status === 403) {
         if (repoKey) _searchApiDisabledRepos.set(repoKey, Date.now());
         return null;
@@ -539,7 +537,7 @@ const searchFallbackPr = async ({ octokit, branch, repoNames, host }: { octokit:
       if (!repo) {
         continue;
       }
-      if (normalizedRepoNames.size > 0 && !normalizedRepoNames.has(normalizeLower(repo.repo))) {
+      if (!networkRepos.has(normalizeRepoKey(repo.owner, repo.repo))) {
         continue;
       }
       try {
@@ -784,7 +782,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     const fallbackSearch = await searchFallbackPr({
       octokit,
       branch: candidateBranch,
-      repoNames: resolvedTargets.map((target) => target.repo.repo),
+      repoKeys: resolvedTargets.map((target) => normalizeRepoKey(target.repo?.owner, target.repo?.repo)),
       host: resolvedTargets[0]?.repo?.host,
     });
     if (fallbackSearch) {

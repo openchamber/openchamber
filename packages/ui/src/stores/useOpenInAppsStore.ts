@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
-import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, isDesktopShell, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { fetchDesktopInstalledApps, isDesktopLocalOriginActive, type InstalledDesktopAppInfo } from '@/lib/desktop';
+import { isDesktopSshRuntimeActive } from '@/lib/desktopSsh';
 import { OPEN_IN_APPS, DEFAULT_OPEN_IN_APP_ID, OPEN_IN_ALWAYS_AVAILABLE_APP_IDS, getOpenInAppById, getPlatformOpenInApp, type OpenInApp } from '@/lib/openInApps';
 import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 
@@ -79,7 +80,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
     };
 
     const loadInstalledApps = async (force?: boolean) => {
-      if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+      if (!isDesktopLocalOriginActive() && !isDesktopSshRuntimeActive()) {
         return;
       }
 
@@ -206,7 +207,7 @@ export const useOpenInAppsStore = create<OpenInAppsState>()((set, get) => ({
       get().initialize();
     }
 
-    if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+    if (!isDesktopLocalOriginActive() && !isDesktopSshRuntimeActive()) {
       return;
     }
 

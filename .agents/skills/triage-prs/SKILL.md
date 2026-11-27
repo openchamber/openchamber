@@ -103,8 +103,10 @@ The maintainer decides the batch on question cards, a few at a time; the written
 A round is one call to the question tool with 4–6 cards. Each card is one decision:
 
 - **Header**: `#N` plus two or three words naming the behavior (`#3640 Cmd+Enter`), within 30 characters.
-- **Body**: the PR as a markdown link (`[#N](https://github.com/openchamber/openchamber/pull/N)`; the cards render markdown) with a plain title on the first line, then one or two plain sentences: what changes for the user, and what it costs (risk, a new surface, a dependency, a support burden). Describe behavior, never file names; spell out jargon the maintainer would not use.
+- **Body**: the PR as a markdown link (`[#N](https://github.com/openchamber/openchamber/pull/N)`; the cards render markdown) with a plain title on the first line, then a sentence on what the PR adds or does at all (the maintainer does not know every PR), then one or two plain sentences: what changes for the user, and what it costs (risk, a new surface, a dependency, a support burden). Describe behavior, never file names; spell out jargon the maintainer would not use.
 - **Options**: 2–3, the recommended one first with `(Recommended)`. Each option says its consequence ("Close: /btw stays a command"), not only a verb. When our own follow-up is part of the verdict, the option says so ("Merge, then we fix the 1px offset").
+
+A PR that goes beyond the agreed feature is not a card by itself: judge whether the extra behavior makes sense for users and what it costs, and decide. It becomes a card only when keeping and cutting it are both reasonable and users would notice the difference, and then the card argues from that, not from "it wasn't agreed".
 
 Order the rounds by how much the maintainer is needed: product decisions first, then plain bug-fix merges, then fix-before-merge, then merge-then-fix, and last one card that confirms all mechanical closes (duplicates, superseded, stale) as a list. A group of trivial, uncontested merges (translations, one-line fixes) shares one card with a one-line description per PR.
 
@@ -175,6 +177,10 @@ Maintainer decisions that settle a PR without asking again. A PR that contradict
 - **Office files from outside the project offer "Attach as is" or "Convert to text"**; a file dragged from the Files panel stays an @-mention ([#7163](https://github.com/openchamber/openchamber/pull/7163)).
 - **Extension folder limits hide the extension's UI in other projects**; its service and agent tools stay global for now ([#7191](https://github.com/openchamber/openchamber/pull/7191)).
 - **An agent's keyboard action in the desktop browser may take real focus for that one action**, until the browser moves to its own `WebContentsView` ([#7074](https://github.com/openchamber/openchamber/pull/7074)).
+- **Each notification switch means the same for every event**: "Enable notifications" controls only pop-ups in open OpenChamber windows; Web Push and phone delivery follow the push subscription and the per-event toggles, whoever sent the notification, an agent included ([#7381](https://github.com/openchamber/openchamber/pull/7381)).
+- **Sessions in an external worktree that Git links to a repository inside a registered project show under that project** (Projects, In work, search); a separate clone and folders declined in folder trust stay hidden, as do other top-level sessions outside registered projects ([#7343](https://github.com/openchamber/openchamber/pull/7343)).
+- **Desktop on macOS declares Calendar and Reminders access**, so tools an agent runs can ask the user for it; macOS shows the prompt and the user decides ([#7384](https://github.com/openchamber/openchamber/issues/7384)).
+- **Safety Net works the same whichever classifier provider is picked**: a provider that can only judge some requests does not get its own auto-approval mode ([#7611](https://github.com/openchamber/openchamber/pull/7611)).
 - **No automatic "start Build?" prompt after a Plan turn**: a plan is rarely done in one turn, so the question after every turn is noise ([#6910](https://github.com/openchamber/openchamber/pull/6910)).
 
 ## Message templates

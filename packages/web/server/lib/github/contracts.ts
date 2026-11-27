@@ -15,9 +15,20 @@ export type AcrossSearchInput<Group extends AcrossGroup> = Omit<SearchInput, 'oc
 export const isDiscoveryText = (value: unknown): value is string => typeof value === 'string';
 export const isCacheIdentity = (value: unknown): value is string => Object.prototype.toString.call(value) === '[object String]';
 
+export type ItemState = 'open' | 'closed';
 export type DiscoveryPull = RestEndpointMethodTypes['pulls']['list']['response']['data'][number];
 export type DiscoveryMetadata = RestEndpointMethodTypes['repos']['get']['response']['data'];
 export interface DiscoveryRepository { owner: string; repo: string; host?: string | null; url?: string }
+export interface MutationPull {
+  number: number;
+  state: ItemState;
+  merged?: unknown;
+  merged_at?: unknown;
+  draft?: unknown;
+  node_id?: string;
+  head: { ref: string; sha: string; repo?: { owner: { login: string }; name: string } | null };
+  base: { ref: string; repo: { owner: { login: string }; name: string; default_branch?: unknown } };
+}
 export interface RemoteCandidate { repo: DiscoveryRepository; remoteName: string }
 export interface RankedCandidate extends RemoteCandidate { priority: number }
 export interface HistoricalEntry { pr: DiscoveryPull | null; fetchedAt: number }
@@ -43,8 +54,14 @@ export interface DetailEntry {
   body: string; createdAt: string | null; url: string; path: string | null; line: number | null;
   review: string | null; id?: string; canUpdate?: boolean; canDelete?: boolean;
   excerpt?: { startLine: number; lines: string[] };
-  thread?: { id: string; resolved: boolean; canResolve: boolean; canReply: boolean; replies: DetailEntry[] };
+  thread?: { id: string; resolved: boolean; canResolve: boolean; canReply: boolean; outdated?: boolean; replies: DetailEntry[] };
   answer?: { chosen: boolean; canChange: boolean };
+}
+export interface ReferenceReview {
+  id?: string;
+  state: 'approved' | 'changes_requested' | 'commented' | 'pending' | 'dismissed';
+  author: { login: string; avatarUrl: string | undefined } | null;
+  submittedAt: string | null;
 }
 export interface StatusDictionary { [key: string]: string | undefined }
 export interface SearchInput extends ReferenceFilters {
@@ -57,15 +74,21 @@ export interface AcrossGroup {
 export interface AcrossPosition { cursor: string | null; offset: number; done: boolean; total: number }
 export interface CommentPermissions { canUpdate?: boolean; canDelete?: boolean }
 export interface EditableText { body?: string; viewerCanUpdate?: boolean }
+export interface ReferenceAssignee { id: string; login: string; avatarUrl?: string | undefined }
 export interface ReferenceDetail extends EditableText {
   number: number; comments: DetailEntry[]; commentTotal: number;
+  writeAccess?: boolean; threadsUnavailable?: boolean;
+  branchWriteAccess?: boolean;
+  assignees?: ReferenceAssignee[];
   pull: {
     reviewDecision: string | null; reviewers: { id: string; login?: string; avatarUrl?: string | undefined }[];
-    reviewerStates: GitHubReviewerState[];
+    reviewerStates?: GitHubReviewerState[];
     checks: ReturnType<typeof summarizeCheckContexts> | null; additions: number; deletions: number; changedFiles: number;
     commits: { sha: string; headline: string; author: { login: string; avatarUrl: string | undefined } | null; authorName: string | null; committedAt: string | null; url: string | null }[];
+    reviews?: ReferenceReview[];
+    canDismissReviews?: boolean;
     commitTotal: number; stack?: Awaited<ReturnType<typeof fetchPullStack>>;
-  };
+  } | null;
 }
 export interface LookupVariables { number: number; [name: string]: string | number }
 type LocatedReference = Reference & { directory: string };
@@ -117,6 +140,7 @@ export interface GitHubEnvelope {
   enablePullRequestAutoMerge?: unknown;
   disablePullRequestAutoMerge?: unknown;
   pullRequest?: unknown;
+  queueRemoval?: unknown;
   autoMergeRequest?: unknown;
   enabledAt?: unknown;
   repository?: unknown;
@@ -127,6 +151,7 @@ export interface GitHubEnvelope {
   oid?: unknown;
   id?: unknown;
   errors?: unknown;
+  path?: unknown;
   data?: unknown;
   type?: unknown;
   issue?: unknown;
@@ -139,3 +164,13 @@ export interface GitHubEnvelope {
 
 export const hasProperty = <Key extends keyof GitHubEnvelope>(value: unknown, key: Key): value is Required<Pick<GitHubEnvelope, Key>> =>
   value != null && key in Object(value);
+
+const hasGraphQLField = <Key extends string>(value: unknown, _key: Key): value is { [Name in Key]?: unknown } =>
+  value != null;
+export const fieldAt = <Key extends string>(value: GitHubEnvelope['data'], key: Key) =>
+  hasGraphQLField(value, key) ? value[key] : undefined;
+export const gqlPath = (value: GitHubEnvelope['data'], ...keys: string[]) => keys.reduce<GitHubEnvelope['data']>(fieldAt, value);
+export const requireField = <Value>(value: Value, name: string): NonNullable<Value> => {
+  if (value == null) throw new TypeError(`GitHub mutation field ${name} is missing`);
+  return value;
+};

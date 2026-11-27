@@ -23,6 +23,29 @@ session), reconciled on every extension activation and deactivation
 (`onExtensionWaitsChanged` in `server-frame/feature-routes-runtime.js`), stopped
 by `server-frame/shutdown-runtime.js` in the same tick as guest admission closes.
 
+It owns a second built-in source, `script` (`wait.start` with `source:
+"script"`, `args: { code, minutes, hours? }`, in `builtin-waits.ts` and
+`script-wait.ts`): the agent's Code Mode script runs every `minutes` without a
+model, for up to `hours` (24 by default, at most 168), and the session wakes
+with the text the script returns. The script runs as an OpenCode automation
+the host creates for the session (`POST /api/experimental/automation`, a code
+action with an `every` trigger and `expires`); this module checks that
+automation at least once a minute (more often than a long script interval, so
+a wake is not an interval late) and delivers the wake like any other.
+OpenCode before 2.4 cannot run such a script: `wait.list` offers `script`
+only when `GET /api/info` names 2.4.0 or newer, and `wait.start` refuses it
+with the version otherwise.
+
+A script wait owns its automation for its whole life. Every way the wait ends
+deletes it: the wake delivered, the wait ended, `wait.stop`, the session
+deleted (also while the start is still creating it) or archived (checked
+before each check). A delete that fails, and a crash before it, leave an
+automation behind; the next check pass and every start list the automations
+named `OpenChamber script wait <owner>` and delete those no stored wait
+names, once they are five minutes old so a start in flight keeps its own.
+`<owner>` comes from this server's data directory, so two OpenChamber
+servers on one OpenCode never delete each other's.
+
 The extension's service is reached through `../guests/service.js`
 (`proxyGuestServiceRequest`), with the guest proxy's own grant, pause and
 idle-stop rules. The proxy stops a service after ten minutes without a
@@ -73,16 +96,14 @@ request, and each wait request carries that same idle stop.
   envelope that names the extension and says the words are its own; `<` and
   `>` are removed from the summary, the label and the title, and the SDK caps
   the summary at `WAIT_SUMMARY_MAX`.
-- Delivery follows `../pr-watch`: never into a running turn, while running
-  subagents and workflow agents do not hold it (see pr-watch's decision), one wake at a time per session, the message id minted and
-  persisted before the first attempt, OpenCode's 409 counts as delivered, 404
-  ends the wait, eight failed attempts give up. A wake that comes due while an
-  attempt is in flight, or while the session's turn runs, is kept and tried at
-  that attempt's end or on the session's idle event. Attempts are spaced by
-  `QUIET_MS` (500 ms) because idle events arrive in bursts around a turn
-  boundary, and a wake just delivered must first show as a running turn. The
-  id is saved before the send because a second attempt would otherwise mint
-  another and OpenCode would admit the wake twice.
+- Delivery follows `../pr-watch`: a wake is sent as soon as it fires, into a
+  running turn too (see pr-watch's decision), one wake at a time per session,
+  the message id minted and persisted before the first attempt, OpenCode's 409
+  counts as delivered, 404 ends the wait, eight failed attempts give up. A
+  wake that comes due while an attempt is in flight is tried at that
+  attempt's end. Attempts are spaced by `QUIET_MS` (500 ms). The id is saved
+  before the send because a second attempt would otherwise mint another and
+  OpenCode would admit the wake twice.
 
 ## Persistence
 
@@ -207,6 +228,32 @@ instead of waiting forever.
 `../dispatch-results`, `../pr-watch` and this module share the same delivery
 rules. Moving them into one module changes two shipped runtimes, so it is its
 own change; until then this copy follows pr-watch line for line.
+
+### Why the script runs as an OpenCode automation and not in OpenChamber
+
+Running a script with tools and no model is OpenCode's Code Mode, and
+OpenChamber has no executor of its own for it. An OpenCode code automation
+runs exactly that on a trigger, with the session's permission rules, a
+30-second and 32 KB cap per run, and state kept between runs. The script is
+wrapped (`wrapScript`) so the agent writes a plain check: its own `return`
+ends a run, a non-empty string or `{ wake }` becomes OpenCode's `done` with
+the wake text in `state.wake`, and `{ state }` is kept under `state.s`. A
+throw ends the automation with the error in `state.error`, because OpenCode
+retries a failed run after a minute and the next run could cover the
+failure before the host reads it. The
+automation never sends to the session itself: OpenCode's `send` steers the
+session directly, past this module's delivery rules, so the host reads
+`state.wake` when the automation is done and wakes the session the usual
+way.
+
+OpenCode creates an automation from a plugin or over HTTP without anyone
+present, so each permission the script needs is settled by the session's
+rules alone: an `allow` passes, and an `ask` refuses the script with
+OpenCode's own words, which `wait.start` passes on. OpenChamber's
+permission auto-accept never sees that request. A run that throws ends the
+wait with its error, because the next run fails the same way and the agent
+can fix the script. The text a script returns reaches the agent escaped
+(`&lt;` for `<`), and unchanged in the wake's metadata.
 
 ### Why the timer is a source of this runtime and not an extension or a runtime of its own
 

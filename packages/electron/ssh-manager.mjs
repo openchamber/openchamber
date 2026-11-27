@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { readJsonObjectForUpdate, replaceFileWithRetry } from './windows-file-replace.mjs';
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -14,6 +14,7 @@ const REMOTE_USER_PREFIX = '$HOME/.openchamber/npm-global';
 const REMOTE_BUN_CANDIDATE = '"${BUN_INSTALL:-$HOME/.bun}/bin/bun"';
 const REMOTE_NVM_BIN = '${NVM_DIR:-$HOME/.nvm}/versions/node/v$(ls -1 "${NVM_DIR:-$HOME/.nvm}/versions/node" 2>/dev/null | sed "s/^v//" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)/bin';
 const REMOTE_OPENCODE_CANDIDATES = [
+  '"${OPENCODE_BINARY:-}"',
   '"$HOME/.opencode/bin/opencode"',
   '"${BUN_INSTALL:-$HOME/.bun}/bin/opencode"',
   '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/opencode"',
@@ -805,7 +806,7 @@ export class ElectronSshManager {
   }
 
   async setInstances(config) {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = await readJsonObjectForUpdate(this.settingsFilePath);
     const previousSshIds = new Set(
       (Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [])
         .map((entry) => String(entry?.id || '').trim())
@@ -930,7 +931,7 @@ export class ElectronSshManager {
   }
 
   async updateHostRuntime(instanceId, label, localUrl, clientToken = '') {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = await readJsonObjectForUpdate(this.settingsFilePath);
     const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
     const existing = hosts.find((entry) => entry?.id === instanceId);
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
@@ -1005,7 +1006,7 @@ export class ElectronSshManager {
   }
 
   async persistLocalPort(instanceId, localPort) {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = await readJsonObjectForUpdate(this.settingsFilePath);
     const instances = Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [];
     for (const instance of instances) {
       if (instance?.id !== instanceId) continue;
@@ -1016,20 +1017,16 @@ export class ElectronSshManager {
     await writeJsonRoot(this.settingsFilePath, root);
   }
 
-  async resolveSshConfig(parsed) {
-    const { code, stdout, stderr } = await this.runSshOutput(parsed, ['-G']);
+  async dumpSshConfig(destination, args) {
+    const { code, stdout, stderr } = await this.runSshOutput({ destination, args }, ['-G']);
     if (code !== 0) {
       throw new Error(stderr.trim() || 'Failed to resolve SSH config');
     }
-    const map = new Map();
-    for (const line of stdout.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const [key, ...rest] = trimmed.split(' ');
-      if (!key || rest.length === 0) continue;
-      map.set(key.toLowerCase(), rest.join(' ').trim());
-    }
-    return map;
+    return stdout;
+  }
+
+  connectedSshParsed(id) {
+    return this.sessions.get(id)?.parsed ?? null;
   }
 
   ensureSessionDir(id) {
@@ -1089,8 +1086,7 @@ export class ElectronSshManager {
     const candidateList = [...extraCandidates, `"$(command -v ${commandName} 2>/dev/null)"`].join(' ');
     const script = [
       `for candidate in ${candidateList}; do`,
-      '  [ -n "$candidate" ] || continue;',
-      '  [ -x "$candidate" ] || continue;',
+      '  [ -f "$candidate" ] && [ -x "$candidate" ] || continue;',
       `  printf '%s' "$candidate";`,
       '  exit 0;',
       'done',
@@ -1228,7 +1224,7 @@ export class ElectronSshManager {
       `node -e 'const fs=require("node:fs"),path=require("node:path");`,
       `if(process.versions.bun)process.exit(1);`,
       `const[maj,min]=(process.versions.node||"").split(".").map(Number);`,
-      `if(!(maj>22||(maj===22&&min>=15)))process.exit(1);`,
+      `if(!(maj>=24||(maj===22&&min>=16)))process.exit(1);`,
       `if(process.platform==="linux"&&!process.report?.getReport?.()?.header?.glibcVersionRuntime)process.exit(1);`,
       `const real=fs.realpathSync(process.argv[1]);`,
       `const dir=path.resolve(path.dirname(real),"..","opencode-server");`,
@@ -1490,7 +1486,7 @@ export class ElectronSshManager {
     const id = instance.id;
     this.setStatus(id, 'config_resolved', 'Resolving SSH command');
     const parsed = instance.sshParsed || parseSshCommand(instance.sshCommand);
-    await this.resolveSshConfig(parsed);
+    await this.dumpSshConfig(parsed.destination, parsed.args);
 
     this.setStatus(id, 'auth_check', 'Checking SSH connectivity');
     const sessionDir = this.ensureSessionDir(id);

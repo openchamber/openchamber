@@ -38,8 +38,10 @@ type Props = {
   goal?: React.ReactNode;
   marks?: React.ReactNode;
   badges: React.ReactNode;
+  endBadges?: React.ReactNode;
   doneHint?: React.ReactNode;
   metaPaddingClass?: string;
+  metaActionsRoomClass?: string;
   hideMetaOnHoverClass: string;
   actionsReserveClass?: string;
   actionsMaskClass?: string;
@@ -112,13 +114,15 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   goal = null,
   marks = null,
   badges,
+  endBadges = null,
   doneHint = null,
   metaPaddingClass,
+  metaActionsRoomClass,
   hideMetaOnHoverClass,
   actionsReserveClass,
   actionsMaskClass,
 }) => {
-  const meta = (withMarks: boolean) => <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', metaPaddingClass, hideMetaOnHoverClass)}>
+  const meta = (withMarks: boolean, padded: boolean, actionsRoomClass?: string) => <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', padded && metaPaddingClass, actionsRoomClass, hideMetaOnHoverClass)}>
     {doneHint}
     {compact ? goal : null}
     {compact ? zombieIndicator ?? prBadge : null}
@@ -155,14 +159,15 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   if (compact) {
     return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       {titleLine}
-      {meta(true)}
+      {meta(true, !endBadges, metaActionsRoomClass)}
+      {endBadges ? <span className={cn('flex flex-shrink-0 items-center gap-1', metaPaddingClass)}>{endBadges}</span> : null}
     </div>;
   }
   const secondLine = Boolean(leadToggle || leadIcon || branchLine || goal || zombieIndicator || prBadge || badges);
   return <div className="flex w-full min-w-0 flex-col gap-px">
     <div className={cn('@container relative flex h-5 w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       {titleLine}
-      {meta(!secondLine)}
+      {meta(!secondLine, true)}
     </div>
     {secondLine ? <div className="relative flex h-4 w-full min-w-0 items-center gap-1">
       {leadSlot}

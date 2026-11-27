@@ -30,6 +30,7 @@ function setup(overrides = {}, options = {}) {
       showReviewers: vi.fn(async () => []),
     },
     MergeRequestNotes: { all: list([{ id: 4, body: 'Looks good', author: { id: 3, username: 'sam' } }]) },
+    MergeRequestApprovals: { showConfiguration: vi.fn(async () => ({ approved_by: [] })) },
     Jobs: { all: vi.fn(async () => [{ id: 8, name: 'test', status: 'running' }]) },
     Issues: {
       all: list([{ iid: 3, title: 'Bug', web_url: `${origin}/me/repo/-/issues/3`, state: 'opened' }]),
@@ -118,7 +119,7 @@ describe('GitLab resource service', () => {
     expect(issuesAll.mock.calls.at(-1)?.[0]).toMatchObject({ state: 'closed', scope: 'assigned_to_me' });
   });
 
-  it('adds commits and review verdicts only when the timeline asks', async () => {
+  it('adds commits only when the timeline asks, keeping verdicts and reviewers in the plain context', async () => {
     const commits = [
       { id: 'bbb', title: 'second', author_name: 'Sam', committed_date: '2026-10-02T10:00:00Z', web_url: `${origin}/team/repo/-/commit/bbb` },
       { id: 'aaa', title: 'first', author_name: 'Sam', committed_date: '2026-10-01T10:00:00Z', web_url: `${origin}/team/repo/-/commit/aaa` },
@@ -138,13 +139,15 @@ describe('GitLab resource service', () => {
     const plain = await service.changeRequestContext('/repo', 5, {});
     expect(plain).not.toHaveProperty('commits');
     expect(allCommits).not.toHaveBeenCalled();
+    expect(plain.verdicts).toMatchObject([{ state: 'approved', createdAt: '2026-10-02T11:00:00Z', author: { username: 'sam' } }]);
+    expect(plain.reviewers).toEqual([expect.objectContaining({ id: '7', username: 'ann' })]);
 
     const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
     expect(result.commits.map((commit) => commit.headline)).toEqual(['first', 'second']);
     expect(result.commitsComplete).toBe(true);
-    expect(result.verdicts).toMatchObject([{ state: 'approved', createdAt: '2026-10-02T11:00:00Z', author: { username: 'sam' } }]);
+    expect(result.verdicts).toEqual(plain.verdicts);
     expect(result.issueComments.map((comment) => comment.body)).toEqual(['Looks good']);
-    expect(result.reviewers).toEqual([expect.objectContaining({ id: '7', username: 'ann' })]);
+    expect(result.reviewers).toEqual(plain.reviewers);
   });
 
   it('reads one state per reviewer only with the timeline', async () => {
@@ -163,12 +166,29 @@ describe('GitLab resource service', () => {
 
     const plain = await service.changeRequestContext('/repo', 5, {});
     expect(plain).not.toHaveProperty('reviewerStates');
+    expect(plain).not.toHaveProperty('reviews');
     expect(showReviewers).not.toHaveBeenCalled();
 
     const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
     expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
       ['ann', 'approved'], ['bo', 'changes_requested'], ['cy', 'pending'], ['di', 'commented'], ['ed', 'pending'], ['flo', 'pending'],
     ]);
+  });
+
+  it('leaves reviewer states unknown when no entry of a non-empty answer parses', async () => {
+    const { service } = setup({
+      MergeRequests: {
+        ...setup().client.MergeRequests,
+        showReviewers: vi.fn(async () => [{ user: { id: 8, username: 'bo' }, state: 'some_future_state' }]),
+        allCommits: list([]),
+        show: vi.fn(async () => ({ ...openMR, reviewers: [{ id: 8, username: 'bo' }] })),
+      },
+      MergeRequestDiscussions: { all: list([]) },
+    });
+
+    const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
+    expect(result).not.toHaveProperty('reviewerStates');
+    expect(result.reviewers.map((user) => user.username)).toEqual(['bo']);
   });
 
   it('keeps the states it understands and leaves the rest to the plain roster', async () => {
@@ -281,6 +301,55 @@ describe('GitLab resource service', () => {
       ['Done', { id: 'abc', resolved: true, resolvable: true, first: false }],
       ['Plain comment', null],
     ]);
+  });
+
+  it('marks the same outdated thread in the review state and the context read', async () => {
+    const sha = 'd'.repeat(40);
+    const old = 'c'.repeat(40);
+    const discussion = {
+      id: 'disc1', individual_note: false,
+      notes: [{
+        id: 10, type: 'DiffNote', body: 'Old line', resolvable: true, resolved: false,
+        author: { id: 3, username: 'sam' },
+        position: { position_type: 'text', new_path: 'a.ts', new_line: 4, head_sha: old },
+      }],
+    };
+    // Written on the whole file before the same push: it stays a whole-file thread, not an outdated line.
+    const fileDiscussion = {
+      id: 'disc2', individual_note: false,
+      notes: [{
+        id: 11, type: 'DiffNote', body: 'About this file', resolvable: true, resolved: false,
+        author: { id: 3, username: 'sam' },
+        position: { position_type: 'file', new_path: 'a.ts', head_sha: old },
+      }],
+    };
+    const mergeRequest = { ...openMR, sha, diff_refs: { base_sha: 'a'.repeat(40), start_sha: 'b'.repeat(40), head_sha: sha } };
+    const requester = { post: vi.fn(async () => ({ body: { data: { project: { mergeRequest: {
+      discussionLocked: false,
+      userPermissions: { createNote: true },
+      discussions: { nodes: [{ id: 'gid://gitlab/Discussion/disc1', notes: { nodes: [{ userPermissions: { resolveNote: true } }] } }] },
+    } } } } })) };
+    const { service } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, all: list([mergeRequest]), allCommits: list([]), show: vi.fn(async () => mergeRequest), requester },
+      MergeRequestDiscussions: { all: list([discussion, fileDiscussion]) },
+      MergeRequestDraftNotes: { all: vi.fn(async () => []) },
+      Users: { showCurrentUser: vi.fn(async () => ({ id: 3, username: 'sam' })) },
+    });
+
+    const state = await service.reviewState('/repo', 5, null, 'origin');
+    const context = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
+
+    // Both reads agree: the thread is outdated, has no line on the current head, and takes no reply there.
+    expect(state.threads).toEqual([
+      expect.objectContaining({ id: 'disc1', outdated: true, line: null, startLine: null, canReply: false }),
+      expect.objectContaining({ id: 'disc2', outdated: false, path: 'a.ts', line: null, canReply: true }),
+    ]);
+    expect(context.reviewComments.find((note) => note.id === '11')?.thread).not.toHaveProperty('outdated');
+    expect(context.reviewComments.find((note) => note.id === '10')).toMatchObject({
+      // The raw note keeps the line it was written on; the preview drops it from the thread it builds.
+      line: 4,
+      thread: { id: 'disc1', outdated: true },
+    });
   });
 
   it("says what this account may do with a thread when GitLab's GraphQL answers", async () => {
@@ -1061,7 +1130,7 @@ describe('GitLab comments and reviews', () => {
   it('reads labels and active members, and sets labels and reviewers as whole sets', async () => {
     const editMR = vi.fn(async (_id, _iid, update) => ({ ...openMR, labels: update.labels?.split(',') ?? [] }));
     const editIssue = vi.fn(async () => ({ iid: 3, title: 'Bug', web_url: `${origin}/me/repo/-/issues/3`, state: 'opened' }));
-    const { service } = setup({
+    const { service, client } = setup({
       MergeRequests: { ...setup().client.MergeRequests, edit: editMR, show: vi.fn(async () => ({ ...openMR, labels: ['bug'], reviewers: [{ id: 7, username: 'ann' }] })) },
       Issues: { ...setup().client.Issues, edit: editIssue },
       ProjectLabels: { all: vi.fn(async () => [{ name: 'bug', color: '#d73a4a' }, { name: '' }]) },
@@ -1075,6 +1144,9 @@ describe('GitLab comments and reviews', () => {
     await expect(service.listLabels('/repo', { owner: 'team', name: 'repo' })).resolves.toEqual([{ name: 'bug', color: 'd73a4a' }]);
     await expect(service.listReviewerCandidates('/repo', { owner: 'team', name: 'repo' }))
       .resolves.toEqual([{ id: '7', login: 'ann', avatarUrl: `${origin}/a.png` }]);
+    expect(client.ProjectMembers.all).toHaveBeenLastCalledWith('2', { includeInherited: true, perPage: 100, maxPages: 1 });
+    await service.listReviewerCandidates('/repo', { owner: 'team', name: 'repo' }, undefined, 'assignee');
+    expect(client.ProjectMembers.all).toHaveBeenLastCalledWith('2', { includeInherited: true, perPage: 100 });
 
     await service.setLabels({ kind: 'change-request-labels', labels: ['bug', 'docs'], providerTarget: { projectId: '2', number: 5 } });
     await service.setLabels({ kind: 'issue-labels', labels: [], providerTarget: { projectId: '1', number: 3 } });
@@ -1400,6 +1472,69 @@ describe("GitLab fork merge requests through the maintainer's upstream clone", (
   });
 });
 
+describe('GitLab context reviews', () => {
+  const timeline = { remote: 'origin', includeTimeline: true };
+  const withApprovals = (answer, overrides = {}) => {
+    const showConfiguration = vi.fn(async () => {
+      if (answer instanceof Error) throw answer;
+      return answer;
+    });
+    const base = setup().client;
+    return { showConfiguration, ...setup({
+      MergeRequestApprovals: { showConfiguration },
+      MergeRequests: { ...base.MergeRequests, allCommits: list([]), ...overrides },
+      MergeRequestDiscussions: { all: list([]) },
+    }) };
+  };
+
+  it('answers an empty list when nobody approved', async () => {
+    const { service, showConfiguration } = withApprovals({ approved: false, approved_by: [] });
+    const context = await service.changeRequestContext('/repo', 5, timeline);
+    expect(showConfiguration).toHaveBeenCalledWith('1', { mergerequestIId: 5 });
+    expect(context.reviews).toEqual([]);
+  });
+
+  // GitLab Free and Community Edition answer only `approved_by` and the viewer's own fields,
+  // and an approver outside every rule is listed there too.
+  it('lists every approver from the merge request approvals, on a Free answer as well', async () => {
+    const { service } = withApprovals({
+      approved: true, user_has_approved: false, user_can_approve: true,
+      approved_by: [
+        { user: { id: 3, username: 'sam', avatar_url: 'https://a/sam.png' }, approved_at: '2026-10-02T00:00:00Z' },
+        { user: { id: 4, username: 'ann' } },
+        { user: { id: 3, username: 'sam' } },
+      ],
+    });
+
+    const context = await service.changeRequestContext('/repo', 5, timeline);
+
+    expect(context.reviews).toEqual([
+      { id: 'approval:sam', state: 'approved', author: { login: 'sam', avatarUrl: 'https://a/sam.png' }, submittedAt: '2026-10-02T00:00:00Z' },
+      { id: 'approval:ann', state: 'approved', author: { login: 'ann' }, submittedAt: null },
+    ]);
+  });
+
+  it.each([
+    ['no approver in the answer can be read', { approved_by: [{ user: { id: 3 } }, { name: 'x' }] }],
+    ['the answer has no approver list', { approved: true }],
+    ['the read fails', new Error('GitLab unavailable')],
+  ])('omits the reviews when %s, keeping the rest of the context', async (_case, answer) => {
+    const { service } = withApprovals(answer);
+    const context = await service.changeRequestContext('/repo', 5, timeline);
+    expect(context).not.toHaveProperty('reviews');
+    expect(context.changeRequest).toMatchObject({ number: 5 });
+    expect(context.issueComments).toBeDefined();
+  });
+
+  it('offers the viewer\'s own withdrawal only on an open merge request', async () => {
+    const open = await withApprovals({ approved_by: [] }).service.changeRequestContext('/repo', 5, timeline);
+    expect(open.canDismissReviews).toBe(true);
+    const merged = await withApprovals({ approved_by: [] }, { show: vi.fn(async () => ({ ...openMR, state: 'merged' })) })
+      .service.changeRequestContext('/repo', 5, timeline);
+    expect(merged.canDismissReviews).toBe(false);
+  });
+});
+
 describe('GitLab live summaries', () => {
   it('maps merge request and issue state onto the shared badge shape and skips what GitLab cannot answer', async () => {
     const byNumber = {
@@ -1498,5 +1633,40 @@ describe('GitLab label filtering', () => {
     expect(client.Projects.show).not.toHaveBeenCalled();
     expect(client.MergeRequests.all).not.toHaveBeenCalled();
     expect(client.Issues.all).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('GitLab review withdrawal', () => {
+  const providerTarget = { projectId: 2, number: 5 };
+  const approvals = (answer) => vi.fn(async () => {
+    if (answer instanceof Error) throw answer;
+    return answer;
+  });
+
+  it('withdraws the viewer\'s approval and counts it done once the merge request reads it gone', async () => {
+    const unapprove = vi.fn(async () => ({}));
+    const showConfiguration = approvals({ user_has_approved: false, approved_by: [{ user: { id: 4, username: 'ann' } }] });
+    const { service } = setup({ MergeRequestApprovals: { unapprove, showConfiguration } });
+
+    await expect(service.dismissReview({ providerTarget })).resolves.toEqual({});
+    expect(unapprove).toHaveBeenCalledWith(2, 5);
+    expect(showConfiguration).toHaveBeenCalledWith(2, { mergerequestIId: 5 });
+  });
+
+  it.each([
+    ['still approves', { user_has_approved: true }],
+    ['does not say', { approved_by: [] }],
+    ['cannot be read', new Error('GitLab unavailable')],
+  ])('refuses to call a withdrawal done when the merge request %s', async (_case, answer) => {
+    const { service } = setup({ MergeRequestApprovals: { unapprove: vi.fn(async () => ({})), showConfiguration: approvals(answer) } });
+
+    await expect(service.dismissReview({ providerTarget })).rejects.toThrow('did not confirm');
+    await expect(service.reconcileReviewDismiss(providerTarget)).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('reconciles a restarted withdrawal from the same read of the viewer\'s approval', async () => {
+    const { service } = setup({ MergeRequestApprovals: { showConfiguration: approvals({ user_has_approved: false }) } });
+    await expect(service.reconcileReviewDismiss(providerTarget)).resolves.toEqual({ state: 'succeeded', result: {} });
   });
 });

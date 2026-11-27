@@ -389,7 +389,6 @@ final class WidgetRenderer {
         if (id.contains("github-copilot")) return R.drawable.widget_logo_github_copilot;
         if (id.contains("codex")) return R.drawable.widget_logo_codex;
         if (id.contains("cursor")) return R.drawable.widget_logo_cursor;
-        if (id.equals("google")) return R.drawable.widget_logo_google;
         if (id.equals("openai")) return R.drawable.widget_logo_openai;
         if (id.equals("claude")) return R.drawable.widget_logo_claude;
         return 0;

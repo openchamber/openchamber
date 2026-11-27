@@ -28,7 +28,7 @@ type BrowserTabOwnership = {
 type BrowserController = BrowserTabOwnership & {
   readonly tabId: string;
   readonly describe: () => { title: string; url: string };
-  readonly run: (action: string, parameters: Record<string, unknown>) => Promise<unknown>;
+  readonly run: (action: string, parameters: Record<string, unknown>, actingSessionId: string | null) => Promise<unknown>;
 };
 
 type SleepingBrowserTab = BrowserTabOwnership & {
@@ -39,7 +39,7 @@ type SleepingBrowserTab = BrowserTabOwnership & {
 
 type RegisteredTab = BrowserController | SleepingBrowserTab;
 
-type BrowserOpener = (url: string, context: BrowserControlRequestContext) => string | null;
+type BrowserOpener = (url: string, context: BrowserControlRequestContext, options?: { usesUserLogins?: boolean }) => string | null;
 
 type BrowserCloser = (directory: string, tabId: string) => boolean;
 
@@ -388,14 +388,14 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
         return;
       }
 
-      const resized = resize ? await attached.run('browser.resize', { viewport: requestedViewport }) : null;
+      const resized = resize ? await attached.run('browser.resize', { viewport: requestedViewport }, caller.sessionId) : null;
       const viewport = resized && typeof resized === 'object'
         ? (resized as { viewport?: unknown }).viewport ?? null
         : null;
       const budgetMs = Math.max(0, OPEN_ANSWER_BUDGET_MS - (Date.now() - openStartedAt));
       const settleParameters = request.parameters.dialog === 'accept' ? { budgetMs, dialog: 'accept' } : { budgetMs };
       const page = settle
-        ? settledPageSchema.safeParse(await attached.run('browser.settle', settleParameters).catch(() => null))
+        ? settledPageSchema.safeParse(await attached.run('browser.settle', settleParameters, caller.sessionId).catch(() => null))
         : null;
       await answer(request, {
         ok: true,
@@ -442,7 +442,7 @@ const runAction = async (
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> => {
   activityListener?.(controller.directory, controller.tabId);
   try {
-    const data = await controller.run(action, parameters);
+    const data = await controller.run(action, parameters, caller.sessionId);
     if (action === 'browser.snapshot' && Object(data) === data) {
       return { ok: true, data: { ...Object(data), tabs: listTabs(caller) } };
     }
@@ -512,8 +512,8 @@ export const registerBrowserTabActivity = (listener: (directory: string, tabId: 
   };
 };
 
-export const openBrowserTabForSession = (url: string, context: BrowserControlRequestContext): string | null => (
-  opener ? opener(url, context) : null
+export const openBrowserTabForSession = (url: string, context: BrowserControlRequestContext, options?: { usesUserLogins?: boolean }): string | null => (
+  opener ? opener(url, context, options) : null
 );
 
 export const registerBrowserOpener = (open: BrowserOpener): (() => void) => {

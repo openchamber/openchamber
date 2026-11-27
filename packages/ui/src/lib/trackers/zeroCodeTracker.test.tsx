@@ -40,7 +40,7 @@ const trackers: TrackerAPI = {
     return { connected: false };
   },
   authStart: unexpected, authConnectToken: unexpected, authSaveOAuthClient: unexpected, authDisconnect: unexpected, authActivate: unexpected, list: unexpected,
-  refreshListReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
+  refreshListReads: unexpected, refreshItemReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
   mappingGet: unexpected, mappingSet: unexpected, sessionStatusPost: unexpected,
   preferencesGet: unexpected, preferencesSet: unexpected,
 };

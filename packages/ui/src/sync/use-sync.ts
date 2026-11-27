@@ -1,5 +1,5 @@
-import { useCallback, useMemo } from "react"
-import type { Message, Part } from "@/lib/opencode/model"
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
+import type { Message, Part, Session } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import { Binary } from "./binary"
 import { upsertSessionRecord } from "./session-records"
@@ -19,6 +19,7 @@ import {
   markRecordedInterruptedTurn,
 } from "./sync-context"
 import { stripSessionDiffSnapshots } from "./sanitize"
+import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 
@@ -32,6 +33,8 @@ const sessionReadDirectorySources: SessionReadDirectorySources = {
 }
 
 const syncSessionInflightByKey = new Map<string, Promise<void>>()
+
+const sessionRecordRefreshInflightByKey = new Map<string, Promise<void>>()
 
 const syncSessionGenerationByKey = new Map<string, number>()
 
@@ -172,6 +175,15 @@ export function useSync() {
     [childStores, directory, keyFor, messageLoader, runtimeKey, store, touch],
   )
 
+  const refreshRecord = useCallback(
+    async (sessionID: string, directoryOverride?: string): Promise<void> => {
+      const selectedDirectory = directoryOverride || directory
+      if (!selectedDirectory) return
+      return refreshSessionRecord({ childStores, sessionID, directory: selectedDirectory, runtimeKey })
+    },
+    [childStores, directory, runtimeKey],
+  )
+
   const loadMore = useCallback(
     async (sessionID: string, targetDirectory: string) => {
       touch(sessionID, targetDirectory)
@@ -242,10 +254,18 @@ export function useSync() {
     [directory, messageLoader],
   )
 
+  const optimisticAdmit = useCallback(
+    (input: { sessionID: string; directory?: string | null; messageID: string }) => {
+      messageLoader.optimisticAdmit({ directory: input.directory || directory, sessionID: input.sessionID, messageID: input.messageID })
+    },
+    [directory, messageLoader],
+  )
+
   return useMemo(
     () => ({
       ensureSessionRenderable: syncSession,
       syncSession,
+      refreshSessionRecord: refreshRecord,
       prefetchSession,
       loadMore,
       hasMore,
@@ -256,10 +276,122 @@ export function useSync() {
         add: optimisticAdd,
         remove: optimisticRemove,
         confirm: optimisticConfirm,
+        admit: optimisticAdmit,
       },
     }),
-    [syncSession, prefetchSession, loadMore, hasMore, isLoading, isComplete, recoverPendingQuestions, optimisticAdd, optimisticRemove, optimisticConfirm],
+    [syncSession, refreshRecord, prefetchSession, loadMore, hasMore, isLoading, isComplete, recoverPendingQuestions, optimisticAdd, optimisticRemove, optimisticConfirm, optimisticAdmit],
   )
+}
+
+function reconcileFetchedRecord(baseline: Session, shown: Session, fetched: Session): Session {
+  const before = new Map(Object.entries(baseline))
+  const live = new Map(Object.entries(shown))
+  const changedMeanwhile = [...new Set([...before.keys(), ...live.keys()])]
+    .filter((field) => JSON.stringify(live.get(field)) !== JSON.stringify(before.get(field)))
+    .map((field) => [field, live.get(field)] as const)
+  return { ...fetched, ...Object.fromEntries(changedMeanwhile) }
+}
+
+export async function refreshSessionRecord({ childStores, sessionID, directory, runtimeKey }: {
+  childStores: ChildStoreManager
+  sessionID: string
+  directory: string
+  runtimeKey: string
+}): Promise<void> {
+  const isCurrent = () => getRuntimeKey() === runtimeKey
+  if (!isCurrent()) return
+  const targetDirectory = await resolveSessionReadDirectory(sessionID, directory, captureRuntimeInstance(), sessionReadDirectorySources)
+  if (!targetDirectory || !isCurrent()) return
+  const key = `${runtimeKey}\n${targetDirectory}\n${sessionID}`
+  if (syncSessionInflightByKey.has(key)) return
+  const existing = sessionRecordRefreshInflightByKey.get(key)
+  if (existing) return existing
+  const targetStore = childStores.children.get(targetDirectory)
+  if (!targetStore) return
+
+  const findShown = (sessions: Session[]) => {
+    const result = Binary.search(sessions, sessionID, (s) => s.id)
+    return result.found ? sessions[result.index] : undefined
+  }
+  const baseline = findShown(targetStore.getState().session)
+  if (!baseline) return
+  const promise = (async () => {
+    const session = await retry(() => opencodeClient.getSession(sessionID, targetDirectory)).catch(() => null)
+    if (!session || !isCurrent() || childStores.children.get(targetDirectory) !== targetStore) return
+    const fetched = stripSessionDiffSnapshots(session)
+    if (fetched.time?.archived) return
+    const current = targetStore.getState()
+    const shown = findShown(current.session)
+    if (!shown) return
+    const sessions = upsertSessionRecord(current.session, reconcileFetchedRecord(baseline, shown, fetched))
+    if (sessions !== current.session) targetStore.setState({ session: sessions })
+  })()
+
+  sessionRecordRefreshInflightByKey.set(key, promise)
+  const clearInflightRequest = () => {
+    if (sessionRecordRefreshInflightByKey.get(key) === promise) {
+      sessionRecordRefreshInflightByKey.delete(key)
+    }
+  }
+  void promise.then(clearInflightRequest, clearInflightRequest)
+  return promise
+}
+
+const sessionRecordDemand = new Map<string, number>()
+const sessionRecordDemandListeners = new Set<() => void>()
+
+const notifySessionRecordDemand = () => {
+  for (const listener of sessionRecordDemandListeners) listener()
+}
+
+const subscribeSessionRecordDemand = (listener: () => void) => {
+  sessionRecordDemandListeners.add(listener)
+  return () => {
+    sessionRecordDemandListeners.delete(listener)
+  }
+}
+
+export function useSessionRecordDemand(sessionID: string | null, shown: boolean): void {
+  useEffect(() => {
+    if (!shown || !sessionID) return undefined
+    sessionRecordDemand.set(sessionID, (sessionRecordDemand.get(sessionID) ?? 0) + 1)
+    notifySessionRecordDemand()
+    return () => {
+      const count = (sessionRecordDemand.get(sessionID) ?? 1) - 1
+      if (count > 0) sessionRecordDemand.set(sessionID, count)
+      else sessionRecordDemand.delete(sessionID)
+      notifySessionRecordDemand()
+    }
+  }, [sessionID, shown])
+}
+
+export function useSessionRecordRefresh(
+  { sessionID, directory, ownsContextSources, hasRenderableSnapshot }: {
+    sessionID: string | null
+    directory: string | null
+    ownsContextSources: boolean
+    hasRenderableSnapshot: boolean
+  },
+  refresh: (sessionID: string, directory?: string) => Promise<void>,
+): void {
+  const demanded = useSyncExternalStore(
+    subscribeSessionRecordDemand,
+    () => (sessionID ? sessionRecordDemand.has(sessionID) : false),
+  )
+  const visitKeyRef = useRef<string | null>(null)
+  const visitKey = ownsContextSources && demanded && sessionID && directory
+    ? `${getRuntimeKey()}\n${directory}\n${sessionID}`
+    : null
+  useEffect(() => {
+    if (!visitKey || !sessionID || !directory) {
+      visitKeyRef.current = null
+      return
+    }
+    if (visitKeyRef.current === visitKey) return
+    visitKeyRef.current = visitKey
+    if (!hasRenderableSnapshot) return
+    void refresh(sessionID, directory)
+  }, [visitKey, sessionID, directory, hasRenderableSnapshot, refresh])
 }
 
 export function usePrefetchSessionMessages() {

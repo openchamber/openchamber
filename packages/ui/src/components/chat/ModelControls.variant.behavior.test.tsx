@@ -180,6 +180,9 @@ type SelectionState = {
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null;
   getAgentModelVariantForSession: () => VariantChoice;
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void;
+  sessionPickedModels: Map<string, { providerId: string; modelId: string }>;
+  getSessionModelPick: (sessionId: string) => { providerId: string; modelId: string } | null;
+  captureSessionModelPickSettlement: (sessionId: string) => () => void;
   pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void;
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void;
   pickSessionAgent: (sessionId: string, agentName: string) => void;
@@ -219,7 +222,17 @@ const useSelectionStore = create<SelectionState>((set, get) => ({
   getAgentModelForSession: () => ({ providerId: PROVIDER_ID, modelId: MODEL_ID }),
   getAgentModelVariantForSession: () => get().savedVariant,
   saveSessionModelSelection: () => undefined,
-  pickSessionModel: (sessionId, providerId, modelId) => { pendingModelWrites.push(`${sessionId}:${providerId}/${modelId}`); },
+  sessionPickedModels: new Map(),
+  getSessionModelPick: (sessionId) => get().sessionPickedModels.get(sessionId) ?? null,
+  captureSessionModelPickSettlement: (sessionId) => () => set((state) => {
+    const sessionPickedModels = new Map(state.sessionPickedModels);
+    sessionPickedModels.delete(sessionId);
+    return { sessionPickedModels };
+  }),
+  pickSessionModel: (sessionId, providerId, modelId) => {
+    pendingModelWrites.push(`${sessionId}:${providerId}/${modelId}`);
+    set((state) => ({ sessionPickedModels: new Map(state.sessionPickedModels).set(sessionId, { providerId, modelId }) }));
+  },
   saveSessionAgentSelection: (sessionId, agentName) => set((state) => ({
     sessionAgentSelections: new Map(state.sessionAgentSelections).set(sessionId, agentName),
   })),
@@ -519,6 +532,7 @@ describe('ModelControls effort restore', () => {
       sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
       sessionFollowedAgents: new Map(),
       sessionFollowedModels: new Map(),
+      sessionPickedModels: new Map(),
     });
     useConfigStore.setState({
       providers: [provider],
@@ -1371,6 +1385,7 @@ describe('ModelControls effort restore', () => {
       withModels();
       // The picker holds a model the session has not been sent with yet.
       useConfigStore.setState({ selectionSource: 'manual' });
+      useSelectionStore.getState().pickSessionModel(SESSION_ID, PROVIDER_ID, MODEL_ID);
       setSessionRecord(recordWith(OTHER_MODEL_ID));
       const { cleanup } = await renderModelControls();
       try {
@@ -1378,8 +1393,22 @@ describe('ModelControls effort restore', () => {
 
         await act(async () => setSessionRecord(recordWith(THIRD_MODEL_ID)));
         expect(useConfigStore.getState().currentModelId).toBe(THIRD_MODEL_ID);
-        // A switch made elsewhere is not this person's pick.
+        // A switch made elsewhere is not this person's pick, and replaces the unsent one.
         expect(lastSelectedWrites).toEqual([]);
+        expect(useSelectionStore.getState().getSessionModelPick(SESSION_ID)).toBeNull();
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('[issue-7456] a kept selection that is no pick shows the model the session runs on', async () => {
+      withModels();
+      // A selection saved here earlier, with no record of which session model this tab followed.
+      useConfigStore.setState({ selectionSource: 'manual' });
+      setSessionRecord(recordWith(OTHER_MODEL_ID));
+      const { cleanup } = await renderModelControls();
+      try {
+        expect(useConfigStore.getState().currentModelId).toBe(OTHER_MODEL_ID);
       } finally {
         await cleanup();
       }

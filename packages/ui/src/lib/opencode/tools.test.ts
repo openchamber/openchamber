@@ -108,6 +108,9 @@ describe("tool row description", () => {
       .toEqual({ kind: "text", value: "usage.read · claude" })
     expect(toolDescription("openchamber_usage", { action: "usage.read", parameters: {} }, undefined))
       .toEqual({ kind: "text", value: "usage.read" })
+    const longLabel = `session.unlink · ${"e".repeat(120)}`
+    expect(toolDescription("openchamber", { action: "session.unlink", parameters: { identifier: "e".repeat(120) } }, undefined))
+      .toEqual({ kind: "text", value: longLabel.slice(0, 100) })
   })
 
   test("shell shows the first line of the command", () => {
@@ -115,6 +118,13 @@ describe("tool row description", () => {
       kind: "text",
       value: "git status",
     })
+    const longCommand = `ls -la ${"a".repeat(210)}`
+    expect(toolDescription("shell", { command: longCommand }, undefined))
+      .toEqual({ kind: "text", value: longCommand })
+    expect(toolDescription("shell", { command: "b".repeat(500) }, undefined))
+      .toEqual({ kind: "text", value: "b".repeat(400) })
+    expect(toolDescription("shell", { command: `${"c".repeat(399)}😀 tail` }, undefined))
+      .toEqual({ kind: "text", value: "c".repeat(399) })
   })
 
   test("subagent shows the 3-5 word label the model wrote", () => {
@@ -249,8 +259,10 @@ describe("tool row description", () => {
   test("execute falls back to the first line of the script while it has called nothing", () => {
     expect(toolDescription("execute", { code: "const issues = await linear.list_issues()\nreturn issues" }, {}))
       .toEqual({ kind: "text", value: "const issues = await linear.list_issues()" })
-    expect(toolDescription("execute", { code: "x".repeat(140) }, undefined))
-      .toEqual({ kind: "text", value: "x".repeat(100) })
+    expect(toolDescription("execute", { code: "x".repeat(500) }, undefined))
+      .toEqual({ kind: "text", value: "x".repeat(400) })
+    expect(toolDescription("execute", { code: `${"y".repeat(399)}😀 tail` }, undefined))
+      .toEqual({ kind: "text", value: "y".repeat(399) })
     expect(toolDescription("execute", {}, undefined)).toBe(null)
   })
 

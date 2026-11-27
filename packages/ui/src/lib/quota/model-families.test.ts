@@ -7,7 +7,9 @@ import { getDefaultModels } from './model-families';
 // exist: Gemini 3.x in both spellings, earlier Gemini generations, and the
 // neighbouring Google families that must not be swept in.
 
-describe('getDefaultModels for the google provider', () => {
+const EXTENSION = 'ext-model-usage';
+
+describe('getDefaultModels for a provider that reports Gemini and Claude models', () => {
   test('selects dotted Gemini 3.x model IDs', () => {
     const models = [
       'gemini-3.1-pro',
@@ -17,19 +19,19 @@ describe('getDefaultModels for the google provider', () => {
       'gemini-3.8-flash',
     ];
 
-    expect(getDefaultModels('google', models)).toEqual(models);
+    expect(getDefaultModels(EXTENSION, models)).toEqual(models);
   });
 
   test('selects the hyphenated Gemini 3 ids', () => {
     const models = ['gemini-3-flash', 'gemini-3-pro'];
 
-    expect(getDefaultModels('google', models)).toEqual(models);
+    expect(getDefaultModels(EXTENSION, models)).toEqual(models);
   });
 
   test('selects hyphenated minor versions some providers expose', () => {
     const models = ['gemini-3-1-pro', 'gemini-3-6-flash', 'gemini-3-7-flash'];
 
-    expect(getDefaultModels('google', models)).toEqual(models);
+    expect(getDefaultModels(EXTENSION, models)).toEqual(models);
   });
 
   test('selects preview and preview-suffixed Gemini 3.x ids', () => {
@@ -40,13 +42,13 @@ describe('getDefaultModels for the google provider', () => {
       'gemini-3.1-flash-live-preview',
     ];
 
-    expect(getDefaultModels('google', models)).toEqual(models);
+    expect(getDefaultModels(EXTENSION, models)).toEqual(models);
   });
 
   test('selects Gemini 3.x under the gemini/ and antigravity/ auth prefixes', () => {
-    expect(getDefaultModels('google', ['gemini/gemini-3.8-flash'])).toEqual(['gemini/gemini-3.8-flash']);
-    expect(getDefaultModels('google', ['antigravity/gemini-3-flash'])).toEqual(['antigravity/gemini-3-flash']);
-    expect(getDefaultModels('google', ['antigravity/gemini-3.1-pro'])).toEqual(['antigravity/gemini-3.1-pro']);
+    expect(getDefaultModels(EXTENSION, ['gemini/gemini-3.8-flash'])).toEqual(['gemini/gemini-3.8-flash']);
+    expect(getDefaultModels(EXTENSION, ['antigravity/gemini-3-flash'])).toEqual(['antigravity/gemini-3-flash']);
+    expect(getDefaultModels(EXTENSION, ['antigravity/gemini-3.1-pro'])).toEqual(['antigravity/gemini-3.1-pro']);
   });
 
   test('selects preview ids regardless of which prefix they carry', () => {
@@ -56,11 +58,11 @@ describe('getDefaultModels for the google provider', () => {
       'gemini-3.1-flash-lite-preview',
     ];
 
-    expect(getDefaultModels('google', models)).toEqual(models);
+    expect(getDefaultModels(EXTENSION, models)).toEqual(models);
   });
 
   test('selects every Claude model', () => {
-    expect(getDefaultModels('google', ['antigravity/claude-sonnet-4-6'])).toEqual(['antigravity/claude-sonnet-4-6']);
+    expect(getDefaultModels(EXTENSION, ['antigravity/claude-sonnet-4-6'])).toEqual(['antigravity/claude-sonnet-4-6']);
   });
 
   test('selects the model list from the bug report', () => {
@@ -73,7 +75,7 @@ describe('getDefaultModels for the google provider', () => {
       'antigravity/claude-sonnet-4-6',
     ];
 
-    expect(getDefaultModels('google', models)).toEqual(models);
+    expect(getDefaultModels(EXTENSION, models)).toEqual(models);
   });
 
   test('keeps legacy Gemini 3 and dotted ids together', () => {
@@ -88,11 +90,11 @@ describe('getDefaultModels for the google provider', () => {
       'antigravity/claude-sonnet-4-6',
     ];
 
-    expect(getDefaultModels('google', models)).toEqual(models);
+    expect(getDefaultModels(EXTENSION, models)).toEqual(models);
   });
 
   test('ignores earlier Gemini generations', () => {
-    expect(getDefaultModels('google', [
+    expect(getDefaultModels(EXTENSION, [
       'gemini-1.5-flash',
       'gemini-2.0-flash',
       'gemini-2.5-flash',
@@ -102,14 +104,14 @@ describe('getDefaultModels for the google provider', () => {
   });
 
   test('ignores versionless Gemini aliases', () => {
-    expect(getDefaultModels('google', [
+    expect(getDefaultModels(EXTENSION, [
       'gemini-flash-latest',
       'gemini-flash-lite-latest',
     ])).toEqual([]);
   });
 
   test('ignores non-chat surfaces and neighbouring families', () => {
-    expect(getDefaultModels('google', [
+    expect(getDefaultModels(EXTENSION, [
       'gemini-embedding-001',
       'gemini-embedding-2',
       'gemma-4-26b-a4b-it',
@@ -119,7 +121,7 @@ describe('getDefaultModels for the google provider', () => {
   });
 
   test('ignores unrelated providers', () => {
-    expect(getDefaultModels('google', ['gpt-5.2-codex', 'deepseek-v4-pro'])).toEqual([]);
+    expect(getDefaultModels(EXTENSION, ['gpt-5.2-codex', 'deepseek-v4-pro'])).toEqual([]);
   });
 });
 
@@ -136,24 +138,5 @@ describe('getDefaultModels for the OpenCode Zen provider', () => {
     const models = ['big-pickle', 'minimax-m3.1-flash-free', 'mimo-v2.6-flash-free'];
 
     expect(getDefaultModels('opencode', models)).toEqual(models);
-  });
-});
-
-describe('getDefaultModels and families for the antigravity provider', () => {
-  test('selects Gemini 3.x and Claude models for antigravity', () => {
-    const models = [
-      'gemini-3.8-flash',
-      'gemini-3.1-pro-high',
-      'claude-sonnet-5-5-low',
-      'claude-opus-5-5-high',
-      'gemini-2.0-flash',
-    ];
-
-    expect(getDefaultModels('antigravity', models)).toEqual([
-      'gemini-3.8-flash',
-      'gemini-3.1-pro-high',
-      'claude-sonnet-5-5-low',
-      'claude-opus-5-5-high',
-    ]);
   });
 });

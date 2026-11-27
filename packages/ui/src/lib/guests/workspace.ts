@@ -1,3 +1,4 @@
+import { listIntegrateCheckouts } from '@/lib/worktrees/integrateCheckouts';
 import { HostRequestError, type GuestLoadState, type GuestSessionRecord, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestWorktree } from '@openchamber/sdk';
 import type { Session } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -10,6 +11,7 @@ import { getLinkedIssues, isLinkedChange } from '@/lib/linkedIssues';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { isSessionUnread } from '@/sync/session-unread';
 import { currentLiveTool, useSessionLiveWorkStore } from '@/sync/session-live-work';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { readDeferredGlobalUpdates, subscribeDeferredGlobalUpdates, withDeferredGlobalUpdate } from '@/sync/session-event-router';
 import { findSessionModelKey, limitsForAnsweringModel } from '@/lib/routing/contextWindowLimits';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -86,13 +88,14 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
   const contextLimit = reading?.state === 'measured'
     ? limitsForAnsweringModel(findSessionModelKey(session), useConfigStore.getState().providers).context
     : 0;
+  const pages = useGlobalBlockingRequestsStore.getState().bySession.get(session.id)?.pages;
   let activity: GuestSessionRecord['activity'] = 'unknown';
   if (connected) {
     if (status?.type === 'busy') activity = 'running';
     else if (status?.type === 'retry') activity = 'retrying';
     else if (status?.type === 'idle' || (!statusInvalidated && (child?.sessionStatusReady || observed))) activity = 'idle';
     if (child?.permission[session.id]?.length) activity = 'waiting-permission';
-    else if (child?.form[session.id]?.length) activity = 'waiting-question';
+    else if (child?.form[session.id]?.length || pages?.length) activity = 'waiting-question';
   }
   return {
     id: session.id, title: session.title || session.id, projectId, directory,
@@ -130,6 +133,7 @@ export const readGuestWorkspace = (query: GuestWorkspaceQuery, guestId: string):
   const directories = new Set(project ? [path, ...worktrees.map((worktree) => normalizePath(worktree.directory) ?? worktree.directory)] : []);
   const manager = getSyncChildStores();
   const global = useGlobalSessionsStore.getState();
+  for (const checkout of listIntegrateCheckouts()) if (checkout.projectPaths.includes(path)) directories.add(checkout.path);
   const coverage = [...directories].map((directory) => {
     const bootstrap = manager.getBootstrapState(directory);
     const state: GuestLoadState = bootstrap === 'failed' || global.status === 'error' ? 'error' : global.status === 'ready' ? 'ready' : 'loading';
@@ -203,6 +207,7 @@ export const observeGuestWorkspace = (query: GuestWorkspaceQuery, guestId: strin
         subscribeDeferredGlobalUpdates(update),
         useConfigStore.subscribe((state, previous) => { if (state.isConnected !== previous.isConnected || state.providers !== previous.providers) update(); }),
         useSessionLiveWorkStore.subscribe(update),
+        useGlobalBlockingRequestsStore.subscribe(update),
         useUIStore.subscribe((state, previous) => { if (state.sessionWorkEnabled !== previous.sessionWorkEnabled) update(); }),
         manager.subscribeBootstrap(update),
         manager.subscribeAllSelected((state) => state.session, update),

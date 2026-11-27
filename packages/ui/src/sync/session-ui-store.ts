@@ -42,8 +42,11 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveCreatedWorktreeStartDirectory, resolveStartDirectory, resolveWorktreeStartDirectory } from "@/lib/worktrees/worktreeStartDirectory"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
-import { admitSession, isSessionAdmitted, withAdmittedLineage } from "./session-admission"
+import { isCheckoutRoot } from "@/lib/worktrees/integrateCheckouts"
+import type { ReadOnlySessionAssociation } from "@/lib/worktrees/readOnlySessionAssociation"
+import { admitSession, confirmNestedSessionTrust, isSessionAdmitted, nestedLineageProject, resolveAdmittedSessionProject, resolveProjectRefForWorktreeDirectory, withAdmittedLineage } from "./session-admission"
 import { isSessionDirectoryAdmitted } from "./session-admission-rule"
+import { revertAndReportFiles } from "./revert-outcome"
 import {
   getSyncSessions,
   getAllSyncSessions,
@@ -155,6 +158,7 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
   agent?: string
   agentMentionName?: string
   variant?: string | null
+  keepSessionModel?: boolean; keepSessionAgent?: boolean
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
@@ -175,12 +179,7 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
   assertRuntimeCurrent()
   const requestDirectory = params.directory ?? undefined
   const sendDirectory = () => getAuthoritativeSessionDirectory(params.sessionId) ?? requestDirectory
-  const sendSelection = () => resolveCheckedSendSelection(params.sessionId, sendDirectory(), {
-    providerID: params.providerID,
-    modelID: params.modelID,
-    variant: params.variant,
-    agent: params.agent,
-  })
+  const sendSelection = () => resolveCheckedSendSelection(params.sessionId, sendDirectory(), params)
   const contextItems = (params.additionalParts ?? [])
     .filter((part) => part.text.trim().length > 0)
     .map((part) => ({ text: part.text, metadata: part.metadata }))
@@ -239,13 +238,11 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
         ...contextItems,
         ...skillInstructionContext(),
       ]
-      const selection = await sendSelection()
       const revertStaged = getSyncSessions(sendDirectory()).some((session) => session.id === params.sessionId && session.revert)
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
-        model: selection.model,
-        agent: selection.agent,
+        resolveSelection: sendSelection,
         command: cmdName,
         arguments: tail.join(" "),
         files: sendFiles,
@@ -274,18 +271,16 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
     files: sendFiles,
     context: contextItems,
     ready: params.ready,
-    markBusy: params.markBusy,
+    markBusy: params.markBusy, steer: params.delivery === 'steer',
     appendSubmissions: params.appendSubmissions,
     onOptimisticInsert: params.onMessageMinted,
     send: async (messageID, context, commitRevert) => {
       assertRuntimeCurrent()
-      const selection = await sendSelection()
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
         providerID: params.providerID,
-        model: selection.model,
-        agent: selection.agent,
+        resolveSelection: sendSelection,
         text: params.content,
         agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
         files: sendFiles,
@@ -379,6 +374,7 @@ export type SessionUIState = {
   availableWorktrees: WorktreeMetadata[]
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>
   worktreeDiscoveryByProject: ReadonlyMap<string, 'loading' | 'ready' | 'error'>
+  nestedSessionOwners: ReadonlyMap<string, ReadOnlySessionAssociation>
   webUICreatedSessions: Set<string>
   sessionAbortFlags: Map<string, { timestamp: number; acknowledged: boolean }>
   abortControllers: Map<string, AbortController>
@@ -441,7 +437,7 @@ export type SessionUIState = {
   unarchiveSession: (id: string) => Promise<boolean>
   unarchiveSessions: (ids: string[], options?: UnarchiveSessionsOptions) => Promise<{ restoredIds: string[]; failedIds: string[] }>
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
-  revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
+  revertToMessage: (sessionId: string, messageId: string) => Promise<{ filesUnchanged: boolean }>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   forkAfterMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
@@ -747,16 +743,6 @@ export type PendingDraftSend = {
   sessionCreated: boolean
 }
 
-const resolveProjectRefForWorktreeDirectory = (directory: string | null, projectId?: string | null): { id: string; path: string } | null => {
-  const projectsState = useProjectsStore.getState()
-  if (projectId) {
-    const project = projectsState.projects.find((entry) => entry.id === projectId)
-    if (project?.path) return { id: project.id, path: project.path }
-  }
-  const resolved = resolveProjectForSessionDirectory(projectsState.projects, useSessionUIStore.getState().availableWorktreesByProject, directory)
-  return resolved?.path ? { id: resolved.id, path: resolved.path } : null
-}
-
 const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, projectId?: string | null): Promise<void> => {
   if (!directory || isSpaceDirectory(directory)) return
   const project = resolveProjectRefForWorktreeDirectory(directory, projectId)
@@ -772,8 +758,7 @@ const projectOfWorktreeRoot = (
 ): { id: string; path: string } | null => {
   if (!directory) return null
   const target = normalizePath(directory)
-  const isWorktreeRoot = [...availableWorktreesByProject.values()]
-    .some((worktrees) => worktrees.some((worktree) => normalizePath(worktree.path) === target))
+  const isWorktreeRoot = isCheckoutRoot(availableWorktreesByProject, target)
   return isWorktreeRoot ? resolveProjectRefForWorktreeDirectory(directory, projectId) : null
 }
 
@@ -1207,20 +1192,23 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   availableWorktrees: flattenWorktreeMap(PERSISTED_WORKTREE_MAP),
   availableWorktreesByProject: PERSISTED_WORKTREE_MAP,
   worktreeDiscoveryByProject: new Map(),
+  nestedSessionOwners: new Map(),
   webUICreatedSessions: new Set(),
   sessionAbortFlags: new Map(),
   abortControllers: new Map(),
   isLoading: false,
   lastLoadedDirectory: null,
 
-  setCurrentSession: (id, directoryHint?: string | null, options?: SetCurrentSessionOptions) => {
+  setCurrentSession: async (id, directoryHint?: string | null, options?: SetCurrentSessionOptions) => {
     const navigationRevision = ++admissionNavigationRevision
     if (id) {
       const record = useGlobalSessionsStore.getState().entityById.get(id)
       const directory = withAdmittedLineage(id, (record ? resolveGlobalSessionDirectory(record) : null)
         ?? resolveSessionDirectory(id, (sid) => get().worktreeMetadata.get(sid))
         ?? normalizePath(directoryHint))
-      if (!directory || !isSessionAdmitted(directory)) {
+      if (directory && !isSessionAdmitted(directory) && nestedLineageProject(id, directory)) {
+        if (!await confirmNestedSessionTrust(directory, () => navigationRevision === admissionNavigationRevision && Boolean(nestedLineageProject(id, directory)))) return
+      } else if (!directory || !isSessionAdmitted(directory)) {
         const runtimeKey = getRuntimeKey()
         const stillSelected = () => navigationRevision === admissionNavigationRevision && runtimeKey === getRuntimeKey()
         void (async () => {
@@ -1259,10 +1247,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const isGuessedDir = knownDir === null
     const projectsState = useProjectsStore.getState()
     const sessionProject = resolvedDir
-      ? resolveProjectForSessionDirectory(
+      ? resolveAdmittedSessionProject(
+        id,
+        resolvedDir,
         projectsState.projects,
         get().availableWorktreesByProject,
-        resolvedDir,
       )
       : null
 
@@ -1381,6 +1370,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       worktreeMetadata: memory?.worktreeMetadata ?? new Map(),
       availableWorktrees: flattenWorktreeMap(availableWorktreesByProject),
       availableWorktreesByProject,
+      nestedSessionOwners: new Map(),
       sessionAbortFlags: new Map(),
         })
     if (admitted) {
@@ -1969,7 +1959,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
-      const settleModelPick = targetSessionId
+      const settleModelPick = targetSessionId && !options?.keepSessionModel
         ? useSelectionStore.getState().captureSessionModelPickSettlement(targetSessionId, providerID, modelID, capturedRuntimeKey)
         : undefined
       const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
@@ -1985,7 +1975,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
       }
 
-      if (targetSessionId && effectiveAgent) {
+      if (targetSessionId && effectiveAgent && !options?.keepSessionAgent) {
         useSelectionStore.getState().saveSessionAgentSelection(targetSessionId, effectiveAgent)
         useSelectionStore.getState().saveAgentModelVariantForSession(
           targetSessionId,
@@ -2049,13 +2039,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
         : undefined
 
-      const carriedPick = inputMode !== "shell" && targetSessionId && effectiveAgent
+      const carriedPick = inputMode !== "shell" && targetSessionId && effectiveAgent && !options?.keepSessionAgent
         && useSelectionStore.getState().getSessionAgentPick(targetSessionId) === effectiveAgent
         ? { sessionId: targetSessionId, agent: effectiveAgent }
         : null
+      const keep = { model: options?.keepSessionModel === true, agent: options?.keepSessionAgent === true }
       if (carriedPick) useSelectionStore.getState().settleSessionAgentPick(carriedPick.sessionId, carriedPick.agent)
       const settleSentSelection = targetSessionId
-        ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant)
+        ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant, keep)
         : undefined
       const routed = await routeMessage({
         runtimeKey: capturedRuntimeKey, isCurrentRuntime: isCurrentRuntimeInstance,
@@ -2067,6 +2058,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         agent: effectiveAgent,
         agentMentionName,
         variant,
+        keepSessionModel: keep.model, keepSessionAgent: keep.agent,
         inputMode,
         files,
         appendSubmissions,
@@ -2130,9 +2122,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     await updateSessionTitleAction(sessionId, title, { byUser: true })
   },
 
-  revertToMessage: async (sessionId, messageId) => {
-    await revertToMessageAction(sessionId, messageId, { refresh: true })
-  },
+  revertToMessage: (sessionId, messageId) => revertAndReportFiles(sessionId, messageId),
 
   handleSlashUndo: async (sessionId) => {
     const messages = getSyncMessages(sessionId)
@@ -2159,7 +2149,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
       : "[No text]"
 
-    await get().revertToMessage(sessionId, targetMessage.id)
+    const { filesUnchanged } = await get().revertToMessage(sessionId, targetMessage.id)
+    if (filesUnchanged) return
 
     const { toast } = await import("sonner")
     const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
@@ -2180,7 +2171,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const targetMessage = revertIndex >= 0 ? userMessages[revertIndex + 1] : undefined
 
     if (targetMessage) {
-      await get().revertToMessage(sessionId, targetMessage.id, { skipRedoPush: true })
+      await revertToMessageAction(sessionId, targetMessage.id, { refresh: true })
       const { toast } = await import("sonner")
       const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
@@ -2405,7 +2396,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       guessedSelectionSessionId = null
     }
     if (sessionId === get().currentSessionId) {
-      if (normalized && !isSessionAdmitted(normalized)) {
+      if (normalized && !isSessionAdmitted(normalized) && !nestedLineageProject(sessionId, normalized)) {
         get().setCurrentSession(null)
         get().setCurrentSession(sessionId, normalized)
         return

@@ -2,8 +2,9 @@
 
 ## Ownership
 
-This module owns comment fields, cards, selection placement and the controller
-that connects file and diff comments to composer drafts. Draft persistence
+This module owns comment fields, cards, selection placement, the controller
+that connects file and diff comments to composer drafts, and reopening what a
+comment was written on (`useOpenCommentSource`). Draft persistence
 belongs to the stores; prompt editing and submission belong to the
 [composer](../chat/composer/DOCUMENTATION.md). Review state and submission belong
 to [review](../review/DOCUMENTATION.md).
@@ -18,6 +19,12 @@ to [review](../review/DOCUMENTATION.md).
   so parent selection clearing cannot change the comment's destination.
 - Drafts match their diff origin as well as their path. A pull request's lines
   and the working file's lines can differ at the same path.
+- A comparison comment reopens in its diff, never the file on disk:
+  `useOpenCommentSource` hands commit, branch and change-request origins to the
+  git tab (`openCommentLocation`) or the phone's Changes as one
+  `CommentLocationRequest` (`lib/commentLocation.ts`). A working-tree comment
+  opens the file; a turn comment opens its turn's diff. A runtime that cannot
+  show the place offers no opener for it.
 - `lineSource` returns the same object for unchanged content and null while
   lines are unavailable or a range has no single line source. `contentVersion`
   changes with that content. Effects read current host callbacks because hosts
@@ -147,3 +154,32 @@ hardware and desktop input retain their modifier semantics.
 Pierre keys annotations by index, so inserting a transient field in the middle
 rebuilds every later annotation. The open field stays after saved annotations
 to preserve their identity.
+
+### Why a comparison comment reopens in its diff and not in the file
+
+A comment on a commit, a branch comparison or a change request names lines of a
+version that is published or historical, so the file on disk is a different
+version and may not have those lines at all. `useOpenCommentSource` therefore
+sends the three origins to the comparison's diff; only a comment on uncommitted
+changes or a file quote opens a file. Always opening the file was rejected as
+wrong rather than imprecise: it would show text the comment never quoted. A turn
+comment goes through the turn's own diff, never a branch comparison, so it
+cannot relabel "Last turn"; without a recorded turn it has no opener.
+
+### Why the request carries the whole comparison
+
+The request names the comparison itself (the change request and its revision,
+the commit, or the branch and the base it was read against) instead of the
+opener selecting it first. In Electron the git tab can live in a detached
+panel window; `openCommentLocation` is a routed action, so the comparison and
+the line reach that window together, and the surface that takes the request
+opens the comparison there. A branch jump shows the recorded base only while
+the person stays on it and never writes it as the branch's saved base.
+
+### Why the surface decides whether the opener exists
+
+`canOpen` asks about the pair (comment, current runtime), not the comment alone:
+VS Code's editor shows files, so a comparison comment there would land on
+another version; the branch scope compares the checkout, so a branch comment
+needs that branch checked out; the mini chat has no viewer. The opener is only
+offered where opening it cannot lie.

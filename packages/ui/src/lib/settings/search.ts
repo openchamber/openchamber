@@ -10,9 +10,13 @@ import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/s
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 import { OPENCHAMBER_TOOLS_SEARCH_ITEMS } from './search-openchamber-tools';
+import { CHAT_ACTIVITY_SEARCH_ITEMS } from './search-chat-activity';
 import { CHAT_SENDING_SEARCH_ITEMS } from './search-chat-sending';
 import { SESSION_DEFAULTS_SEARCH_ITEMS } from './search-session-defaults';
+import { SIDEBAR_SESSION_SEARCH_ITEMS } from './search-sidebar-sessions';
+import { SESSION_COST_SEARCH_ITEMS, SESSION_GOAL_SEARCH_ITEMS } from './search-session-limits';
 import { VOICE_SEARCH_ITEMS } from './search-voice';
+import { SKILLS_SEARCH_ITEMS } from './search-skills';
 
 type SettingsSearchTitle =
   | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
@@ -364,34 +368,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['review', 'walkthrough', 'changes', 'diff', 'jev', 'classification'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  {
-    id: 'chat.session-goal',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.sessionGoal',
-    keywords: ['goal', 'objective', 'auto continue'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'chat.session-goal-checker',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.goal.checkerLabel',
-    keywords: ['goal', 'progress', 'check', 'jev', 'classification', 'small model'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'chat.session-goal-max-turns',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.goal.maxTurnsLabel',
-    keywords: ['goal', 'turns', 'limit', 'continuations', 'safety'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'chat.session-goal-budget',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.goal.budgetLabel',
-    keywords: ['goal', 'budget', 'tokens', 'limit'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...SESSION_GOAL_SEARCH_ITEMS,
   {
     id: 'chat.reasoning-traces',
     page: 'chat',
@@ -495,18 +472,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.openchamber.visual.field.savePastedImagesAsFilesInfo',
     keywords: ['image', 'screenshot', 'paste', 'vision', 'text-only', 'model', 'path', 'attachment', 'file', 'link'],
   },
-  {
-    id: 'chat.tool-file-icons',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.showToolFileIcons',
-    keywords: ['tools', 'files', 'icons'],
-  },
-  {
-    id: 'chat.changed-files',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.showTurnChangedFiles',
-    keywords: ['changed files', 'turns'],
-  },
+  ...CHAT_ACTIVITY_SEARCH_ITEMS,
   {
     id: 'chat.dotfiles',
     page: 'general',
@@ -600,7 +566,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'sessions.warming',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.sessionWarming',
-    descriptionKey: 'settings.openchamber.defaults.field.sessionWarmingInfo',
+    descriptionKey: 'settings.openchamber.defaults.sessionWarming.searchDescription',
     keywords: ['warming', 'warm', 'cache', 'prompt cache', 'keep-alive', 'idle', 'per session', 'keep warm', 'duration', 'how long', 'hour'],
   },
   {
@@ -639,13 +605,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['permissions', 'auto-accept', 'accept', 'safety net', 'ask', 'shield', 'approval', 'new session'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
-  {
-    id: 'sessions.show-chats',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.showChats',
-    keywords: ['chats', 'sidebar', 'hide', 'show', 'section'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...SIDEBAR_SESSION_SEARCH_ITEMS,
   {
     id: 'sessions.work',
     page: 'sessions',
@@ -659,6 +619,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.sessionWork.field.enabled',
     keywords: ['in work', 'in progress', 'track', 'done', 'sidebar'],
   },
+  ...SESSION_COST_SEARCH_ITEMS,
   {
     id: 'sessions.small-model',
     page: 'sessions',
@@ -1313,48 +1274,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.webSearch.section.providersInfo',
     keywords: ['api key', 'exa', 'tavily', 'firecrawl', 'parallel', 'tinyfish', 'searxng', 'brave', 'kagi', 'perplexity', 'linkup', 'serper', 'credentials'],
   },
-  {
-    id: 'skills.create',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.title.newSkill',
-    keywords: ['create', 'add', 'new skill'],
-  },
-  {
-    id: 'skills.basic-information',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.section.basicInformation',
-    keywords: ['name', 'location', 'description', 'manual', 'invocation', 'autoinvoke'],
-  },
-  {
-    id: 'skills.instructions',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.section.instructions',
-    keywords: ['markdown', 'skill.md', 'content'],
-  },
-  {
-    id: 'skills.supporting-files',
-    page: 'skills.installed',
-    titleKey: 'settings.skills.page.section.supportingFiles',
-    keywords: ['files', 'resources'],
-  },
-  {
-    id: 'skills.catalog.source',
-    page: 'skills.catalog',
-    titleKey: 'settings.skills.catalog.page.section.sourceRepository',
-    keywords: ['catalog', 'repository', 'source', 'refresh'],
-  },
-  {
-    id: 'skills.catalog.search',
-    page: 'skills.catalog',
-    titleKey: 'settings.skills.catalog.shared.field.searchSkillsPlaceholder',
-    keywords: ['find skills', 'install skills', 'catalog search'],
-  },
-  {
-    id: 'skills.catalog.add-catalog',
-    page: 'skills.catalog',
-    titleKey: 'settings.skills.catalog.page.actions.addCatalog',
-    keywords: ['external repository', 'add source', 'catalog'],
-  },
+  ...SKILLS_SEARCH_ITEMS,
   {
     id: 'magic-prompts.scope',
     page: 'magic-prompts',

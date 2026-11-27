@@ -1,4 +1,5 @@
 import { asNonEmptyString } from '../shared/guards.js';
+import { readLead } from '../session-lead/metadata.js';
 import { sessionParentId } from '../session-lineage.js';
 import type { createWorkMembership, WorkSession } from '../session-work/membership.js';
 
@@ -21,6 +22,7 @@ export interface ListedSession {
   agent?: string;
   model?: unknown;
   outcome?: unknown;
+  lead?: boolean;
   inWork?: boolean;
   doneSuggested?: boolean;
 }
@@ -35,11 +37,14 @@ interface SessionProjection {
   agent: string | null;
   model: unknown;
   outcome: unknown;
+  lead?: boolean;
   inWork?: boolean;
   doneSuggested?: boolean;
 }
 
-export const listedSession = (record: ListedSessionRecord, workMembership: Pick<ReturnType<typeof createWorkMembership>, 'isInWork' | 'isDoneSuggested'> | null): ListedSession => {
+export const isLead = (record: ListedSessionRecord) => sessionParentId(record) === null && readLead(record.metadata) !== null;
+
+export const listedSession = (record: ListedSessionRecord, work: { membership: Pick<ReturnType<typeof createWorkMembership>, 'isInWork' | 'isDoneSuggested'>; pinnedInWork: boolean } | null): ListedSession => {
   const session: SessionProjection = {
     id: record.id,
     title: asNonEmptyString(record.title),
@@ -51,9 +56,10 @@ export const listedSession = (record: ListedSessionRecord, workMembership: Pick<
     model: record.model,
     outcome: record.outcome,
   };
-  if (workMembership) {
-    session.inWork = workMembership.isInWork(record);
-    session.doneSuggested = workMembership.isDoneSuggested(record);
+  if (isLead(record)) session.lead = true;
+  if (work) {
+    session.inWork = work.membership.isInWork(record, work.pinnedInWork);
+    session.doneSuggested = work.membership.isDoneSuggested(record, work.pinnedInWork);
   }
   return Object.fromEntries(Object.entries(session).filter(([, value]) => value !== undefined && value !== null));
 };

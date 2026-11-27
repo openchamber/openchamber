@@ -26,6 +26,17 @@ const createTempDir = (prefix) => {
   return dir;
 };
 
+// The layout an OpenCode Desktop installer leaves: OpenCode.exe with the
+// Electron bundle in resources\app.asar beside it.
+const createWindowsDesktopInstall = (folder) => {
+  const installDir = path.join(createTempDir('openchamber-localappdata-'), 'Programs', folder);
+  fs.mkdirSync(path.join(installDir, 'resources'), { recursive: true });
+  fs.writeFileSync(path.join(installDir, 'resources', 'app.asar'), '');
+  const desktopBinary = path.join(installDir, 'OpenCode.exe');
+  fs.writeFileSync(desktopBinary, '');
+  return desktopBinary;
+};
+
 const setPlatform = (platform) => {
   Object.defineProperty(process, 'platform', {
     value: platform,
@@ -177,7 +188,7 @@ describe('OpenCode env runtime', () => {
     expect(runtime.resolveManagedOpenCodeLaunchSpec(entry)).toEqual({
       binary: process.versions.bun ? expect.any(String) : process.execPath,
       args: [entry],
-      env: {},
+      env: { UV_THREADPOOL_SIZE: '32' },
       wrapperType: 'bundled-server',
     });
     const binary = createExecutable('openchamber-plain-opencode-');
@@ -507,11 +518,14 @@ describe('OpenCode env runtime', () => {
     expect(resolvePackageBundledOpenCodeServerDir(pathToFileURL(path.join(sourceModuleDir, 'bundled-opencode-server.ts')).href)).toBeNull();
   });
 
-  it('requires Node 22.15+ for the bundled OpenCode server', () => {
+  it('requires Node 22.16+ or 24+ for the bundled OpenCode server', () => {
     expect(isSupportedBundledNodeVersion('v20.19.0')).toBe(false);
     expect(isSupportedBundledNodeVersion('22.12.0')).toBe(false);
-    expect(isSupportedBundledNodeVersion('22.15.0')).toBe(true);
+    expect(isSupportedBundledNodeVersion('22.15.0')).toBe(false);
+    expect(isSupportedBundledNodeVersion('22.16.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('22.23.3')).toBe(true);
+    expect(isSupportedBundledNodeVersion('23.11.1')).toBe(false);
+    expect(isSupportedBundledNodeVersion('24.0.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('24.14.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('v25.1.0')).toBe(true);
     expect(isSupportedBundledNodeVersion('bun')).toBe(false);
@@ -542,19 +556,27 @@ describe('OpenCode env runtime', () => {
     });
   });
 
-  it('rejects known Windows OpenCode desktop app install paths', async () => {
+  // An in-place update keeps the first installer's folder name, so a Desktop
+  // install is not always in Programs\OpenCode.
+  it.each(['OpenCode', '@opencode-aidesktop'])('rejects the Windows OpenCode desktop app installed in Programs\\%s', async (folder) => {
     setPlatform('win32');
-    const localAppData = createTempDir('openchamber-localappdata-');
-    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
-    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
-    fs.writeFileSync(desktopBinary, '');
-    process.env.LOCALAPPDATA = localAppData;
+    const desktopBinary = createWindowsDesktopInstall(folder);
     const { runtime } = createRuntime({ opencodeBinary: desktopBinary });
 
     await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
       code: 'OPENCODE_BINARY_INVALID',
       message: expect.stringContaining('Windows desktop app install'),
     });
+  });
+
+  it('accepts the opencode CLI shipped inside a Windows desktop app install', async () => {
+    setPlatform('win32');
+    const desktopBinary = createWindowsDesktopInstall('@opencode-aidesktop');
+    const cliBinary = path.join(path.dirname(desktopBinary), 'resources', 'opencode-cli.exe');
+    fs.writeFileSync(cliBinary, '');
+    const { runtime } = createRuntime({ opencodeBinary: cliBinary });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(cliBinary);
   });
 
   it('bounds every login-shell probe and falls through when one overruns', () => {
@@ -603,32 +625,49 @@ describe('OpenCode env runtime', () => {
       },
     });
 
-    // Not probed yet, so the PowerShell and cmd snapshot probes run too.
+    // Not probed yet, so the registry probes run too.
     state.cachedLoginShellEnvSnapshot = undefined;
-    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
+    expect(runtime.getLoginShellEnvSnapshot()).toEqual({ PATH: process.env.PATH });
     expect(runtime.resolveOpencodeCliPath()).toBeNull();
     expect(calls.some((call) => call.command === 'where')).toBe(true);
+    expect(calls.some((call) => call.command.endsWith('reg.exe'))).toBe(true);
     for (const call of calls) {
       expect(call.options.timeout).toBe(10_000);
     }
-    const powershellCalls = calls.filter((call) => call.args.includes('-Command'));
-    expect(powershellCalls.length).toBeGreaterThan(0);
-    for (const call of powershellCalls) {
-      expect(call.args).toContain('-NoProfile');
-      expect(call.args).toContain('-NonInteractive');
-    }
+  });
+
+  it('puts the Windows registry PATH before the process PATH and expands only REG_EXPAND_SZ', () => {
+    setPlatform('win32');
+    const processPath = createTempDir('openchamber-process-path-');
+    process.env.PATH = processPath;
+    process.env.SystemRoot = 'C:\\Windows';
+    const machineOutput = [
+      '',
+      'HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+      '    Path    REG_EXPAND_SZ    %SystemRoot%\\system32;C:\\Program Files\\Git\\cmd;%NOT_SET_HERE%\\bin',
+      '',
+      '',
+    ].join('\r\n');
+    const userOutput = 'HKEY_CURRENT_USER\\Environment\r\n    Path    REG_SZ    C:\\literal\\%SystemRoot%\r\n';
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: (command, args) => {
+        expect(command).toBe('C:\\Windows\\System32\\reg.exe');
+        if (args[1].startsWith('HKCU')) return { status: 0, stdout: userOutput };
+        return { status: 0, stdout: machineOutput };
+      },
+    });
+    state.cachedLoginShellEnvSnapshot = undefined;
+
+    expect(runtime.getLoginShellEnvSnapshot()).toEqual({
+      PATH: ['C:\\Windows\\system32;C:\\Program Files\\Git\\cmd;%NOT_SET_HERE%\\bin', 'C:\\literal\\%SystemRoot%', processPath].join(path.delimiter),
+    });
   });
 
   it('does not auto-detect the Windows OpenCode desktop app as a CLI', () => {
     setPlatform('win32');
-    const localAppData = createTempDir('openchamber-localappdata-');
-    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
-    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
-    fs.writeFileSync(desktopBinary, '');
-    process.env.LOCALAPPDATA = localAppData;
+    process.env.OPENCODE_BINARY = createWindowsDesktopInstall('@opencode-aidesktop');
     process.env.PATH = createTempDir('openchamber-empty-path-');
     process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
-    delete process.env.OPENCODE_BINARY;
     const { runtime } = createRuntime({}, {
       spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
     });
@@ -638,13 +677,9 @@ describe('OpenCode env runtime', () => {
 
   it('skips Windows OpenCode desktop app entries returned by where.exe', () => {
     setPlatform('win32');
-    const localAppData = createTempDir('openchamber-localappdata-');
-    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
+    const desktopBinary = createWindowsDesktopInstall('@opencode-aidesktop');
     const cliBinary = path.join(createTempDir('openchamber-cli-'), 'opencode.exe');
-    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
-    fs.writeFileSync(desktopBinary, '');
     fs.writeFileSync(cliBinary, '');
-    process.env.LOCALAPPDATA = localAppData;
     process.env.PATH = createTempDir('openchamber-empty-path-');
     process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
     delete process.env.OPENCODE_BINARY;

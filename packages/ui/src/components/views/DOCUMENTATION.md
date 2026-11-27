@@ -145,9 +145,13 @@ stores own durable state and shared caches.
 - Bounded metadata retries advance only on external request-state transitions.
   Attempt counters and inline starter functions cannot retrigger the effect;
   changing directories resets exhaustion in the first render.
-- Range-cache reservations prevent duplicate reads, release on cleanup and reject
-  stale completions. Range changes hide old values immediately with a stable
-  empty map; equivalent path revisions cannot cancel pending reads.
+- Range-cache reservations prevent duplicate reads, release when their path
+  leaves the request and reject stale completions by request identity. Range
+  changes hide old values immediately with a stable empty map; equivalent path
+  revisions cannot cancel pending reads. Completed entries whose path is no
+  longer requested are kept up to `RANGE_CACHE_IDLE_ENTRIES`, oldest dropped
+  first, so scrolling an expanded list does not retain every patch it read.
+  A hidden view requests nothing and keeps what it holds until it shows again.
 - Content polling confirms changed text with a second read before applying it,
   so a half-written file stays out of the editor. A failed read leaves the change
   pending for retry; metadata comparison tolerates sub-millisecond mtime jitter.
@@ -329,6 +333,27 @@ working or staged diff.
 The comparison picker puts the bound remote's default branch first, without
 changing automatic base detection. Other remotes' defaults keep their place:
 a base on a remote other than the bound one is rejected.
+
+The pull request picker (`git/PullRequestComparisonSelector.tsx`: Changes,
+Walkthrough and mobile Changes) and the Git panel's list
+(`git/PullRequestListPanel.tsx`) share one filter icon,
+`git/PullRequestFilterButton.tsx`, over the panel in
+`components/references/referenceFilterPanel.tsx`. The filter and its list read
+belong to `usePullRequestComparison`. Both start at Open, so the default read
+asks for open pull requests only; All, Closed and Merged read `state=all`, and
+every page of that list keeps the state (`pullRequestListState`). On a provider
+with `advancedSearch`, a status qualifier in the search text decides the status
+as it does on the board: the host ignores the state sent with it, so the status
+group is disabled and names the qualifier, and no loaded row is dropped for its
+status. The filter
+narrows the loaded rows on the client, so a page can hold no match: Load more,
+a failed page's error and its Retry stay reachable then. Repository, author and
+label choices come from the loaded rows, and a chosen one stays listed after
+the rows that carried it are gone. The filter belongs to the folder, branch and
+repository it was chosen in, and the picker drops it with its search text when
+it closes. The filter sits inside the picker's `Command`, so the picker stops
+its key presses there: Enter on the icon would otherwise pick the highlighted
+pull request.
 
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved
@@ -654,10 +679,10 @@ selected turn's state the view shows loading; a failed read keeps its error
 and retry. A listed file is expanded and scrolled to on every click, since
 the chip's absolute path only matches the relative list through this request.
 
-A file missing from the turn diff opens Changed in the repository holding it,
-read afresh and expanded. Only a file inside a project that is not a repository,
-once discovery finds no repository in the project holding it, opens in the
-editor instead (`files/openChangedFileWithoutRepository.ts`): there is no
+On desktop, a file missing from the turn diff opens Changed in the repository
+holding it, read afresh and expanded. Only a file inside a project that is not a
+repository, once discovery finds no repository in the project holding it, opens
+in the editor instead (`files/openChangedFileWithoutRepository.ts`): there is no
 working-tree diff for it. Unknown or failed discovery, a file outside the
 project and a repository-owned file the list misses (a staged-only entry) keep
 the Changed path. The open checks the file with a stat first, since the
@@ -670,8 +695,20 @@ attempt on the repository left on screen.
 
 Picking Last turn by hand clears the historical selection and shows the newest
 turn, empty or not. The phone's Changes surface (`apps/MobileChangesSurface.tsx`)
-opens the selected turn's file diff when a repository holds it; when no
-repository holds the file, the phone stays on the Changes list. VS Code has no
+opens the selected turn's file diff when a repository holds it. When the status
+read for the directory succeeds and the working list still has no entry, the
+phone opens a file inside the chip's session folder itself, scoped to that
+folder, and brings the Files surface forward: a project that is no repository
+and a repository-owned file the working list misses (a committed file) land
+there. A failed status read, failed repository discovery in a project that is no
+repository (its Retry stays reachable), a file outside the session folder and a file the
+open refuses end on the working-tree Changes list. The status answer and the
+file read belong to the tap that started them: a newer tap, hiding or leaving
+Changes, or picking a scope or repository drops them without a tab, toast or
+switch to Files; an iPad side panel counts as hidden once it starts closing.
+A failed status read the tap started ends on the list; a failed one it joined
+in flight is followed by one more read, since the joined one belongs to an
+earlier caller. VS Code has no
 Diff view panel: the chip reads its turn's diff once with full context and
 opens the file in the editor's own diff (`editor.openDiff` with `patch` and
 `snapshot`), both sides built from that patch, so later edits or a later
@@ -689,6 +726,48 @@ fallback from the tab would send that person back to Changed every time.
 A read of a running step makes OpenCode capture a fresh working-copy snapshot.
 Reading on every step only to keep a count current would cost one capture per
 step of every turn while the panel is open on another scope.
+
+### Why the phone opens the file itself
+
+Desktop opens the editor only for a non-repository project whose file no
+repository holds, because its Changed view can read the repository's working
+tree afresh and show the file there. The phone's Changes surface shows a
+working-tree or turn diff and has no view of the file itself for a file neither
+list holds, so a repository-owned committed file would land on a list without
+it. The phone opens the file in the Files surface and comes forward with it,
+only when the open actually happened: a file the open refuses, such as a
+deleted one or binary content or one too large, shows its toast over the
+Changes list. Until the answer is known the chip's screen stays on loading,
+since showing the working list first flashed it before the file appeared.
+
+## Where a review comment reopens
+
+A comment's opener in the chat (`components/comments/useOpenCommentSource.ts`)
+sends a comparison comment to the git tab as a `CommentLocationRequest`
+(`lib/commentLocation.ts`): runtime, repository folder, file, line, side and
+the comparison itself. `GitView` takes it the moment the tab is on screen for
+that folder (`hooks/useTakenCommentLocation.ts`), so it leaves the shared store
+at once and never fires on a later visit, and hands it to
+`UnifiedReviewScopeView`, which answers it (`git/useReviewScopeCommentJump.ts`):
+it opens the change request, the commit by hash (past the history's first page
+too) or the branch against the recorded base, waits until that comparison is on
+screen, reveals the file and scrolls its viewer to the line. The file is loaded
+whole, because a comment's line can sit outside the hunks a patch carries.
+
+The jump ends when the line is reached, and drops instead of guessing when the
+comparison cannot be shown: the tab shows another repository than the one the
+comment was read in (the origin's `directory`; older comments name only the
+chat's folder), another branch is checked out, the recorded base is gone (no
+other base stands in for it), the change request's head moved on a host that
+serves only its current patch, the scope changes, the person picks another
+comparison, the tab is hidden, or the comparison fails or answers without the
+file. A recorded head is sent as a revision read only to hosts that keep
+revisions; elsewhere it only identifies the patch. A recorded base stays on screen while the person stays on the branch
+scope and is never written as the branch's saved base. Mobile Changes answers
+the same request through `hooks/useMobileChangesCommentNavigation.ts`, and
+shows the nested-repository state when the comment's repository is not the one
+on screen. `DiffView`, which only renders another folder's comparison, takes no
+such request.
 
 ## Pull request comparisons
 
@@ -811,6 +890,16 @@ A row under each hunk covered no code, but it striped the diff with empty
 bands and cost 2.25rem per hunk. An overlay shown at rest covered the code it
 acts on. Shown only while the user points at the hunk, it covers that line's
 end only then, and the diff keeps its rhythm.
+
+### Why the hovered line outlives its hunk anchors
+
+A refresh withdraws the anchors while the old diff stays on screen, then
+rebuilds the Pierre instance, which reports no line for a resting pointer. The
+viewer therefore listens for line hover without anchors too, keeps the line and
+matches it again when anchors arrive. Listening only while anchors exist lost
+a pointer that came to rest during the refresh: the buttons stayed hidden until
+it moved. The viewer's wrapper clears the line on pointer leave, because the
+rebuilt instance reports no leave for a line it never saw entered.
 
 ## Sticky horizontal scrollbar
 
@@ -989,15 +1078,13 @@ A context zone opens, closes, expands and is dragged over an animation
 (`lib/layoutAnimation.ts`). Work a surface does inside it shows as dropped
 frames, so the heavy part waits for the end or is spread over frames.
 
-### Why the stacked diff list mounts a batch of entries per frame
+### Why the stacked diff list mounts entries in batches or near the viewport
 
-`DiffView` mounts the first `STACKED_ENTRIES_FIRST` file entries and then
-`STACKED_ENTRIES_PER_FRAME` more on each frame until the list is complete. All
-at once, the first open of an 88-file change was one 100 to 120 ms frame. A
-request to scroll to a file mounts every entry in that commit, because its
-entry may be past the limit and the alignment waits only 20 frames for it.
-Virtualizing the list was the alternative; it changes the scroller, the
-sticky headers and find, for a cost paid once per list.
+An 88-file change took a 100 to 120 ms frame when all entries mounted together.
+Smaller lists spread that one-time cost over frames. At 1,000 files and above,
+mounting every full entry can exhaust renderer memory even if every file is
+collapsed. The list keeps lightweight rows for scroll and keyboard navigation
+and mounts full entries near the viewport or while their state is in use.
 
 ### Why a file that arrives mid-animation renders after it
 

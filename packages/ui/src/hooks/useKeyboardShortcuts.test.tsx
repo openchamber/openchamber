@@ -232,6 +232,30 @@ test('Settings yields its default VS Code key and lets inputs and menus use Esca
   }
 });
 
+test('Escape on a fullscreen diagram control over Settings leaves Settings open', async () => {
+  const previousUI = useUIStore.getState();
+  try {
+    useUIStore.setState({ isSettingsDialogOpen: true, isImagePreviewOpen: true });
+    await withShortcutsMounted(async () => {
+      // The viewer's toolbar is portaled to the body, outside Settings' dialog.
+      const zoom = document.createElement('button');
+      document.body.append(zoom);
+      const press = async () => {
+        await act(async () => {
+          zoom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        });
+      };
+      await press();
+      expect(useUIStore.getState().isSettingsDialogOpen).toBe(true);
+      useUIStore.setState({ isImagePreviewOpen: false });
+      await press();
+      expect(useUIStore.getState().isSettingsDialogOpen).toBe(false);
+    });
+  } finally {
+    useUIStore.setState(previousUI, true);
+  }
+});
+
 function createComposer(parent: HTMLElement) {
   const chatInput = document.createElement('div');
   chatInput.dataset.chatInput = 'true';
@@ -333,4 +357,34 @@ test('double Escape stops a running chat only from its composer', async () => {
     await act(async () => { await interrupted; });
     expect(aborts()).toBe(1);
   });
+});
+
+test('a chord started in a field that is gone completes unless another field is pressed', async () => {
+  const previous = useUIStore.getState().shortcutOverrides;
+  try {
+    useUIStore.setState({ shortcutOverrides: {}, isHelpDialogOpen: false });
+    await withShortcutsMounted(async () => {
+      const composer = document.createElement('textarea');
+      document.body.append(composer);
+      const startInPalette = () => {
+        const palette = document.createElement('input');
+        document.body.append(palette);
+        palette.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', code: 'KeyK', ctrlKey: true, bubbles: true, cancelable: true }));
+        palette.remove();
+      };
+      const typeH = async () => {
+        await act(async () => {
+          composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', code: 'KeyH', bubbles: true, cancelable: true }));
+        });
+        return useUIStore.getState().isHelpDialogOpen;
+      };
+      startInPalette();
+      composer.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      expect(await typeH()).toBe(false);
+      startInPalette();
+      expect(await typeH()).toBe(true);
+    });
+  } finally {
+    useUIStore.setState({ shortcutOverrides: previous, isHelpDialogOpen: false });
+  }
 });

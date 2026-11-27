@@ -5,7 +5,13 @@ import type { SettingsDocument } from './settings-helpers.js';
 import type { Query } from '../shared/http-contracts.js';
 import { isString } from '../shared/object-guards.js';
 
-const registry: { fields: Record<string, { scope?: string; perSurface?: boolean }> } = createRequire(import.meta.url)('./settings-registry.json');
+const registry: { fields: Record<string, {
+  scope?: string;
+  perSurface?: boolean;
+  owner?: string;
+  computed?: boolean;
+  secret?: boolean;
+}> } = createRequire(import.meta.url)('./settings-registry.json');
 
 export type SettingsSurface = 'web' | 'desktop' | 'vscode' | 'mobile';
 export interface PreferenceField {
@@ -25,8 +31,26 @@ const PREFERENCES_DOCUMENT_VERSION = 1;
 
 const getSettingsScope = (key: string) => registry.fields[key]?.scope ?? null;
 
+export type PreferenceReadResult =
+  | { status: 'missing'; revision?: number }
+  | { status: 'failed'; fields?: PreferenceFields | undefined; revision?: number }
+  | { status: 'ok'; fields: PreferenceFields; revision: number; missing: boolean | undefined };
+
+const TEMP_FILE_IN_USE_MS = 60_000;
+
+export const isAbandonedSettingsTempFile = (name: string, now: number) => {
+  const match = /^(?:settings|preferences)\.json\.tmp-(?:\d+-(\d+)-)?/.exec(name);
+  return match !== null && now - Number(match[1] ?? 0) > TEMP_FILE_IN_USE_MS;
+};
+
+export const isBlankSettingsText = (text: string) => /^[\s\0]*$/.test(text);
+
 export const isProfileSettingsKey = (key: string) => getSettingsScope(key) === 'profile';
 export const isDeviceSettingsKey = (key: string) => getSettingsScope(key) === 'device';
+export const isNotifiableSettingsKey = (key: string) => {
+  const field = Object.hasOwn(registry.fields, key) ? registry.fields[key] : null;
+  return Boolean(field && field.scope !== 'device' && field.owner !== 'desktop-shell' && !field.computed && !field.secret);
+};
 
 const isPerSurfaceSettingsKey = (key: string) => registry.fields[key]?.perSurface === true;
 
@@ -104,6 +128,11 @@ export const flattenPreferences = (fields: PreferenceFields, surface: SettingsSu
 export const buildPreferencesFields = (previousFields: PreferenceFields, document: SettingsDocument, now: number, { surface = null, changedKeys = null }: PreferencesWriteOptions = {}) => {
   const fields: PreferenceFields = {};
   const changed = changedKeys ? new Set(changedKeys) : null;
+  if (surface && changed) {
+    for (const [key, previous] of Object.entries(previousFields)) {
+      if (isPerSurfaceSettingsKey(key) && !changed.has(key)) fields[key] = previous;
+    }
+  }
   for (const [key, value] of Object.entries(document)) {
     if (value === undefined || !isProfileSettingsKey(key)) continue;
     const previous = previousFields[key];

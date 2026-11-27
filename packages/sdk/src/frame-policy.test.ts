@@ -13,11 +13,18 @@ describe('guestFramePolicy', () => {
   });
 
   test('lets connections reach only the package path it is given', () => {
-    expect(directive(guestFramePolicy('oc.test:3000/api/guests/demo/'), 'connect-src')).toBe('connect-src oc.test:3000/api/guests/demo/');
+    expect(directive(guestFramePolicy('http://oc.test:3000/api/guests/demo/'), 'connect-src')).toBe('connect-src http://oc.test:3000/api/guests/demo/');
+  });
+
+  test('loads code and assets from the package by its full URL, which WebKit needs in a sandboxed frame', () => {
+    const policy = guestFramePolicy('http://oc.test:3000/api/guest-files/g/');
+    for (const name of ['script-src', 'style-src', 'img-src', 'font-src', 'media-src', 'worker-src', 'frame-src']) {
+      expect(directive(policy, name)).toContain(" 'self' http://oc.test:3000/api/guest-files/g/ data: blob:");
+    }
   });
 
   test('opens approved origins for data and assets, never for code', () => {
-    const policy = guestFramePolicy('oc.test/api/guests/demo/', ['https://fonts.example.com']);
+    const policy = guestFramePolicy('http://oc.test/api/guests/demo/', ['https://fonts.example.com']);
     for (const name of ['connect-src', 'img-src', 'font-src', 'style-src', 'media-src']) {
       expect(directive(policy, name)).toContain('https://fonts.example.com');
     }

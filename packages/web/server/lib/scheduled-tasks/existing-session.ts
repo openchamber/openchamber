@@ -1,3 +1,4 @@
+import { sameSchedule } from './next-run.js';
 import path from 'node:path';
 import { z } from 'zod';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
@@ -142,8 +143,8 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
     try {
       if (reason === 'scheduled') {
         const claim = await projectConfigRuntime.updateScheduledTaskStateIf(projectId, task.id,
-          (candidate) => candidate.enabled && (!isFiniteNumber(candidate.state?.lastScheduledFor) || Math.abs(candidate.state.lastScheduledFor - (scheduledFor === undefined ? Number.NaN : scheduledFor)) > 5_000),
-          { lastScheduledFor: scheduledFor, nextRunAt: nextRunAt ?? undefined });
+          (candidate) => candidate.enabled && (task.schedule.kind !== 'once' || sameSchedule(candidate, task)) && (!isFiniteNumber(candidate.state?.lastScheduledFor) || Math.abs(candidate.state.lastScheduledFor - (scheduledFor === undefined ? Number.NaN : scheduledFor)) > 5_000),
+          { lastScheduledFor: scheduledFor, waitingForFolder: undefined, nextRunAt: nextRunAt ?? undefined });
         if (!claim.updated) return { ok: false, skipped: true };
       }
       const { directory } = await validateTarget(projectId, task.targetSessionId);
@@ -191,6 +192,7 @@ export const createExistingSessionTasks = ({ projectConfigRuntime, messageQueueR
 
   return {
     validateTarget, listEligibleTargets, run, beforeSend,
+    pendingAdmissions: () => admissions.size,
     result: ({ projectId, taskId }: ScheduledTaskProvenance, status: ScheduledTaskStatus, cause?: unknown) => record(projectId, taskId, status, cause),
     cancel: (projectId: string, taskId: ScheduledTaskInput['id']) => messageQueueRuntime.cancelScheduledTask(projectId, taskId),
   };

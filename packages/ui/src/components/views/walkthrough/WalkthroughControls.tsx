@@ -400,12 +400,16 @@ export const WalkthroughOptions = ({
   hasView,
   size = 'default',
   onOpenChanges,
+  allStopsCollapsed,
+  onToggleAllStopsCollapsed,
   onActed,
 }: {
   review: WalkthroughReview;
   hasView: boolean;
   size?: ControlSize;
   onOpenChanges?: () => void;
+  allStopsCollapsed?: boolean;
+  onToggleAllStopsCollapsed?: () => void;
   onActed?: () => void;
 }) => {
   const { t } = useI18n();
@@ -421,6 +425,21 @@ export const WalkthroughOptions = ({
         <WalkthroughLanguagePicker review={review} size={size} className={size === 'mobile' ? undefined : 'w-full'} />
       </div>
       <WalkthroughGenerateButton review={review} hasView={hasView} size={size === 'mobile' ? 'default' : 'sm'} className="w-full" onActed={onActed} />
+      {hasView && onToggleAllStopsCollapsed && (
+        <Button
+          type="button"
+          variant="ghost"
+          size={size === 'mobile' ? 'default' : 'sm'}
+          className="w-full"
+          onClick={() => {
+            onToggleAllStopsCollapsed();
+            onActed?.();
+          }}
+        >
+          <Icon name="expand-up-down" className="size-4" />
+          {allStopsCollapsed ? t('walkthrough.action.expandAllSteps') : t('walkthrough.action.collapseAllSteps')}
+        </Button>
+      )}
       {onOpenChanges && (
         <Button
           type="button"

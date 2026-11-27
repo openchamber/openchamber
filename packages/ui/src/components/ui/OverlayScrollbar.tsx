@@ -214,6 +214,10 @@ function bindScrollbar(
     thumb.setPointerCapture(event.pointerId);
   };
 
+  const keepFocusOnThumbPress = (event: MouseEvent) => {
+    if (getThumbAxis(event.target)) event.preventDefault();
+  };
+
   const onPointerMove = (event: PointerEvent) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const pointer = drag.axis === "vertical" ? event.clientY : event.clientX;
@@ -276,6 +280,7 @@ function bindScrollbar(
   container.addEventListener("pointerenter", onContainerPointerEnter);
   container.addEventListener("pointerleave", onContainerPointerLeave);
   root.addEventListener("pointerdown", onPointerDown);
+  root.addEventListener("mousedown", keepFocusOnThumbPress);
   root.addEventListener("pointermove", onPointerMove);
   root.addEventListener("pointerup", onPointerEnd);
   root.addEventListener("pointercancel", onPointerEnd);
@@ -375,6 +380,7 @@ function bindScrollbar(
       container.removeEventListener("pointerleave", onContainerPointerLeave);
       setUserIntentListeners(false);
       root.removeEventListener("pointerdown", onPointerDown);
+      root.removeEventListener("mousedown", keepFocusOnThumbPress);
       root.removeEventListener("pointermove", onPointerMove);
       root.removeEventListener("pointerup", onPointerEnd);
       root.removeEventListener("pointercancel", onPointerEnd);

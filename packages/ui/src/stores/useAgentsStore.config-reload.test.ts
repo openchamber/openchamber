@@ -17,6 +17,7 @@ environment.respond(async (url, init) => {
     variants: [], time: { released: 0 }, cost: [], status: 'active', enabled: true,
     limit: { context: 1000, output: 100 },
   }] });
+  if (url.pathname === '/api/plugin') return Response.json({ data: [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }] });
   if (url.pathname === '/api/model/default') return Response.json({ data: { providerID: 'test', modelID: 'model' } });
   if (url.pathname === '/api/provider') return Response.json({ data: [{ id: 'test', name: 'Test', activation: 'enabled', package: 'test' }] });
   if (url.pathname === '/api/agent') return Response.json({ data: [{

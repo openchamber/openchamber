@@ -4,11 +4,14 @@ import { Window } from 'happy-dom';
 import { fitToolbar } from '../useDiffToolbarFit';
 import { GIT_PANEL_HEADER_FIT } from './gitPanelHeaderFit';
 
-// How wide the pickers need to be at each step, as layout would report it: the
-// repository picker is already down to its icon at step zero, the branch picker
-// gives way next, then hiding the sync word and its counts frees row room.
-const PICKERS = { full: 220, branchShrinks: 124 };
-const ROW = { full: 330, compact: 280, tight: 260 };
+const WIDTH_AFTER = {
+  none: 420,
+  'data-git-header-review-icons': 330,
+  'data-git-header-compact': 300,
+  'data-git-header-tight': 285,
+  'data-git-header-review-menu': 230,
+  'data-git-header-scope-short': 210,
+} as const;
 
 describe('Git panel header fit', () => {
   let win: Window;
@@ -21,17 +24,13 @@ describe('Git panel header fit', () => {
     previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
     Object.defineProperty(globalThis, 'document', { value: win.document, configurable: true, writable: true });
     row = document.createElement('div');
-    const pickers = document.createElement('div');
-    pickers.setAttribute('data-git-header-pickers', '');
-    row.appendChild(pickers);
-    const has = (step: string) => row.hasAttribute(step);
-    // The pickers' slot gets what the rest of the row leaves.
-    const slotWidth = () => available - (has('data-git-header-tight') ? ROW.tight : has('data-git-header-compact') ? ROW.compact : ROW.full) + PICKERS.branchShrinks;
     Object.defineProperty(row, 'clientWidth', { get: () => available });
-    Object.defineProperty(row, 'scrollWidth', { get: () => available });
-    Object.defineProperty(pickers, 'clientWidth', { get: () => slotWidth() });
-    Object.defineProperty(pickers, 'scrollWidth', {
-      get: () => Math.max(slotWidth(), has('data-git-header-branch-shrinks') ? PICKERS.branchShrinks : PICKERS.full),
+    Object.defineProperty(row, 'scrollWidth', {
+      get: () => {
+        const taken = GIT_PANEL_HEADER_FIT.steps.filter((step) => row.hasAttribute(step));
+        const last = taken.at(-1);
+        return Math.max(available, last ? WIDTH_AFTER[last] : WIDTH_AFTER.none);
+      },
     });
   });
 
@@ -42,28 +41,26 @@ describe('Git panel header fit', () => {
   });
 
   const taken = () => GIT_PANEL_HEADER_FIT.steps.filter((step) => row.hasAttribute(step));
-
-  test('keeps the sync word while the pickers can still give way', () => {
-    available = 430;
+  const fitAt = (width: number) => {
+    available = width;
     fitToolbar(row, GIT_PANEL_HEADER_FIT);
-    expect(taken()).toEqual([]);
+    return taken();
+  };
 
-    available = 340;
-    fitToolbar(row, GIT_PANEL_HEADER_FIT);
-    expect(taken()).toEqual(['data-git-header-branch-shrinks']);
+  test('keeps the review actions with their words while the row fits', () => {
+    expect(fitAt(430)).toEqual([]);
   });
 
-  test('drops the word, then the counts, only while the pickers still overflow', () => {
-    available = 300;
-    fitToolbar(row, GIT_PANEL_HEADER_FIT);
-    expect(taken()).toEqual(['data-git-header-branch-shrinks', 'data-git-header-compact']);
+  test('turns the review actions into icons before touching sync', () => {
+    expect(fitAt(340)).toEqual(['data-git-header-review-icons']);
+  });
 
-    available = 270;
-    fitToolbar(row, GIT_PANEL_HEADER_FIT);
-    expect(taken()).toEqual(['data-git-header-branch-shrinks', 'data-git-header-compact', 'data-git-header-tight']);
-
-    available = 430;
-    fitToolbar(row, GIT_PANEL_HEADER_FIT);
-    expect(taken()).toEqual([]);
+  test('moves the review actions into the menu only after sync has given up its word and counts', () => {
+    expect(fitAt(290)).toEqual(['data-git-header-review-icons', 'data-git-header-compact', 'data-git-header-tight']);
+    expect(fitAt(240)).toEqual([
+      'data-git-header-review-icons', 'data-git-header-compact', 'data-git-header-tight', 'data-git-header-review-menu',
+    ]);
+    expect(fitAt(215)).toEqual(GIT_PANEL_HEADER_FIT.steps.slice());
+    expect(fitAt(430)).toEqual([]);
   });
 });

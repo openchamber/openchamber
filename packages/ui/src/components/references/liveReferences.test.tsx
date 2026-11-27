@@ -55,7 +55,7 @@ beforeEach(() => {
 });
 
 /** The server's answer for a GitHub PR read with `context`'s account, at `fetchedAt`. */
-const pushPull = (reference: RepositoryChangeRequestReference, context: SourceControlReadContext, fetchedAt: number, state: Partial<{ state: 'open' | 'merged'; checks: CISummary }>) => {
+const pushPull = (reference: RepositoryChangeRequestReference, context: SourceControlReadContext, fetchedAt: number, state: Partial<{ state: 'open' | 'merged'; checks: CISummary; base: string }>) => {
   const item: TrackedThread<'pull'> = { provider: 'github', instance: context.instance, kind: 'pull', owner: 'acme', repo: 'app', number: reference.number, accountId: context.accountId };
   const record: TrackedItemState = {
     type: 'pull', item, fetchedAt,
@@ -95,6 +95,17 @@ test('a listed PR takes the state followed after the list was read, never an old
   // Merged on the host after the list was read.
   pushPull(pull(2), github, readAt + 5_000, { state: 'merged' });
   expect(view.current().items.map((item) => item.state)).toEqual(['open', 'merged']);
+  view.unmount();
+});
+
+test('a base retargeted on the host replaces the branch the list showed', async () => {
+  const readAt = Date.now();
+  const items: RepositoryChangeRequestReference[] = [pull(1)];
+  const reads = [{ start: 0, read: { at: readAt, forced: false } }];
+  const view = await render(() => live.useLiveReferences(items, () => github, reads));
+
+  pushPull(pull(1), github, readAt + 5_000, { base: 'release' });
+  expect(view.current().items[0]?.base).toBe('release');
   view.unmount();
 });
 

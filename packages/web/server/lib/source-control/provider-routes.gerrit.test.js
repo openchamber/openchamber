@@ -206,7 +206,7 @@ describe('Gerrit through the route shell', () => {
     for (const [method, url] of [
       ['post', '/pr/create'], ['post', '/pr/update'], ['post', '/pr/labels'], ['post', '/issues/comment'], ['post', '/issues/state'],
       ['post', '/issues/labels'], ['get', '/issues/list'], ['get', '/issues/get'], ['get', '/issues/comments'],
-      ['post', '/pr/thread/start'], ['post', '/pr/thread/reply'], ['post', '/pr/thread/resolve'], ['get', '/references/labels'],
+      ['post', '/pr/thread/start'], ['post', '/pr/thread/resolve'], ['get', '/references/labels'],
       ['get', `/uploads/${'0'.repeat(32)}/a.png`], ['get', '/references'], ['post', '/references/across'],
       ['get', '/references/detail'], ['get', '/references/status'], ['post', '/auth/start'], ['post', '/auth/complete'], ['post', '/auth/cli'],
     ]) {

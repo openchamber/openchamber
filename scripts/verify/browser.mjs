@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process"
 import process from "node:process"
 
 import { CdpClient, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "../perf/cdp.mjs"
+import { guardedCommand } from "./guard.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
 
 const VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 }
@@ -376,8 +377,10 @@ export const startBrowser = async ({ chrome, headed = false, onSpawn }) => {
   const profile = resolveProfileDir(null, "verify")
   // A Windows SSH session or a Linux CI runner may have no input devices.
   // Desktop scenarios still use a mouse, including controls behind CSS (hover: hover).
+  // macOS does not nest sandboxes: the stand's replaces Chrome's own, and the
+  // pages it opens are the stand's.
   const pointerArgs = ["--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2"]
-  const child = launchChrome({ chrome: executable, profileDir: profile.dir, port, headless: !headed, extraArgs: ["--lang=en-US", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`, ...pointerArgs] })
+  const child = launchChrome({ chrome: executable, profileDir: profile.dir, port, headless: !headed, extraArgs: ["--lang=en-US", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`, ...pointerArgs, "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1", "--proxy-server=http://127.0.0.1:9", "--proxy-bypass-list=localhost;127.0.0.1", ...(process.platform === "darwin" ? ["--no-sandbox"] : [])], wrap: guardedCommand })
   profile.removeAfter(child)
   const spawnFailed = new Promise((_, reject) => child.once("error", (error) => reject(new Error(`Chrome did not start: ${error.message}`))))
   const connecting = Promise.resolve().then(() => {

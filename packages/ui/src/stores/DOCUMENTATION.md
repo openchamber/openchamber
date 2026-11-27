@@ -90,16 +90,11 @@ A manual configuration reload used to refresh every saved project's provider and
 
 ### Why catalog bursts share resource refreshes
 
-A config save announces several catalog kinds. `refreshStoresForCatalogKinds`
-unions their tasks before invalidation, so config plus agent or command refreshes each
-corresponding directory once, and config plus provider plus model refreshes providers
-once. Concurrent batches count invalidation revisions per resource, scoped to
-the SDK instance and the directory owners. A revision received during a request
-earns one trailing read; all invalidations during that read coalesce again.
-Callers wait for the latest revision's read. Entries leave the map when settled;
-a later edit still refreshes. Agents and commands retain the ambient project and event
-locations without reading unrelated directories. Separate refreshes per kind
-were rejected because their invalidations retired each other's fresh reads.
+A config save announces several catalog kinds. `refreshStoresForCatalogKinds` unions their tasks before invalidation, so config plus agent or command refreshes each corresponding directory once, and config plus provider plus model refreshes providers once per directory. Concurrent batches count invalidation revisions per resource, scoped to the SDK instance and the directory owners. A revision received during a request earns one trailing read using the latest batch's callback, including its active-directory follow-up; all invalidations during that read coalesce again. Callers wait for the latest revision's read. Entries leave the map when settled; a later edit still refreshes. Agents and commands retain the ambient project and event locations without reading unrelated directories. Providers retain the composer's active catalog directory and event locations. Credential changes use those same directory owners for both the immediate read and the delayed model-discovery read. Separate refreshes per kind were rejected because their invalidations retired each other's fresh reads.
+
+### Why provider refreshes keep the composer's directory
+
+An untargeted Chat draft reads the Chats root while Settings can show a project. Refreshing only the active catalog left the mounted Settings list stale after a successful provider connection. Refreshes now include the event locations while retaining the composer's catalog owner; using the ambient project alone would leave the Chat draft stale. OpenCode announces a credential change without a location, so an open Providers page also registers its Settings directory with `subscribeCredentialChanges`, and that directory takes part in both credential reads. Deriving it from the stored Settings project was rejected: it would start that project's MCP servers while no page shows it. The delayed credential read also covers a catalog activated during the wait, once, because its first load can precede model discovery. Reading every known catalog was rejected because each OpenCode read starts that directory's MCP servers.
 
 Models.dev metadata enriches every catalog independently of agent/config
 contents. Catalog events and explicit config reloads retain it. A runtime
@@ -512,13 +507,29 @@ Work Status panel showed (`packages/web/server/lib/session-todos/DOCUMENTATION.m
 An entry is `loading` until the first answer, `off` while OpenCode's
 `todowrite` tool is off in its directory, else `ready`. One read per session at
 a time; a demand during it earns one read after it. A failed read keeps what is
-shown. `sync/session-todos-sync.ts` applies each broadcast list, reads a
-session again when the server announces it with `todos: null` (a revert) and
-every session of a directory announced with `sessionId: null` (its config
-changed; with no directory as well, OpenCode's stream had a gap), and reads
-every entry again when the control stream reconnects. Reads an event starts
-carry the subscription's runtime guard. A
-runtime switch resets the store. VS Code keeps it empty: it has no OpenChamber
+shown. `sync/session-todos-sync.ts` applies each broadcast list and reads a
+session again when the server announces it with `todos: null` (a revert; its
+location is already running). The sessions of a directory announced with
+`sessionId: null` (its config changed; with no directory as well, OpenCode's
+stream had a gap) and every entry when the control stream reconnects are read
+again only while their Tasks are on screen (`showSessionTodos`): a Work Status
+panel or the mobile Status pane is visible with Tasks enabled in its section
+layout, or the Panel sections dialog is open (so a hidden Tasks section can still
+be discovered and re-enabled). `useLoadSessionTodos` holds that demand and releases it, cancelling a
+pending retry, when the panel closes or Tasks is hidden. Such a re-read that
+arrives during a read queues its follow-up only while the Tasks are still
+shown when that read ends; a revert queues it regardless. The others are marked
+stale and read as soon as their Tasks are shown again, without waiting out an
+earlier failed read's retry delay. Starting a read ends the stale mark, so a
+read that fails retries with the usual delay, and a read that started before
+the reconnect cannot clear a mark the reconnect set. Each read goes to
+OpenCode under the session's directory and starts its location, so re-reading
+every session the panel ever showed started one location, with its MCP
+servers, per idle chat after each reconnect; that is the measured cause this
+rule fixes (#7541 has the history). Config-file saves that wake every chat
+directory through the catalog are a separate path (#7628). Reads an event
+starts carry the subscription's runtime guard. A runtime switch resets the
+store. VS Code keeps it empty: it has no OpenChamber
 server and no panel.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
@@ -644,7 +655,7 @@ Session defaults belong to the active runtime. Switching instances clears the in
 
 Persisted config (`config-store`) holds selections only. The provider and agent catalogs and their `*Loaded` flags stay in memory, both top level and per directory. VS Code gives every OpenChamber webview one origin, so each localStorage write reaches every webview in every window as a `StorageEvent` carrying the old and the new value. With the catalogs included, one write was tens of megabytes, and the shared webview renderer ran out of memory. A cold start therefore paints the pickers once `initializeApp` / `activateDirectory` load the catalogs; an empty hydrated snapshot reports not-loaded, never an authoritative empty list. The last live catalogs are kept instead in IndexedDB (`configCatalogCache.ts`, which fires no `StorageEvent`), keyed by runtime and config directory, bounded to 24 directories, with a schema version; a record that fails its shape check or names another schema is deleted on read. Records hold only what the pickers and composer show, built field by field from an allowlist and read through strict schemas: provider, model and variant `settings`/`headers`/`body`, an agent's request (apart from its numeric `temperature`/`topP`) and its system prompt are never written, because they carry API keys and authorization headers. At startup and on a directory switch the cached catalog fills a directory whose live catalog has not loaded, without setting `*Loaded`: the composer pickers render from it, Settings pickers and recovery loops keep waiting for a live load. Only live loads write the cache, 3 s after they apply and only when no catalog event for that directory arrived since the load began (the re-read the event triggers writes instead), so a starting location's partial first answer is never stored; an empty answer is written only by a re-read. A location OpenCode is still starting answers empty, then partial, so the first live answer for a directory shown from the cache is held back when it lists fewer models or agents than the cache, and re-read once after 2.5 s; that re-read replaces the cache whatever it holds. Older blobs that still carry catalogs hydrate as before. The slim format is persist version 1: a build without it has no `migrate` for version 1 and skips the blob, so it gets a cold start instead of reading `snapshot.agents` on a snapshot that has none. The persist middleware writes after every `set()`, including one whose updater returns the same state, so selection setters (`setProvider`, `setModel`, `setAgent` and the model it resolves) check for an unchanged selection before calling `set()`.
 
-Until a directory's live catalog has loaded (the snapshot's `providersLoaded`, which a catalog shown from the local cache never sets), configured project and global model identifiers stay selected even when the catalog does not list them, except for an Auto selection the server has confirmed it cannot honour. A draft can display its configured identifier before model metadata arrives, and the missing catalog never selects Big Pickle in its place. Once the live catalog has loaded, a model it does not list is skipped for the next one down the cascade: a project default whose provider was removed or switched off gives way to the global default, and so on to the agent's pin, OpenCode's `model`, the last chat pick and the fallback. The stored defaults are left as they are, so reconnecting the provider brings the model back on the next new session. An unknown settings document defers fallback selection; a successful document with no configured model permits the normal OpenCode fallback. Before that fallback comes the model last picked in a chat composer (`lastSelectedModel`, a synced profile setting written only by the composer's model picker and the favorite-model shortcuts, never by other model pickers or session restores), so a new session starts where the user last chose when nothing configured names a model. Like a configured identifier it stands until the live catalog loads and is skipped when that catalog does not list it; a model hidden since is skipped, and so is an Auto pick the server cannot honour. The fallback itself (Big Pickle, else the first model) skips models hidden in the picker, on the client and in the server's session routes; a configured project, settings, agent, or OpenCode model is honoured even when hidden, and with every model hidden the unfiltered pick stands. Saved thinking preferences stay in settings; an OpenCode config `model` carries its effort as a `#variant` suffix, and a discovered model's supported variants determine the effective thinking level.
+Until a directory's live catalog has loaded (the snapshot's `providersLoaded`, which a catalog shown from the local cache never sets), configured project and global model identifiers stay selected even when the catalog does not list them, except for an Auto selection the server has confirmed it cannot honour. A draft can display its configured identifier before model metadata arrives, and the missing catalog never selects Big Pickle in its place. Once the live catalog has loaded, a model it does not list is skipped for the next one down the cascade: a project default whose provider was removed or switched off gives way to the global default, and so on to the agent's pin, OpenCode's `model` and the last chat pick. When none of the named models is listed, the first one stands, marked as missing; the fallback is only for a user who named no model. The stored defaults are left as they are, so reconnecting the provider brings the model back on the next new session. An unknown settings document defers fallback selection; a successful document with no configured model permits the normal OpenCode fallback. Before that fallback comes the model last picked in a chat composer (`lastSelectedModel`, a synced profile setting written only by the composer's model picker and the favorite-model shortcuts, never by other model pickers or session restores), so a new session starts where the user last chose when nothing configured names a model. Like a configured identifier it stands until the live catalog loads and is skipped when that catalog does not list it; a model hidden since is skipped, and so is an Auto pick the server cannot honour. The fallback itself (Big Pickle, else the first model) skips models hidden in the picker, on the client and in the server's session routes; a configured project, settings, agent, or OpenCode model is honoured even when hidden, and with every model hidden the unfiltered pick stands. Saved thinking preferences stay in settings; an OpenCode config `model` carries its effort as a `#variant` suffix, and a discovered model's supported variants determine the effective thinking level.
 
 Each `provider/model` also remembers the thinking level last chosen for it (`lastUsedEfforts`, a synced profile map). Resolution when a session has no saved pick for the model: the level configured for that model (the project or Settings default model's level, or the active agent's pinned level for its own model), then the remembered level, then Default. A remembered level the model no longer offers is ignored, and an explicit Default is stored as `null` so it stays a choice rather than "nothing remembered". A picker change writes it immediately, before any conversation: the variant menu, mobile effort chips, the cycle shortcut, and the left/right keys in the model picker. A successful user composer send records the level it carried too. A BTW fork reads the map but never writes it, and neither do queued delivery, scheduled tasks or other background sends. A value never moves to another model.
 
@@ -652,7 +663,7 @@ The same order is read by the server's session routes when a tool creates a sess
 
 ### Why a removed provider's model is skipped, not cleared
 
-A configured model whose provider is gone is skipped each time the cascade runs, and the setting stays as it is. Clearing it when the provider is disconnected was the alternative. That only catches a removal made through OpenChamber, misses `opencode auth logout`, a removed environment key or a config edit, and loses the choice for someone who disconnects to sign in again. Skipping needs an authoritative catalog: OpenCode 2.2 answers a directory's first provider and model read only after its plugins activate (a 503 after 5 s, never a partial list), so a live load is complete. Before one arrives, or when it is empty, nothing counts as missing, which keeps the protection against starting a session on Big Pickle while providers load. Settings shows a warning under a model new sessions skip (`selectIsModelMissingFromCatalog`). A model the user picked by hand is never replaced, even once its provider is gone; the composer marks it with the warning icon and says why in its tooltip, the way it marks a missing agent, and the send is left to fail with OpenCode's error.
+A configured model whose provider is gone is skipped each time the cascade runs, and the setting stays as it is. Clearing it when the provider is disconnected was the alternative. That only catches a removal made through OpenChamber, misses `opencode auth logout`, a removed environment key or a config edit, and loses the choice for someone who disconnects to sign in again. Skipping needs an authoritative catalog: OpenCode 2.2 answers a directory's first provider and model read only after its plugins activate (a 503 after 5 s, never a partial list), so a live load is complete. One partial list remains: while OpenCode 2.4.1 takes in a changed managed config, it lists only its own `opencode` provider for 50 ms to 1.2 s (measured). Such a list never counts another provider's model as missing, and no named model is ever replaced by Big Pickle or another unchosen model: that sent a user's text to a provider they did not pick, and the pick stayed after the reload. Before one arrives, or when it is empty, nothing counts as missing, which keeps the protection against starting a session on Big Pickle while providers load. Settings shows a warning under a model new sessions skip (`selectIsModelMissingFromCatalog`). A model the user picked by hand is never replaced, even once its provider is gone; the composer marks it with the warning icon and says why in its tooltip, the way it marks a missing agent, and the send is left to fail with OpenCode's error.
 
 Project defaults include `defaultAgent`, `defaultModel`, and `defaultVariant`.
 The project agent precedes the global agent, then OpenCode's default and the
@@ -723,23 +734,78 @@ agent together with the model `setAgent` resolved for it. Only
 clear the pick. An effort picked in a draft is a choice of its own: those same
 paths leave the draft alone while `currentVariantSelection.override` is set.
 
-A live unsent model pick survives changing the agent,
-before either an older per-agent override or the new agent's pinned-model
-catalog lookup can replace it. `selectionSource: 'manual'` alone grants no such
-precedence because restoring a session writes that source too.
+Switching agents resolves the target agent's model in this order: the model
+picked for that agent in this session, the agent's pinned model, the current
+manual model when neither agent pins one, then the defaults. A model picked in
+the composer belongs to the agent it was picked for: before resolving, `setAgent`
+saves an unsent pick still on screen as the previous agent's session model, so
+every pick path (desktop list, mobile list, favorite-model shortcuts) comes back
+with that agent and never moves to another agent that pins its own. An unsent
+pick the new agent's model replaces is dropped from `sessionPickedModels`, and
+the session's saved model becomes the new agent's, because readers outside the
+composer (guest prompts, form replies) take either as the next message's model.
+A target whose pinned model the catalog does not list still counts as pinned:
+it gets the defaults, never the previous agent's manual model.
 
-### Why only an unsent model pick overrides a pinned model
+With Settings → Chat → Composer → *Keep the model and thinking level when
+switching agents* on (`keepModelOnAgentSwitch`, a profile preference, off by
+default), a switch the person makes (`setAgent(name, { pick: true })`: the
+agent menu on desktop and mobile, the composer's cycle key, the global cycle
+shortcut) keeps the model and the level on screen for any target that does not
+pin a model the catalog lists. A model saved for the target in this session
+does not apply; the kept pair becomes the target's own session model and level
+instead, so the composer's per-agent restores and a reopened session show the
+same pair, and it is held as the session's unsent model pick, so the next send
+switches to it even when the agent pick settles (switching back to the agent
+the session record already names). A target with a listed pin gets its pin
+before any model remembered for it in this session, and the pin is recorded as
+its session model so the per-agent restore does not bring the remembered one
+back. The level stays inherited when the target would inherit the same
+one, and travels as a choice when it would not (a level the previous agent
+pinned for its own model). Restores, defaults and following a switch made elsewhere pass
+no `pick` and are unaffected, so opening a session still shows that session's
+own model. Columns with their own selection (BTW, a pinned column) never move
+the model with the agent; the setting carries their level to the picked agent.
+Carrying a level writes nothing to the model's remembered level
+(`lastUsedEfforts`): nobody chose it. Subagents run on their own configuration
+on the server and are untouched.
 
-An explicit model pick describes the next message's model. Switching agents
-keeps that intent, including while the pinned model is absent from discovery.
-A model restored from the session lets the newly selected agent apply its
-pinned model. Treating every manual source as live intent would prevent that
-normal agent selection from working. Picker changes make no session API writes,
+### Why the setting acts on picks and not on every `setAgent`
+
+`setAgent` also restores a session's agent when it opens, follows the record,
+and applies defaults. Keeping the model there would show the previous session's
+model on a session that ran on another one. Only a person's switch is a request
+to change what the agent may do while keeping who answers.
+
+### Why a pinned agent's model wins over an unsent pick
+
+An agent that pins a model is a choice of model too: people keep one agent per
+model and switch agents to switch models (#3391). Carrying an unsent pick into
+such an agent and saving it as that agent's model replaced the pin for the rest
+of the session, one switch at a time. The composer shows the agent's model as
+soon as the agent changes, so what is sent matches what is shown; a person who
+wants another model on that agent picks it after choosing the agent. Picker
+changes make no session API writes,
 except while the session's turn waits for an automatic retry: the composer then
 switches the session to the unsent model pick at once
 (`sync/session-actions.ts` `applyModelPickToRetry`, driven by
 `hooks/useRetryModelPick.ts`), because OpenCode reloads the session's model
 before every attempt.
+
+### Why only a pick moves an open session to another model
+
+The unsent model pick (`useSelectionStore.pickSessionModel`, held per runtime
+and session for the page's life) and an unsent agent pick, which brings its model, are what
+a send from the composer, a queued message, `/compact` and a form reply switch
+the session to. Choosing an effort makes a model pick too, because the effort is
+part of the model sent. The model the composer merely keeps, such as one saved
+in this browser before another client switched the session, never outranks the
+session record: `ModelControls` shows the record's model unless an unsent pick
+holds another, and a switch made elsewhere after the pick replaces it. Comparing
+the composer's model with the server's, as sends did before, could not tell a
+pick from a kept selection, so a stale tab switched the session back (#7456).
+Writing the model at pick time was rejected for the same reason agent picks wait
+for the send: every switch is a record in the transcript.
 
 ### Why a pick reaches a retrying turn and waits during plain generation
 
@@ -819,7 +885,7 @@ A fresh provider read waiting behind another request keeps its original instance
 
 `getProvidersForConfig` asks `model.list` for chat and image models, because OpenCode lists chat models only by default and a provider whose models all generate images would vanish from Settings → Providers, leaving it impossible to edit or disable there. `loadProviders` keeps `providers`, which every chat picker reads, to chat models (an unset `type` is chat). A provider with no chat model goes to `settingsOnlyProviders`, which only Settings → Providers reads through `selectSettingsOnlyProvidersForDirectory`: one with image models carries them, and one with no model at all carries an empty list. The second case is what a Copilot Free or Student sign-in leaves: OpenCode lists the provider and its stored credential and answers no model. Adding those providers to `providers` with an empty or image-only model list was rejected: the pickers, default-model resolution and the catalog cache all treat a listed model as one a chat can run. The list is runtime-only and is not persisted or cached.
 
-Since OpenCode 2.2 the provider and model routes wait for the directory's plugins, so the first provider read of a directory OpenCode has not started is complete, and `getProvidersForConfig` asks for models, the default and providers together. The agent route stopped waiting in 2.2.7: the first agent read of such a directory answers an empty list, and the full list follows about half a second later through `agent.updated` with that directory, which re-reads it and re-applies the default agent. For a folder inside an isolated space the providers come from the host project the space was made from, so a catalog event in that project also takes the space's loaded folders out of the freshness window. A catalog event still means the catalog changed (a provider connected, a config edit, a plugin reloaded). The catalog refresh re-reads only the active directory, so every catalog event also calls `markConfigCatalogStale(kind, directory)`, which takes that directory's providers or agents out of the 30-second freshness window (`null`, for a server-wide event such as a credential change, takes out all of them). Switching back to a directory whose catalog changed while it was in the background therefore re-reads it. Meanwhile the composer labels the selected model, its efforts and the agent with `selectKnownCatalogModel` / `selectKnownAgent`, which fall back to any other directory's snapshot, so a cold directory shows the name it already knows rather than a raw id or "Select agent". That fallback is display only: selection, effort resolution and validation read the active catalog, and a model or agent no catalog knows is shown as before.
+Since OpenCode 2.2 the provider and model routes wait for the directory's plugins, so the first provider read of a directory OpenCode has not started is complete, and `getProvidersForConfig` asks for models, the default and providers together. The agent route stopped waiting in 2.2.7: the first agent read of such a directory answers an empty list, and the full list follows about half a second later through `agent.updated`. `listAgents` therefore takes an empty answer as "not activated yet": it waits on `model.default`, which waits for the directory's plugins, and reads the agents once more, so the store never commits that empty list as a loaded catalog. Before, it did, and the agent picker showed the session's agent as missing from its folder until the event's re-read arrived; the old answer to this, holding a first load that came back smaller than the cached list, went with the move to 2.2.0. A list still empty after the wait is the folder's answer. The `agent.updated` re-read stays and also covers a wait that timed out. For a folder inside an isolated space the providers come from the host project the space was made from, so a catalog event in that project also takes the space's loaded folders out of the freshness window. A catalog event still means the catalog changed (a provider connected, a config edit, a plugin reloaded). Provider refreshes re-read the active catalog directory and the event locations, so a mounted Settings project updates even while Chat owns another catalog. Every catalog event also calls `markConfigCatalogStale(kind, directory)`, which takes that directory's providers or agents out of the 30-second freshness window (`null`, for a server-wide event such as a credential change, takes out all of them). Switching back to a directory whose catalog changed while it was in the background therefore re-reads it. Meanwhile the composer labels the selected model, its efforts and the agent with `selectKnownCatalogModel` / `selectKnownAgent`, which fall back to any other directory's snapshot, so a cold directory shows the name it already knows rather than a raw id or "Select agent". That fallback is display only: selection, effort resolution and validation read the active catalog, and a model or agent no catalog knows is shown as before.
 
 An effort picked in a project draft travels to another worktree of the same project (`activateDirectory` with `preserveManualModel`), also while the model is still the automatic one. `currentVariant` is what a send carries, so every loader that keeps a pick in `currentVariantSelection` also writes that pick to `currentVariant` (`variantAfterResolve`) instead of the default it resolved for the model; otherwise the picker showed the pick and the send used the default. Marks carry a revision, and a load that began before the latest mark for its directory does not make that directory fresh again.
 
@@ -1101,6 +1167,19 @@ itself. A server no config file defines (one an integration adds) can only be
 disconnected, and switching on a server its config already enables is a
 reconnect. Settings keeps its separate connect and disconnect buttons, which
 are runtime-only.
+
+#### Why saved MCP OAuth recovery checks live status first
+
+The status shown in Settings may predate a runtime disconnect. The retry
+reads the selected directory and confirms the same integration still needs
+authentication or has failed before it connects. If already connected, the
+read refreshes only the selected badge. An earlier full read can refresh
+other badges but cannot overwrite that confirmation. A newer read that
+already reported the server connected, disabled or removed wins over a
+delayed failure from the retry, so that failure sends no connect. A retired
+directory or runtime, or an aborted selection, cannot complete that read
+into a connection. A connection already sent to OpenCode cannot refresh or
+publish diagnostics to a retired scope.
 
 Two rules follow from the routes:
 
@@ -1401,7 +1480,7 @@ After meaningful Git/PR store changes, verify manually:
 
 - Settings retains switched-off skills absent from OpenCode's inventory, including built-ins absent from disk scans, so the user can turn them back on. An exact-denied id retains a known row or a noneditable id-only row until its rule disappears.
 - A skill switch cannot lift a wildcard deny or remove a deny without an editable file. Its recheck ultimately uses OpenCode's statements even if another rule overrides the accepted switch write. Skill policy ids derive from the containing folder or loose filename and can differ from display names.
-- Skill discovery uses server-reported environment flags because the browser cannot read them and the upstream list omits project skills the agent can use. External-skill disable excludes `.claude` and `.agents`; Claude-specific disable excludes only `.claude`. Name collisions prefer `.agents`, including symlinked copies. Unknown flags preserve the list, and Windows paths normalize before root matching.
+- Skill discovery uses server-reported environment flags because the browser cannot read them and the upstream list omits project skills the agent can use. The one flag OpenCode still reads, `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`, excludes `.claude`; `.agents` is always loaded, since OpenCode 2 dropped `OPENCODE_DISABLE_EXTERNAL_SKILLS`. Name collisions prefer `.agents`, including symlinked copies. Unknown flags preserve the list, and Windows paths normalize before root matching.
 - A disk-only skill response is incomplete. It preserves previously known built-ins and config-discovered skills, while absence of a managed-root skill is authoritative.
 - The server's skill-catalog list is authoritative even when empty because machine policy can hide every built-in catalog. Freshness alone governs empty-list reuse.
 - MCP forms rebuild config objects, so an emptied field removes its key. Entries require `type`; startup timeout applies only to spawned local servers. Code Mode Default and legacy negotiation remove their keys so OpenCode's per-server defaults apply.
@@ -1450,7 +1529,7 @@ After meaningful Git/PR store changes, verify manually:
 - Deep-link trust is device-local security state and never roams through server settings.
 - Favicons cache per origin so same-site navigation and additional tabs avoid placeholder flicker. Data URLs stay in memory because persisting them costs more storage than the saved request warrants; insertion-order eviction is sufficient for a cheap refetch. Requests use the reporting view's session so isolated-space icons traverse that space's proxy. Failure retains the placeholder silently. Browser history includes runtime and directory because equal paths on different hosts expose different servers.
 - Context-panel tab budgets apply per surface because each surface has its own strip. The tab being opened or viewed survives even if protection leaves 1 extra tab. Each zone closes and selects independently; closing its last tab does not jump to an unrelated surface.
-- File preview replacement removes the old editor entry too, and closing files keeps panel tabs and editor state aligned. Closing the last real file retains the empty editor/tree placeholder; closing that placeholder closes the surface. A move rebuilds path-derived ids and replaces stale destination tabs. The tree and editor can each hide, but at least 1 remains, and selecting a file shows its editor.
+- File preview replacement removes the old editor entry too, and closing files keeps panel tabs and editor state aligned. Closing the last real file retains the empty editor/tree placeholder; closing that placeholder closes the surface. Closing files never changes tree visibility, because a tree the user hid stays hidden until they show it; only opening the empty file surface from the rail reveals a hidden tree. A move rebuilds path-derived ids and replaces stale destination tabs. The tree and editor can each hide, but at least 1 remains, and selecting a file shows its editor.
 - Terminals, pinned chats, tracker items and PR comparisons can target other directories without changing app navigation. Cross-project Changes and walkthrough targets persist as the panel's own directory because their requested PR selection is memory-only. The rail returns to the panel's project when opening those surfaces.
 - Agent browser tabs always allocate in the background, even when another tab has the same URL, preserving the user's panel visibility and selection. User-requested new tabs also preserve existing tabs; labels follow navigation. Tracker item tabs retain the branch tab beside them, including after the last item closes.
 - Context-panel persistence drops modes the runtime cannot render, including browser tabs in VS Code. A saved-plan tab requires its owner; an unowned legacy saved-plan descriptor cannot revive as an openable plan. Zone sizes migrate from the last-used directory, and preview-to-browser migration rebuilds mode-derived ids and resolves URL collisions.

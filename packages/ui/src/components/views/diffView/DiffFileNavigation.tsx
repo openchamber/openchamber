@@ -5,6 +5,7 @@ import { describeChange } from '../git/changeStatus';
 import { FileTreeChevron, FileTreeIndentGuides, FileTreeRowEnd, FileTreeStatusLetter } from '../files/FileTreeRowParts';
 import { fileTreeRowPaddingLeft, fileTreeRowStateClassName } from '../files/fileTreeRow';
 import { useFileTreeDisclosure } from '../files/useFileTreeDisclosure';
+import { Icon } from '@/components/icon/Icon';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { ReviewFileMark } from '@/components/review/ReviewFileMark';
 import { useI18n } from '@/lib/i18n';
@@ -16,12 +17,14 @@ interface FileListProps {
     changedFiles: FileEntry[];
     selectedFile: string | null;
     onSelectFile: (path: string) => void;
+    reviewedPaths?: ReadonlySet<string>;
 }
 
 export const FileList = React.memo<FileListProps>(({
     changedFiles,
     selectedFile,
     onSelectFile,
+    reviewedPaths,
 }) => {
     const { t } = useI18n();
     if (changedFiles.length === 0) return null;
@@ -32,6 +35,7 @@ export const FileList = React.memo<FileListProps>(({
                 {changedFiles.map((file) => {
                     const descriptor = describeChange(file);
                     const isActive = selectedFile === file.path;
+                    const isReviewed = reviewedPaths?.has(file.path) ?? false;
 
                     return (
                         <li key={file.path}>
@@ -61,6 +65,13 @@ export const FileList = React.memo<FileListProps>(({
                                 >
                                     {file.path}
                                 </span>
+                                {isReviewed && (
+                                    <Icon
+                                        name="checkbox-circle"
+                                        className="size-3.5 shrink-0 text-[var(--status-success)]"
+                                        aria-label={t('diffView.reviewed.label')}
+                                    />
+                                )}
                                 {formatDiffTotals(file.insertions, file.deletions)}
                             </button>
                         </li>
@@ -74,6 +85,7 @@ export const FileTree = React.memo<FileListProps>(({
     changedFiles,
     selectedFile,
     onSelectFile,
+    reviewedPaths,
 }) => {
     const { t } = useI18n();
     const [collapsedDirectories, setCollapsedDirectories] = React.useState<ReadonlySet<string>>(() => new Set());
@@ -136,6 +148,7 @@ export const FileTree = React.memo<FileListProps>(({
 
                     const descriptor = describeChange(row.file);
                     const isActive = selectedFile === row.file.path;
+                    const isReviewed = reviewedPaths?.has(row.file.path) ?? false;
                     return (
                         <li key={row.key} className="relative" data-tree-disclosure-path={row.file.path}>
                             <FileTreeIndentGuides depth={row.depth} />
@@ -151,8 +164,15 @@ export const FileTree = React.memo<FileListProps>(({
                                 title={row.file.path}
                             >
                                 <FileTypeIcon filePath={row.file.path} className="ms-0.5 size-3.5 flex-shrink-0" />
-                                <span className="oc-file-tree-row-name typography-meta">{row.name}</span>
+                                <span className={cn('oc-file-tree-row-name typography-meta', isReviewed && !isActive && 'text-muted-foreground')}>{row.name}</span>
                                 <FileTreeRowEnd className="pe-2">
+                                    {isReviewed && (
+                                        <Icon
+                                            name="checkbox-circle"
+                                            className="size-3.5 shrink-0 text-[var(--status-success)]"
+                                            aria-label={t('diffView.reviewed.label')}
+                                        />
+                                    )}
                                     <ReviewFileMark path={row.file.path} />
                                     <FileTreeStatusLetter
                                         code={descriptor.code}

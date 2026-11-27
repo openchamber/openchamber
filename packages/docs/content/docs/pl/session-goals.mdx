@@ -36,7 +36,7 @@ Gdy agent się zatrzyma i sesja na chwilę ucichnie, OpenChamber:
 1. Prosi mały, tani model o audyt ostatniej tury względem celu: kontynuować, gotowe czy utknięto?
 2. Jeśli werdykt to „kontynuować", wysyła prompt kontynuacji i agent wraca do pracy.
 3. Jeśli cel jest weryfikowalnie osiągnięty, cel się kończy, a ty dostajesz powiadomienie.
-4. Jeśli agent naprawdę utknął (potrzebuje twojego udziału), cel zatrzymuje się jako zablokowany — ale dopiero gdy audytor powie to trzy razy z rzędu, więc jednorazowa przeszkoda nigdy nie kończy celu.
+4. Jeśli audytor stwierdzi, że agent potrzebuje twojego udziału, cel zatrzymuje się jako zablokowany już po pierwszej takiej ocenie.
 
 Są też twarde bezpieczniki: opcjonalny budżet tokenów, limit automatycznych kontynuacji i stop przy błędzie tury. Jeśli kontekst sesji zostanie skompaktowany w trakcie pracy, cel po prostu trwa dalej — uderzenie w okno kontekstu to dowód, że praca nie była skończona.
 

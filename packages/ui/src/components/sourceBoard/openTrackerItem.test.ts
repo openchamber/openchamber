@@ -4,7 +4,14 @@ import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { createWebAPIs } from '../../../../web/src/api/index';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { useGuestDialogStore } from '@/lib/guests/dialog-store';
+import { useGuestScopeStore } from '@/lib/guests/folders';
+import { useGuestsStore } from '@/lib/guests/store';
+import type { InstalledGuest } from '@/lib/guests/types';
+import { markMiniChatWindow } from '@/lib/miniChatWindow';
 import { useTrackerRegistry } from '@/lib/trackers/registry';
+import { shownContextModes } from '@/lib/workspace/zones';
+import { useInputStore } from '@/sync/input-store';
 import { useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSourceBoardStore } from '@/stores/useSourceBoardStore';
@@ -78,6 +85,119 @@ test('Linear links open the board only with an available connected integration',
     useTrackerAuthStore.setState(originals.auth, true);
     useDirectoryStore.setState(originals.directory, true);
     useSourceBoardStore.setState(originals.board, true);
+    useUIStore.setState(originals.ui, true);
+    useSessionUIStore.setState(originals.session, true);
+    await browser.happyDOM.close();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
+
+test('a link an extension claims to open opens that extension beside the chat on screen, as the same link does in a message', async () => {
+  const browser = new Window({ url: 'http://localhost' });
+  const descriptors = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({
+    window: browser, document: browser.document, navigator: browser.navigator,
+    HTMLElement: browser.HTMLElement, Element: browser.Element, IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { value, configurable: true });
+  }
+  const originals = {
+    guests: useGuestsStore.getState(), dialog: useGuestDialogStore.getState(), input: useInputStore.getState(),
+    directory: useDirectoryStore.getState(), ui: useUIStore.getState(), session: useSessionUIStore.getState(),
+    scope: useGuestScopeStore.getState(),
+  };
+  const external: string[] = [];
+  browser.open = (url) => { external.push(String(url)); return null; };
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const url = 'https://tasks.example.com/tasks/DEMO-12';
+  const tasks = (attach: 'dialog' | 'panel', action: 'open' | 'attach', folders?: string[]): InstalledGuest => ({
+    id: 'tasks', name: 'Tasks', icon: 'task', attach, folders,
+    capabilities: { requested: ['links'], granted: ['links'] },
+    links: { action, keys: ['DEMO'], urls: {
+      origin: 'https://tasks.example.com', identifierPattern: '^[A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16}$', itemTemplate: '/tasks/{id}',
+      patterns: [{ path: '^/tasks/([A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16})(?:/|$)' }],
+    } },
+  });
+  let modifier: 'metaKey' | 'shiftKey' | null = null;
+  function Link() {
+    const open = useOpenTrackerItem();
+    // A sidebar row of a session in another worktree passes its own directory, not the one on screen.
+    return React.createElement('button', {
+      onClick: () => open(url, '/repo', { metaKey: modifier === 'metaKey', ctrlKey: false, shiftKey: modifier === 'shiftKey', altKey: false }),
+    }, 'Open');
+  }
+  const click = () => act(async () => host.querySelector('button')?.click());
+  try {
+    useDirectoryStore.setState({ currentDirectory: '/on-screen' });
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...originals.session.newSessionDraft, open: false } });
+    useGuestsStore.setState({ guests: [tasks('dialog', 'open')] });
+    await act(async () => root.render(React.createElement(Link)));
+    await click();
+    expect(useGuestDialogStore.getState().request).toEqual({ guestId: 'tasks', item: { kind: 'link', identifier: 'DEMO-12', url } });
+    expect(external).toEqual([]);
+
+    useGuestDialogStore.setState({ request: null });
+    for (const key of ['metaKey', 'shiftKey'] as const) {
+      modifier = key;
+      external.length = 0;
+      await click();
+      expect(useGuestDialogStore.getState().request).toBeNull();
+      expect(external).toEqual([url]);
+    }
+
+    modifier = null;
+    external.length = 0;
+    useGuestsStore.setState({ guests: [tasks('panel', 'open')] });
+    await click();
+    const panels = useUIStore.getState();
+    expect(shownContextModes(panels.contextPanelByDirectory['/on-screen'], panels.contextSurfaceZones).has('plugin:tasks')).toBe(true);
+    expect(panels.contextPanelByDirectory['/repo']).toBeUndefined();
+    expect(external).toEqual([]);
+
+    useGuestsStore.setState({ guests: [tasks('dialog', 'attach')] });
+    await click();
+    expect(useInputStore.getState().pendingGuestIssue).toBeNull();
+    expect(external).toEqual([url]);
+
+    // The pane hides a tab whose folders leave the screen out, so the click would show nothing.
+    external.length = 0;
+    useGuestScopeStore.setState({ paths: ['/on-screen'] });
+    useGuestsStore.setState({ guests: [tasks('panel', 'open', ['/repo'])] });
+    await click();
+    expect(external).toEqual([url]);
+
+    // A dialog extension limited to one project opens only while that project is on screen.
+    external.length = 0;
+    useGuestDialogStore.setState({ request: null });
+    useGuestsStore.setState({ guests: [tasks('dialog', 'open', ['/project-a'])] });
+    useGuestScopeStore.setState({ paths: ['/project-a'] });
+    await click();
+    expect(useGuestDialogStore.getState().request).toEqual({ guestId: 'tasks', item: { kind: 'link', identifier: 'DEMO-12', url } });
+    expect(external).toEqual([]);
+    useGuestDialogStore.setState({ request: null });
+    useGuestScopeStore.setState({ paths: ['/project-b'] });
+    await click();
+    expect(useGuestDialogStore.getState().request).toBeNull();
+    expect(external).toEqual([url]);
+
+    external.length = 0;
+    useGuestsStore.setState({ guests: [tasks('panel', 'open')] });
+    markMiniChatWindow();
+    await click();
+    expect(external).toEqual([url]);
+  } finally {
+    useGuestScopeStore.setState(originals.scope, true);
+    await act(async () => root.unmount());
+    useGuestsStore.setState(originals.guests, true);
+    useGuestDialogStore.setState(originals.dialog, true);
+    useInputStore.setState(originals.input, true);
+    useDirectoryStore.setState(originals.directory, true);
     useUIStore.setState(originals.ui, true);
     useSessionUIStore.setState(originals.session, true);
     await browser.happyDOM.close();

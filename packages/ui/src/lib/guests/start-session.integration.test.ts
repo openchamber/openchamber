@@ -22,6 +22,11 @@ const created: Session = {
   time: { created: 1, updated: 1 },
 };
 const originalSendMessage = useSessionUIStore.getState().sendMessage;
+// The client decides the model and agent writes inside its send order; the stub does the same and keeps the result on the call.
+const sendResolvingSelection = async (params: Parameters<typeof opencodeClient.sendMessage>[0]) => {
+  Object.assign(params, await params.resolveSelection?.());
+  return 'message';
+};
 const originalLastUserChoice = useSessionUIStore.getState().getLastUserChoice;
 afterEach(() => {
   mock.restore();
@@ -327,7 +332,7 @@ test('a background agent switch retains the session model, not an older model fo
   let record: Session = { ...created, id: sessionId, agent: 'plan', model: { providerID: 'p', id: 'M1' } };
   spyOn(syncRefs, 'getDirectoryState').mockImplementation(() => ({ ...INITIAL_STATE, session: [record] }));
   spyOn(opencodeClient, 'getSession').mockImplementation(async () => record);
-  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('message');
+  const send = spyOn(opencodeClient, 'sendMessage').mockImplementation(sendResolvingSelection);
   // Keep the real send selection and settlement; skip only transcript insertion.
   spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });
   selection.followSessionAgent(sessionId, 'plan');
@@ -368,7 +373,7 @@ test('a background agent switch retains the session model, not an older model fo
   let record: Session = { ...created, id: sessionId, agent: 'plan', model: { providerID: 'p', id: 'M1' } };
   spyOn(syncRefs, 'getDirectoryState').mockImplementation(() => ({ ...INITIAL_STATE, session: [record] }));
   spyOn(opencodeClient, 'getSession').mockImplementation(async () => record);
-  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('message');
+  const send = spyOn(opencodeClient, 'sendMessage').mockImplementation(sendResolvingSelection);
   spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });
   selection.followSessionAgent(sessionId, 'plan');
   selection.saveSessionModelSelection(sessionId, 'p', 'M1');
@@ -404,7 +409,7 @@ test('composer and guest sends retain the same unsent model after selecting a pi
   const record: Session = { ...created, id: sessionId, agent: 'build', model: { providerID: 'p', id: 'M1' } };
   spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [record] });
   spyOn(opencodeClient, 'getSession').mockResolvedValue(record);
-  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('message');
+  const send = spyOn(opencodeClient, 'sendMessage').mockImplementation(sendResolvingSelection);
   const switchModel = spyOn(opencodeClient, 'switchSessionModel');
   const switchAgent = spyOn(opencodeClient, 'switchSessionAgent');
   spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });

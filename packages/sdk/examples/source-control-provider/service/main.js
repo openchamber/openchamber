@@ -172,6 +172,7 @@ var SOURCE_CONTROL_PROVIDER_METHODS = [
   "liveSummaries",
   "readChangeRequestHead",
   "resolveChangeRequestSource",
+  "reviewState",
   "mutation.resolveTarget",
   "mutation.perform",
   "mutation.reconcile"
@@ -294,12 +295,10 @@ var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
 // packages/sdk/examples/source-control-provider/service/main.ts
-var reviewerStatesPath = `./reviewer-states${".js"}`;
-var { readReviews, withReviewerStates } = await import(reviewerStatesPath);
-var referencesPath = "./references.js";
-var { readReferences, withReferences } = await import(referencesPath);
-var diffPath = "./diff.js";
-var { mapChangedFile, splitUnifiedDiff } = await import(diffPath);
+var modulePath = (name) => `./${name}${".js"}`;
+var { readReviews, reviewDismissal, withReviewerStates } = await import(modulePath("reviewer-states"));
+var { readReferences, withReferences, itemReferences } = await import(modulePath("references"));
+var { mapChangedFile, splitUnifiedDiff } = await import(modulePath("diff"));
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
 var serviceToken = process.env.OPENCHAMBER_SERVICE_TOKEN ?? "";
 if (!port || !serviceToken) {
@@ -561,13 +560,13 @@ var findBranchPull = async (call, repo, branch) => {
   }
   throw new CallError(`The repository has more open pull requests than this Git host scans (${STATUS_SCAN_PAGES * SCAN_SIZE})`, 502, "SCAN_LIMIT");
 };
-var readItemReferences = (call, input, repo, number) => readReferences(input.includeReferences === true ? (page, limit) => api(call, "GET", `${repo}/issues/${number}/timeline`, {
-  query: { page: String(page), limit: String(limit) }
-}) : null);
 var unsupported = async (_call, _input, request) => {
   throw new CallError(`${request.method} is not something this Git host offers`, 501, "UNSUPPORTED");
 };
+var { createReviewDrafts } = await import(modulePath("review-drafts"));
+var reviewDrafts = createReviewDrafts({ api, repoPath, text, integer, objectOf, selectorOf, resolveRepo, readPull, fail: (message, status, code) => new CallError(message, status, code) });
 var handlers = {
+  ...reviewDrafts.handlers,
   "auth.status": unsupported,
   "auth.verify": async (call) => {
     const { data } = await api(call, "GET", "/user");
@@ -616,7 +615,7 @@ var handlers = {
     return { items, page, hasMore: hasMore(page, data.length, total) };
   },
   changeRequestContext: async (call, input) => {
-    const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
+    const { raw: repoRaw, project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
     const number = integer(input, "number"), repo = repoPath(project), includeDiff = input.includeDiff === true;
     const [raw, { data: comments }, diff, changed, reviews, references] = await Promise.all([
       readPull(call, project, number),
@@ -624,7 +623,7 @@ var handlers = {
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(""),
       includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
       input.includeTimeline === true ? readReviews(SCAN_SIZE, (page, limit) => api(call, "GET", `${repo}/pulls/${number}/reviews`, { query: { page: String(page), limit: String(limit) } })) : Promise.resolve(null),
-      readItemReferences(call, input, repo, number)
+      readReferences(itemReferences(api, call, repo, number, input.includeReferences === true))
     ]);
     const pull = mapPull(call, raw, project), patches = splitUnifiedDiff(diff);
     const files = changed.map((file) => {
@@ -642,7 +641,7 @@ var handlers = {
       files,
       diff,
       ci: null
-    }, reviews, raw.requested_reviewers ?? []);
+    }, reviews, raw.requested_reviewers ?? [], repoRaw.permissions?.admin === true && pull.state === "open");
     return withReferences(context, references);
   },
   listIssues: async (call, input) => {
@@ -658,7 +657,7 @@ var handlers = {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
     const [{ data }, references] = await Promise.all([
       api(call, "GET", `${repoPath(project)}/issues/${integer(input, "number")}`),
-      readItemReferences(call, input, repoPath(project), integer(input, "number"))
+      readReferences(itemReferences(api, call, repoPath(project), integer(input, "number"), input.includeReferences === true))
     ]);
     if (data.pull_request)
       throw new CallError(`#${data.number} is a pull request`, 404);
@@ -947,7 +946,7 @@ var perform = async (call, input) => {
       return { state };
     }
     default:
-      throw new CallError(`${kind} is not something this Git host offers`, 501, "UNSUPPORTED");
+      return kind === "change-request-review-dismiss" ? reviewDismissal(api, CallError).perform(call, kind, normalized, providerTarget) : reviewDrafts.perform(call, input);
   }
 };
 var NOT_APPLIED = { state: "failed", result: { failureStatus: 409, failureCode: "SOURCE_CONTROL_MUTATION_NOT_APPLIED" } };
@@ -983,7 +982,7 @@ var reconcile = async (call, input) => {
       return data.state === text(normalized, "state") ? { state: "succeeded", result: { state: data.state } } : NOT_APPLIED;
     }
     default:
-      return { state: "outcome-unknown" };
+      return kind === "change-request-review-dismiss" ? reviewDismissal(api, CallError).reconcile(call, kind, normalized, providerTarget) : reviewDrafts.reconcile(call, input);
   }
 };
 var failureOf = (error) => {

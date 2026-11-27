@@ -35,6 +35,7 @@ export interface CreateMultiRunParams {
   agent?: string;
   worktreeBaseBranch?: string;
   isolateRuns?: boolean;
+  spaceDirectory?: string;
   files?: MultiRunFileAttachment[];
   setupCommands?: string[];
   autoFusion?: MultiRunAutoFusion;

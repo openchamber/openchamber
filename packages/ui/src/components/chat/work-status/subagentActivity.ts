@@ -1,6 +1,7 @@
 import { getLastConversationMessage, type Message, type Part, type SessionStatus, type ToolPart } from '@/lib/opencode/model';
 import { structuredErrorText } from '@/lib/opencode/projection';
-import { isShellTool, toolDescription, type ToolDescription } from '@/lib/opencode/tools';
+import { commandPreview, PANEL_COMMAND_LENGTH } from '@/lib/opencode/toolRowPreview';
+import { isExecuteTool, isShellTool, toolDescription, type ToolDescription } from '@/lib/opencode/tools';
 import { getToolMetadata } from '@/lib/toolHelpers';
 
 export const SUBAGENT_SILENCE_MS = 90_000;
@@ -42,7 +43,11 @@ const describeTool = (part: ToolPart): ToolCall => {
   const cached = callsByPart.get(part);
   if (cached) return cached;
   const metadata = 'metadata' in part.state ? part.state.metadata : undefined;
-  const detail = describeDetail(toolDescription(part.tool, part.state.input, metadata));
+  const description = toolDescription(part.tool, part.state.input, metadata);
+  const isCommand = isShellTool(part.tool) || isExecuteTool(part.tool);
+  const detail = description?.kind === 'text' && isCommand
+    ? commandPreview(description.value, PANEL_COMMAND_LENGTH)
+    : describeDetail(description);
   const call = isShellTool(part.tool) && detail ? { tool: null, detail } : { tool: getToolMetadata(part.tool).displayName, detail };
   callsByPart.set(part, call);
   return call;

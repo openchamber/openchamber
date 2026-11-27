@@ -6,11 +6,14 @@ import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import { useSpaceCatalogDirectory } from '@/lib/spaces/useSpaceCatalogDirectory';
+import { useSpaceModelPicker } from '@/lib/spaces/useSpaceModelPicker';
+import type { SpaceTarget } from '@/lib/spaces/space-model-offer';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 const CHIP_HEIGHT_CLASS = 'h-7';
@@ -71,6 +74,7 @@ interface ModelMultiSelectProps {
   portal?: boolean;
   addButtonAriaLabel?: string;
   addButtonTooltip?: string;
+  spaceTarget?: SpaceTarget | null;
 }
 
 export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
@@ -90,16 +94,19 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   portal = false,
   addButtonAriaLabel,
   addButtonTooltip,
+  spaceTarget = null,
 }) => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
+  const catalogDirectory = useSpaceCatalogDirectory(spaceTarget?.directory);
+  const providers: ModelPickerProvider[] = useConfigStore((state) => selectProvidersForDirectory(state, catalogDirectory));
   const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
   const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
-  const { favoriteModelsList, recentModelsList } = useModelLists();
+  const { favoriteModelsList, recentModelsList } = useModelLists(catalogDirectory);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const providerOrder = useUIStore((state) => state.providerOrder);
   const [isOpen, setIsOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
+  const space = useSpaceModelPicker(spaceTarget, providers, setIsOpen);
   const [availableHeight, setAvailableHeight] = React.useState<number | null>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const popupRef = React.useRef<HTMLDivElement>(null);
@@ -277,6 +284,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 favoriteModels={favoriteModelsList}
                 recentModels={recentModelsList}
                 hiddenModels={hiddenModels}
+                space={space}
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}
                 onSelect={handleSelectModel}

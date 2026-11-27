@@ -3,6 +3,7 @@ import type { ConversationMetadata } from '@/lib/search/conversationSearch';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DirectoryOwner } from './sessions/sessionOwnership';
 import { normalizePath } from './utils';
+import type { ReadOnlySessionAssociation } from '@/lib/worktrees/readOnlySessionAssociation';
 
 type SearchProject = { id: string; label?: string; normalizedPath: string };
 type ScopeInput = {
@@ -10,9 +11,10 @@ type ScopeInput = {
   worktrees: ReadonlyMap<string, WorktreeMetadata[]>;
   knownDirectories: ReadonlySet<string>;
   isVSCode: boolean;
+  nestedSessionOwners?: ReadonlyMap<string, ReadOnlySessionAssociation>;
 };
 
-export function resolveSidebarSearchScope({ projects, worktrees, knownDirectories, isVSCode }: ScopeInput) {
+export function resolveSidebarSearchScope({ projects, worktrees, knownDirectories, isVSCode, nestedSessionOwners }: ScopeInput) {
   const knownDirectoryKeys = new Set([...knownDirectories].map((directory) => normalizePath(directory)));
   const roots = new Set<string>();
   for (const project of projects) {
@@ -26,19 +28,24 @@ export function resolveSidebarSearchScope({ projects, worktrees, knownDirectorie
     if (isVSCode) return false;
     let candidate: string | null = normalized;
     while (candidate) {
-      if (roots.has(candidate)) return true;
+      if (roots.has(candidate) || knownDirectoryKeys.has(candidate)) return true;
       const slash = candidate.lastIndexOf('/');
       candidate = slash > 0 ? candidate.slice(0, slash) : null;
     }
     return false;
   };
+  const isSessionAdmitted = (directory: string | null, sessionId?: string): boolean => (
+    isAdmitted(directory)
+    || Boolean(!isVSCode && sessionId && nestedSessionOwners?.has(sessionId)
+      && nestedSessionOwners.get(sessionId)?.directory === normalizePath(directory))
+  );
   const directories = isVSCode ? [...knownDirectories].sort() : undefined;
-  return { directories, available: directories === undefined || directories.length > 0, isAdmitted };
+  return { directories, available: directories === undefined || directories.length > 0, isAdmitted, isSessionAdmitted };
 }
 
 export function sidebarSearchMetadata(input: {
   sessions: readonly Session[];
-  isAdmitted: (directory: string | null) => boolean;
+  isAdmitted: (directory: string | null, sessionId?: string) => boolean;
   owners: ReadonlyMap<string, DirectoryOwner>;
   projects: readonly SearchProject[];
   worktrees: ReadonlyMap<string, WorktreeMetadata[]>;
@@ -48,7 +55,7 @@ export function sidebarSearchMetadata(input: {
   return input.sessions.flatMap((session) => {
     const directory = normalizePath(session.directory);
     const archived = Boolean(session.time?.archived);
-    if (session.parentID || seen.has(session.id) || !input.isAdmitted(directory)) return [];
+    if (session.parentID || seen.has(session.id) || !input.isAdmitted(directory, !archived ? session.id : undefined)) return [];
     seen.add(session.id);
     const owner = input.owners.get(session.id);
     const project = owner ? projects.get(owner.projectId) : undefined;

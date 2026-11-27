@@ -23,6 +23,7 @@ This validates:
 
 - frontmatter (`title`, `description`) exists for every MDX page
 - sidebar links resolve to existing MDX routes
+- root-relative links in page bodies (`[text](/page/)`, `href="/page/"`) resolve to existing MDX routes
 
 ## Deployment model
 

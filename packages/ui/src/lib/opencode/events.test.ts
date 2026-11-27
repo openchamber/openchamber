@@ -155,11 +155,11 @@ describe("translateWireEvent", () => {
     })
     expect(events[0]).toEqual({
       type: "message.updated",
-      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, metadata: { source: "chat" } } },
+      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, metadata: { source: "chat" }, pending: true } },
     })
     expect(events[1]).toMatchObject({
       type: "message.parts.replaced",
-      properties: { messageID: "msg_u", parts: [{ id: partIds.userText("msg_u"), type: "text", text: "hi" }] },
+      properties: { messageID: "msg_u", parts: [{ id: partIds.userText("msg_u"), type: "text", text: "hi" }], whilePending: true },
     })
   })
 
@@ -176,7 +176,7 @@ describe("translateWireEvent", () => {
     })
     expect(events[0]).toEqual({
       type: "message.updated",
-      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }] } },
+      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }], pending: true, steer: true } },
     })
   })
 
@@ -479,6 +479,22 @@ describe("routing helpers", () => {
     expect(syncEventSessionID(created)).toBe("ses_1")
     expect(syncEventMessageID(created)).toBe("msg_a")
     expect(messageIdFromEvent("evt_abc")).toBe("msg_abc")
+  })
+})
+
+describe("background jobs", () => {
+  test("an image job update says whether it still runs, and other kinds are not reported", () => {
+    const image = { kind: "image" as const, id: "image_1", sessionID: "ses_1", status: "running" as const, title: "dot", path: "/tmp/image_1", model: "fake/pic", time: { started: Date.now() } }
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: image } })).toEqual([
+      { type: "image.job.updated", properties: { id: "image_1", sessionID: "ses_1", job: { id: "image_1", sessionID: "ses_1", path: "/tmp/image_1", model: "fake/pic", startedAt: image.time.started } } },
+    ])
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { ...image, status: "cancelled" } } })).toEqual([
+      { type: "image.job.updated", properties: { id: "image_1", sessionID: "ses_1", job: null } },
+    ])
+    // A running record without its file, or a status OpenCode does not send, ends nothing.
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { ...image, path: "" } } })).toEqual([])
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { ...image, status: "paused" } } } as never)).toEqual([])
+    expect(translateWireEvent({ ...base, type: "experimental.job.updated", data: { info: { kind: "shell", id: "sh_1", sessionID: "ses_1", status: "running", title: "x", shellID: "sh_1", command: "x", time: { started: 1 } } } })).toEqual([])
   })
 })
 

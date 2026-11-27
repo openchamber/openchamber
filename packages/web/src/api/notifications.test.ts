@@ -120,6 +120,33 @@ describe('web notifications API', () => {
     }
   });
 
+  it('opens the pull request a notification names in the running app', async () => {
+    const assign = vi.fn();
+    installWindowMock({ search: '?session=ses_other', focus: vi.fn(), assign });
+    installFocusedDocument();
+    installEmptyNavigator();
+    const captured: CapturedNotification[] = [];
+    installNotificationMock(() => undefined, captured);
+    const { listenForNotificationNavigation } = await import('@openchamber/ui/lib/router/notificationNavigation');
+    const accept = vi.fn((_url: URL) => true);
+    const cleanup = listenForNotificationNavigation(accept);
+    try {
+      const { createWebNotificationsAPI } = await import('./notifications');
+      await createWebNotificationsAPI().notifyAgentCompletion({
+        title: 'Merged', kind: 'pull-request', itemUrl: 'https://github.com/acme/app/pull/7', directory: '/work/app',
+      });
+      const instance = captured[0].instance;
+      instance.onclick?.call(instance, new Event('click'));
+      expect(assign).not.toHaveBeenCalled();
+      const target = accept.mock.calls[0]?.[0];
+      if (!target) throw new Error('the click did not navigate');
+      expect(target.searchParams.get('item')).toBe('https://github.com/acme/app/pull/7');
+      expect(target.searchParams.get('itemDir')).toBe('/work/app');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('deduplicates repeated foreground notifications by tag', async () => {
     installWindowMock();
     const created: Array<{ title: string; options?: NotificationOptions }> = [];

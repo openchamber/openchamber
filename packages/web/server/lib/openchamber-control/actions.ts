@@ -2,8 +2,8 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List session destinations', description: 'Projects and Chats; use an id as projectId for session.create. No parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
   { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
-  { action: 'session.list', title: 'List sessions', description: 'Newest top-level sessions here; each has inWork (in the sidebar\'s In work) and doneSuggested (its last turn looks finished). Filters inWork, busy (running now), mine (sessions you created with ownWork, with their status), query (title words); inWork, busy and mine span every project unless scoped and return all matches. Optional limit, all, children, withStatus (status as in session.status)' },
-  { action: 'session.archive', title: 'Archive a session', description: 'Archive sessionId, a session you created with ownWork, once you used its result. Restoring one is the user\'s' },
+  { action: 'session.list', title: 'List sessions', description: 'Newest top-level sessions here; each has inWork (in the sidebar\'s In work) and doneSuggested (its last turn looks finished), and lead: true on a lead. Filters inWork, busy (running now), leads, mine (sessions you created with ownWork, with their status), query (title words); inWork, busy, leads and mine span every project unless scoped and return all matches. Optional limit, all, children, withStatus (status as in session.status)' },
+  { action: 'session.archive', title: 'Archive a session', description: 'Archive sessionId, a session you created with ownWork. Restoring one is the user\'s' },
   { action: 'session.markDone', title: 'Mark a session done', description: 'Take sessionId (default: this session) out of In work, as the Done button does. Only on the user\'s word; a later message puts it back' },
   { action: 'session.track', title: 'Put a session in work', description: 'Put sessionId back in In work, as the Track button does, such as to undo a markDone' },
   { action: 'session.create', title: 'Create a session', description: 'In this directory by default; projectId from projects.list selects a project or openchamber:chats for a new Chat. Use the returned directory for later session actions. Prompt optional' },
@@ -17,11 +17,11 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'pr.watch', title: 'Wait on a pull request', description: 'Requires url of a GitHub pull request or GitLab merge request. Same as wait.start with source "pr"', agentExposed: false },
   { action: 'pr.unwatch', title: 'Stop waiting on a pull request', description: 'This session stops waiting on the pull request at url, or on every one without url', agentExposed: false },
   { action: 'wait.list', title: 'List waits', description: "This session's waits, and the sources to wait on (the built-in timer, pull requests, and what extensions offer), with the args each takes" },
-  { action: 'wait.start', title: 'Wait on a timer, a pull request or an extension', description: 'Requires source and args: "timer" with { "minutes": N } (1 to 1440); "pr" with { "url": "<GitHub pull request or GitLab merge request address>" }, which wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed; or a source from wait.list with args as its params say. Each pull request is its own wait, so a session can wait on several. One wake ends the wait, so start it again to keep waiting. End your turn while you wait. Never wait with a sleep loop' },
+  { action: 'wait.start', title: 'Wait on a timer, a script, a pull request or an extension', description: 'Requires source and args: "timer" with { "minutes": N } (1 to 1440); "script" with { "code": "<Code Mode script>", "minutes": N, "hours"?: N }, which runs the script every N minutes without a model for up to hours (24 by default, at most 168) and wakes the session when it returns a non-empty string or { wake }, keeping { state } between runs, with tools.<ns>.<tool>(...) and fetch allowed when their permission does not ask; "pr" with { "url": "<GitHub pull request or GitLab merge request address>" }, which wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, GitHub removes it from the merge queue, or it is merged or closed; or a source from wait.list with args as its params say. Each pull request is its own wait, so a session can wait on several. One wake ends the wait, so start it again to keep waiting. End your turn while you wait. Never wait with a sleep loop' },
   { action: 'wait.stop', title: 'Stop a wait', description: 'Stop waitId (a pull request wait\'s waitId is its address), or every wait of this session without it' },
   { action: 'work.name', title: 'Name the task', description: 'Name the worktree\'s or isolated space\'s task for sessionId (default: this session), never a session; a lead\'s name is its session title, so for a lead it renames the session. In title: at most 4 words in the user\'s latest language; rename only for a different task. A user-given name stays. Main checkout and plain folders need no naming. A worktree on an OpenChamber-generated placeholder branch also requires branch, the English branch name after the task, and renames it; any other branch stays' },
-  { action: 'lead.brief', title: "Keep the lead's brief", description: 'Only in a lead session. Without brief or edits it returns the brief; edits changes parts of it, brief replaces it whole' },
-  { action: 'lead.digest', title: "Update the lead's digest", description: 'Only in a lead session. Replaces the digest the user reads above the chat with needsYou, now, news and suggestions' },
+  { action: 'lead.brief', title: "Keep the lead's brief", description: 'Only in a lead session. Without parameters it returns the brief. brief replaces the free text (goal, outcomes, rules) and edits changes parts of it; strands sets or closes strands of work by id. The answer says how full the brief is. A refusal throws inside a script' },
+  { action: 'lead.digest', title: "Update the lead's digest", description: 'Only in a lead session. Replaces the digest the user reads above the chat with needsYou, now, news and suggestions. A refusal throws inside a script' },
   { action: 'schedule.status', title: 'Check scheduler status', description: 'No parameters', agentExposed: false },
   { action: 'schedule.list', title: 'List scheduled tasks', description: 'Tasks and scheduler status' },
   { action: 'schedule.create', title: 'Create a scheduled task', description: 'Requires name, prompt, one schedule selector, and model unless targetSessionId is set. That session keeps its model and agent unless the task names others, which then become the session\'s. A named model is checked against the catalog when the task is written. runInWorktree (git only) runs each run in a fresh worktree on baseBranch (default HEAD); cleanupWorktree false keeps it' },
@@ -30,6 +30,9 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'schedule.delete', title: 'Delete a scheduled task', description: 'Delete taskId' },
   { action: 'schedule.toggle', title: 'Enable or disable a scheduled task', description: 'Requires taskId and disabled' },
   { action: 'file.open', title: 'Show a file to the user', description: 'Put path in front of the user\'s file panel, for a result worth seeing: a screenshot, report, CSV, recording, generated page' },
+  { action: 'folder.list', title: 'List sidebar folders', description: 'Sidebar folders in this project (or projectId/directory), with each folder\'s id, name, parentId and member count, and the folder holding the current worktree or session when filed' },
+  { action: 'folder.create', title: 'Create a sidebar folder', description: 'Create a sidebar folder in this project (or projectId/directory). Requires name; optional parentId nests it under an existing folder. Use when the user or workflow calls for it' },
+  { action: 'folder.move', title: 'Move to a sidebar folder', description: 'Place a worktree or session in a sidebar folder, or remove it from its folder when folder is null. Targets this session\'s worktree (or this session in the project root) by default; optional sessionId or directory targets another. folder accepts an existing id or name, or a new name to create it. Use when the user or workflow calls for it' },
 ]);
 
 const OPENCHAMBER_CONTROL_ACTIONS = Object.freeze(
@@ -156,7 +159,7 @@ export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
 
 export const OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS = Object.freeze([
   { action: 'actions.list', title: 'List project actions', description: "This project's actions for this computer: id, name, command, the folder it runs in, url when set, and its current or last run with who started it" },
-  { action: 'actions.run', title: 'Run a project action', description: 'Start the action name in its folder, as the actions menu does. When the action already runs, nothing starts a second copy and the answer says whose run it is' },
+  { action: 'actions.run', title: 'Run a project action', description: 'Start the action name in its folder, as the actions menu does, and wait until its app answers or the command finishes. When the action already runs, nothing starts a second copy and the answer says whose run it is' },
   { action: 'actions.logs', title: 'Read project action output', description: "The end of the current or last run of the action name as plain text; maxBytes caps it" },
   { action: 'actions.stop', title: 'Stop a project action', description: 'Stop the action name, only a run you started' },
 ]);
@@ -185,14 +188,19 @@ export const WORKFLOW_ANSWER_TOOL = 'openchamber_workflow_answer';
 export const CONTROL_ONLY_PARAMETER_PROPERTIES = Object.freeze({
   url: { type: 'string', description: 'session.unlink: the address of the link to remove' },
   identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
-  source: { type: 'string', description: 'wait.start: "timer", "pr", or <extension>/<wait> as wait.list names it' },
+  source: { type: 'string', description: 'wait.start: "timer", "script", "pr", or <extension>/<wait> as wait.list names it' },
   args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "minutes": 10 } or { "url": "https://github.com/o/r/pull/1" }' },
   waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
-  brief: { type: 'string', description: "lead.brief: the whole brief as markdown, at most 12000 characters: the user's goal and agreed outcomes in their words, rules, and each strand of work with its expected result" },
+  brief: { type: 'string', description: "lead.brief: the brief's free text as markdown: the user's goal and agreed outcomes in their words, and rules. The strands stay; together at most 12000 characters" },
   edits: {
     type: 'array',
     items: { type: 'object', properties: { find: { type: 'string' }, replace: { type: 'string' } }, required: ['find', 'replace'] },
-    description: 'lead.brief: changes applied in order, each replacing the exact text find, which must appear once, with replace; nothing is saved when one fails',
+    description: 'lead.brief: changes to the free text, applied in order, each replacing the exact text find, which must appear once, with replace; nothing is saved when one fails',
+  },
+  strands: {
+    type: 'array',
+    items: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' }, close: { type: 'boolean' } }, required: ['id'] },
+    description: 'lead.brief: strands to change, the others stay. { id, text } sets or replaces one, at most 600 characters: the expected result, its session, where it stands now. { id, close: true } removes a finished one. id is a short name such as relay-push',
   },
   needsYou: {
     type: 'array',
@@ -203,6 +211,10 @@ export const CONTROL_ONLY_PARAMETER_PROPERTIES = Object.freeze({
   news: { type: 'array', items: { type: 'string' }, description: 'lead.digest: at most 5 lines, only what changed the picture since the user last wrote' },
   suggestions: { type: 'array', items: { type: 'string' }, description: 'lead.digest: at most 3 lines, work worth doing outside what the user gave you, with why' },
   mine: { type: 'boolean', description: 'session.list: only the sessions you created with ownWork, each with its status' },
+  leads: { type: 'boolean', description: 'session.list: only lead sessions' },
+  folder: { type: ['string', 'null'], description: 'Sidebar folder id or name (created if it does not exist yet), or null for no folder. On folder.move: the destination folder. On session.create or session.moveToWorktree: places the new worktree or session in that folder; omitting inherits the caller\'s folder when filed, null leaves it unfiled. Use when the user or workflow calls for it' },
+  parentId: { type: ['string', 'null'], description: 'folder.create: existing parent folder id to nest under' },
+  name: { type: 'string', description: 'folder.create: sidebar folder name' },
 });
 
 export const OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS = Object.freeze([

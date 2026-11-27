@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
 import { createMessageSearchIndexer } from './indexer.js';
 import { loadSqliteOpener } from './sqlite.js';
-import { buildSnippet, MATCH_END, MATCH_START, openMessageSearchStore, toMatchExpression } from './store.js';
+import { buildSnippet, countMatches, MATCH_END, MATCH_START, openMessageSearchStore, toMatchExpression } from './store.js';
 
 // A fake OpenCode that pages the way v2 does (message.ts): ascending order,
 // an opaque cursor naming the last item of the page, filtered by type.
@@ -721,5 +721,12 @@ describe('snippets', () => {
   it('centres on the longest word of the query', () => {
     const text = `see github first ${'filler '.repeat(40)} then git rebase later`;
     expect(mark(buildSnippet(text, ['git', 'rebase'], 20))).toContain('[rebase]');
+  });
+});
+
+describe('match counts', () => {
+  it('counts each word of the query in any case, the way the chat paints matches', () => {
+    expect(countMatches('Git rebase onto github, then GIT push', ['git', 'rebase'])).toBe(4);
+    expect(countMatches('aaaa', ['aaa'])).toBe(1);
   });
 });

@@ -2,13 +2,14 @@ import { z } from 'zod';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, isSshForwardedRuntime } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
 import { isUpdateChannel, type UpdateChannel } from '@/lib/updateChannel';
 
 export type UpdateInfo = {
   available: boolean;
+  downloaded?: boolean;
   version?: string;
   currentVersion: string;
   body?: string;
@@ -68,7 +69,7 @@ const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
   return (window as unknown as { __OPENCHAMBER_ELECTRON__?: ElectronRuntimeGlobal }).__OPENCHAMBER_ELECTRON__ ?? null;
 };
 
-const getDesktopBridge = (): DesktopBridgeGlobal | null => {
+export const getDesktopBridge = (): DesktopBridgeGlobal | null => {
   if (typeof window === 'undefined') return null;
   return (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__ ?? null;
 };
@@ -751,8 +752,7 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
     return null;
   }
 
-  const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
-  return info as UpdateInfo;
+  return invokeDesktop<UpdateInfo>('desktop_check_for_updates');
 };
 
 export const downloadDesktopUpdate = async (
@@ -996,7 +996,7 @@ export const fetchDesktopInstalledApps = async (
   apps: string[],
   force?: boolean
 ): Promise<FetchDesktopInstalledAppsResult> => {
-  if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
+  if (!hasDesktopInvoke() || (!isDesktopLocalOriginActive() && !isSshForwardedRuntime())) {
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 

@@ -9,6 +9,7 @@ import { DictationStreamSender } from './dictation-stream-sender';
  */
 class FakeClient {
     isConnected = true;
+    runtimeGeneration = 0;
     ackSeq = -1;
     starts: Array<{ dictationId: string; format: string; options: DictationStartOptions }> = [];
     chunks: Array<{ dictationId: string; seq: number; audio: string }> = [];
@@ -173,6 +174,58 @@ describe('DictationStreamSender resume', () => {
         expect(client.chunks.map((chunk) => chunk.seq)).toEqual([0, 0, 1]);
         expect(client.chunks.map((chunk) => chunk.audio)).toEqual(['a', 'a', 'b']);
         expect(client.starts[1].dictationId).toBe('dic_fixed');
+    });
+});
+
+describe('DictationStreamSender after the server released the stream', () => {
+    const released = async () => {
+        const client = new FakeClient();
+        let ids = 0;
+        const sender = new DictationStreamSender({
+            client,
+            getStartOptions: () => ({ provider: 'local' }),
+            createDictationId: () => `dic_${ids++}`,
+        });
+        await sender.restartStream();
+        sender.enqueueSegment('a');
+        await client.waitForChunks(1);
+        sender.markReleased();
+        return { client, sender };
+    };
+
+    test('audio kept through a failed reopen never goes to another host by itself', async () => {
+        const { client, sender } = await released();
+        let dialFailed = Promise.resolve();
+        client.beforeStart = () => {
+            dialFailed = Promise.reject(new Error('offline'));
+            return dialFailed;
+        };
+        sender.enqueueSegment('b');
+        await dialFailed.catch(() => undefined);
+        for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+        expect(client.starts).toHaveLength(2);
+
+        client.beforeStart = null;
+        client.runtimeGeneration += 1;
+        sender.enqueueSegment('c');
+        await expect(sender.finish(2)).rejects.toThrow('Runtime changed');
+        expect(client.starts).toHaveLength(2);
+
+        sender.cancel();
+        await sender.finish(2);
+        expect(client.chunks.slice(1).map((chunk) => chunk.audio)).toEqual(['a', 'b', 'c']);
+    });
+
+    test('a cancel while the confirm reopens the stream opens no other one', async () => {
+        const { client, sender } = await released();
+        let release = () => {};
+        client.beforeStart = () => new Promise<void>((resolve) => { release = resolve; });
+        const finished = sender.finish(0);
+        sender.clearAll();
+        release();
+        await expect(finished).rejects.toThrow('Dictation cancelled');
+        expect(client.starts).toHaveLength(2);
+        expect(client.finishes).toEqual([]);
     });
 });
 

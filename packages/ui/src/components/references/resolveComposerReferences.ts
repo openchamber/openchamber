@@ -19,6 +19,7 @@ import { referencePickerItemKey, type ReferencePickerSelection } from './referen
 export type ReferenceResolveDeps = {
     sourceControl: Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext' | 'referenceDetail'>;
     context: SourceControlReadContext | null;
+    contextOf?: (directory: string) => SourceControlReadContext | null;
     readTrackerDetail: (provider: string, itemId: string) => Promise<TrackerItem>;
     trackerName: (provider: string) => string;
 };
@@ -142,7 +143,8 @@ async function readChangeRequest(
 async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceResolveDeps): Promise<ComposerReference> {
     if (selection.source === 'tracker') return readTrackerItem(deps, selection.provider, selection.item.id);
 
-    const { sourceControl, context } = deps;
+    const { sourceControl } = deps;
+    const context = selection.directory && deps.contextOf ? deps.contextOf(selection.directory) : deps.context;
     if (!context) throw new Error('The repository is not available here');
     const { reference } = selection;
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };

@@ -46,12 +46,16 @@ with its named pin lists. How the rows are drawn stays with the row model
   replace on updates and a sidebar can contain thousands of them. Subagent work
   state does not count as the user's work state.
 - A section of the user's own lists every work that matches its filter, so one
-  work can show in several. Its one choice is about projects: with "Also show
+  work can show in several. In work lists what no shown section of the user's
+  own lists, so it holds what is not sorted yet; the work stays in work
+  everywhere else. A section filtered by state (`states`) takes nothing from In
+  work, nor does a group of projects. Hidden sections take nothing, and the
+  order does not matter. The section's one choice is about projects: with "Also show
   under projects" off (`claims`), its works leave their projects; on, they stay
   there too and leave them only during a search. Pinned and In work have the
   same choice (`keepPinnedInPlace`, on by default; `keepWorkInPlace`, off by
-  default). They never share a work, since a pinned work is never in work, so
-  their order decides nothing. Projects lists what no section took out and no group of
+  default). With "Also in work" on Pinned they can share a work; In work never takes
+  a pinned one out of its project, so their order decides nothing. Projects lists what no section took out and no group of
   projects took, wherever it stands in the order.
 - A group of projects (`grouping: 'project'`) takes whole projects, and only
   projects: its filter keeps `projectIds` alone, and it always takes them, so
@@ -75,19 +79,22 @@ with its named pin lists. How the rows are drawn stays with the row model
   one at the limit; the normalizer would otherwise drop one the user has.
 - Activity filters ("Today", "Last 7 days", "Idle 3+ days") compare against a
   clock that moves by the local hour while such a section is shown
-  (`useSidebarSectionsNow`), so "Today" turns over at local midnight in any
-  time zone.
+  (`useSidebarClocks`), so "Today" turns over at local midnight in any
+  time zone. The same clock runs while the list is grouped by time, which
+  reads only its local day; the filters see a fixed time while none is shown.
 - The Folder condition asks for folders of a project's root by id, across
   projects. A session is in a folder when it is filed there, a worktree or a
-  space likewise. Chats and folders inside a worktree are not offered, as
-  sections list neither. The list comes from `foldersMap`, so it needs no read
+  space likewise. The choice omits folders in Chats and inside worktrees.
+  The list comes from `foldersMap`, so it needs no read
   of its own. Deleting a folder takes it out of every section as deleting a pin
   list does (`removeFolderFromSections`), and a section left asking for no
   folder goes with it.
-- "Scheduled run" is a type of its own beside what the work is (a session or a
-  worktree): a work whose top-level session a scheduled task started
+- "Lead" and "Scheduled run" are types of their own beside what the work is (a
+  session or a worktree): a work whose top-level session is marked as a lead
+  (`openchamber.lead`, cleared on a fork) or started by a scheduled task
   (`openchamber.kind = 'scheduled'`, cleared on a fork). With the text
-  condition it lists the runs of one task, whose sessions carry the task's name.
+  condition "Scheduled run" lists the runs of one task, whose sessions carry the
+  task's name.
 - The text condition ("Title or branch") holds phrases, any one of which
   matches, each a chip like another condition's values (an older build stored
   one phrase as a string, read as a list of one). A phrase matches as the
@@ -146,6 +153,15 @@ with its named pin lists. How the rows are drawn stays with the row model
 
 ## Decisions
 
+### Why a section takes its works out of In work by rule and not by a switch
+
+A work in a user's section stood in In work too, so sections did not cut the
+noise and what was not sorted yet could not be seen (#6220; maintainer,
+2026-11-25). A switch per section would look like "Also in work" on Pinned and
+mean something else; first match by order was tried and removed on 2026-10-31,
+because dragging a section then changed what others listed. State sections are
+excluded because their rows come and go with every turn.
+
 ### Why sections are filters over works and not a second list of sessions
 
 Pinned and In work were already filters with a fixed place: pinned works, works
@@ -162,6 +178,11 @@ switch did two things, and the second depended on the order the user drags,
 so "the sections below" read as noise (maintainer, 2026-10-31). Now a section
 shows every work that matches, and its switch only says whether the work also
 stays in its project.
+
+Pinned Chats also appear in sections whose Pins condition matches their list.
+Other custom filters keep their project scope. A pinned Chat follows the same switch as a pinned project work: it leaves Chats only when its section takes works out of their projects (maintainer, 2026-11-26).
+The macOS Dock and the Windows Jump List count an unread Chat by the same rule while Chats is hidden: listed in Pinned or in a shown section whose Pins condition matches (`isChatListedInPinSections`).
+Pin sections read a Chat's list from its saved metadata. The optimistic pin mark does not name the list, so using it for placement would show a new named pin under Pinned until the write returns.
 
 ### Why the user's sections leave works in their projects by default
 

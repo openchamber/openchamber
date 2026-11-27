@@ -2,6 +2,8 @@
 <resources>
     <string name="tile_new_session">新建会话</string>
     <string name="tile_new_session_description">新建 OpenChamber 会话</string>
+    <string name="shortcut_new_session">新建会话</string>
+    <string name="shortcut_dictate">语音输入</string>
     <string name="sealed_push_channel_name">智能体更新</string>
     <string name="widget_usage_label">用量</string>
     <string name="widget_sessions_label">会话</string>

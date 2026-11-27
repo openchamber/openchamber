@@ -4,6 +4,37 @@
   "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/", "packages/ui/src/components/chat/MarkdownRendererImpl.tsx", "packages/ui/src/components/chat/timeline/"],
   "features": [
     {
+      "id": "lead-digest",
+      "name": "Lead digest and phone header menus",
+      "sources": ["packages/ui/src/apps/MobileApp.tsx", "packages/ui/src/apps/MobileHeader.tsx", "packages/ui/src/apps/MobileSessionSwitcher.tsx", "packages/ui/src/components/chat/column/LeadDigestRow.tsx"],
+      "what": "The phone's session switcher opens over the collapsed digest, with the whole first title available to tap.",
+      "reach": "Open a lead with a digest and tap the current session title in the phone header.",
+      "proof": "Tapping the first title where it crosses the digest switches sessions without opening the digest.",
+      "scenarios": [
+        {
+          "id": "mobile-switcher",
+          "kind": "path",
+          "title": "The first switcher title can be tapped over the collapsed lead digest",
+          "steps": [
+            {"do": "settings", "values": {"fontSize": 80}},
+            {"do": "session.create", "as": "lead", "title": "Sample lead"},
+            {"do": "session.seedMetadata", "session": "lead", "patch": {"openchamber": {"lead": {"at": 1780000000000, "digest": {"updatedAt": 1780000000000, "needsYou": [{"question": "Which of the sample layouts should be used for the next preview of the catalog?", "options": ["Compact list", "Roomy grid"], "recommended": "Compact list"}], "now": ["Preparing the next preview of the sample catalog and checking how the long example entries wrap."], "news": ["Both draft layouts are ready for a side-by-side look."], "suggestions": ["Try both views with the same set of sample entries."]}}}}},
+            {"do": "session.create", "as": "notes", "title": "Sample notes"},
+            {"do": "session.create", "as": "target", "title": "Sample session for the layout preview"},
+            {"do": "open", "session": "lead", "phone": true},
+            {"do": "see", "on": "phone.switcherToggle", "text": "Sample lead", "exact": true},
+            {"do": "see", "on": "chat.leadDigestCollapsed", "text": "Preparing the next preview"},
+            {"do": "click", "on": "phone.switcherToggle"},
+            {"do": "see", "on": "phone.switcherFirstTitle", "text": "Sample session for the layout preview", "exact": true},
+            {"do": "click", "on": "phone.switcherFirstTitle", "text": "Sample session for the layout preview", "exact": true},
+            {"do": "see", "on": "phone.switcherToggle", "text": "Sample session for the layout preview", "exact": true},
+            {"do": "gone", "on": "chat.leadDigestOpen"},
+            {"do": "gone", "on": "phone.switcher"}
+          ]
+        }
+      ]
+    },
+    {
       "id": "history",
       "name": "An agent turn in the transcript",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/body/UserMessageBody.tsx", "packages/ui/src/components/chat/message/parts/UserTextPart.tsx", "packages/ui/src/components/chat/message/body/AssistantMessageBody.tsx", "packages/ui/src/components/chat/message/body/useAssistantRenderedParts.tsx", "packages/ui/src/components/chat/message/parts/AssistantTextPart.tsx", "packages/ui/src/components/chat/message/parts/ToolPart.tsx", "packages/ui/src/components/chat/message/parts/ProgressiveGroup.tsx", "packages/ui/src/components/chat/message/parts/MinDurationShineText.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolPartContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/ToolExpandedContent.tsx", "packages/ui/src/components/chat/message/parts/toolRow/toolDescriptions.ts", "packages/ui/src/components/chat/message/parts/toolRow/toolChangeSummary.ts", "packages/ui/src/components/chat/message/parts/toolRow/DiffPreview.tsx", "packages/ui/src/components/chat/message/parts/ToolPartDiffPreview.tsx", "packages/ui/src/components/chat/message/parts/toolDiffUtils.ts", "packages/ui/src/components/chat/markdown/MarkdownLink.tsx"],
@@ -16,6 +47,7 @@
           "kind": "path",
           "title": "Tool rows and the answer of an agent turn render",
           "steps": [
+            {"do": "settings", "values": {"activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Chat agent turn"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -33,6 +65,7 @@
           "kind": "path",
           "title": "Clicking an Edit File row shows the edit as a diff",
           "steps": [
+            {"do": "settings", "values": {"activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Chat tool expand"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -428,6 +461,7 @@
           "kind": "path",
           "title": "Opening a Search Files row shows what it searched for and what it found",
           "steps": [
+            {"do": "settings", "values": {"activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Tools search"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -507,6 +541,7 @@
           "kind": "path",
           "title": "Open file diff on an opened Edit File row shows the file in Changes",
           "steps": [
+            {"do": "settings", "values": {"activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Tools open diff"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -523,6 +558,7 @@
           "kind": "path",
           "title": "Open file at first change on an opened Edit File row opens the file in Files scrolled to that line",
           "steps": [
+            {"do": "settings", "values": {"activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Tools open at change"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -540,6 +576,7 @@
           "kind": "path",
           "title": "The side-by-side switch on an opened Edit File row shows the edit in two columns and back in one",
           "steps": [
+            {"do": "settings", "values": {"activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Tools diff layout"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -649,6 +686,7 @@
             {"do": "session.create", "as": "s", "title": "Tools subagent"},
             {"do": "session.send", "session": "s", "prompt": "Ask a subagent about the TypeScript bump."},
             {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.turnLine"},
             {"do": "see", "on": "chat.toolRow", "text": "Verify TypeScript bump"},
             {"do": "see", "on": "chat.message", "text": "Bumped. Two errors came up", "count": 0, "timeout": 1},
             {"do": "click", "on": "chat.toolRow", "text": "Verify TypeScript bump"},
@@ -1094,7 +1132,7 @@
     {
       "id": "search",
       "name": "Searching the conversation",
-      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/search/ChatSearchBar.tsx", "packages/ui/src/components/chat/search/chatSearchHighlight.ts", "packages/ui/src/components/chat/column/useChatSearch.ts"],
+      "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/search/ChatSearchBar.tsx", "packages/ui/src/components/chat/search/chatSearchHighlight.ts", "packages/ui/src/components/chat/search/searchMatchNavigation.ts", "packages/ui/src/components/chat/column/useChatSearch.ts"],
       "what": "Cmd/Ctrl+F in a chat opens a search bar over it that finds words in this conversation and counts the matches; Escape closes it, and it never follows the user into another session.",
       "reach": "Click the transcript or the composer, press Cmd/Ctrl+F, type a word.",
       "proof": "The bar opens, its count reads 2 of 2 for a word in two messages, Escape closes it, and switching to another session closes it too.",
@@ -1123,6 +1161,102 @@
             {"do": "click", "on": "sidebar.row", "session": "other"},
             {"do": "see", "on": "chat.answer", "text": "Bumped. Two errors came up"},
             {"do": "gone", "on": "chat.search"}
+          ]
+        },
+        {
+          "id": "long-answer",
+          "kind": "path",
+          "title": "Each match in a reply many screens tall is brought on screen, one press per match",
+          "steps": [
+            {"do": "session.create", "as": "s", "title": "Chat search long answer"},
+            {"do": "session.send", "session": "s", "prompt": "Write the long migration plan."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.answer", "text": "Delete the old quokka table last"},
+            {"do": "press", "key": "f", "mods": ["mod"]},
+            {"do": "see", "on": "chat.search"},
+            {"do": "type", "text": "quokka"},
+            {"do": "see", "on": "chat.searchCount", "text": "4 of 4"},
+            {"do": "see", "on": "chat.message", "text": "Delete the old quokka table last", "inView": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.searchCount", "text": "1 of 4"},
+            {"do": "see", "on": "chat.message", "text": "The quokka table needs its foreign keys dropped first", "inView": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.searchCount", "text": "2 of 4"},
+            {"do": "see", "on": "chat.message", "text": "After that the quokka report reads from the new table", "inView": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.searchCount", "text": "3 of 4"},
+            {"do": "see", "on": "chat.message", "text": "The nightly job counts the quokka rows once more", "inView": true},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "see", "on": "chat.searchCount", "text": "2 of 4"},
+            {"do": "see", "on": "chat.message", "text": "After that the quokka report reads from the new table", "inView": true},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "see", "on": "chat.searchCount", "text": "1 of 4"},
+            {"do": "see", "on": "chat.message", "text": "The quokka table needs its foreign keys dropped first", "inView": true},
+            {"do": "press", "key": "Enter", "times": 3},
+            {"do": "see", "on": "chat.searchCount", "text": "4 of 4"},
+            {"do": "see", "on": "chat.message", "text": "Delete the old quokka table last", "inView": true},
+            {"do": "wheel", "on": "chat.scroller", "dy": -9000, "times": 2},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "see", "on": "chat.searchCount", "text": "3 of 4"},
+            {"do": "see", "on": "chat.message", "text": "The nightly job counts the quokka rows once more", "inView": true}
+          ]
+        },
+        {
+          "id": "reasoning",
+          "kind": "path",
+          "title": "A word in two thinking blocks far apart in one reply is reached in both directions",
+          "steps": [
+            {"do": "settings", "values": {"showReasoningTraces": true, "collapsibleThinkingBlocks": true}},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Chat", "exact": true, "timeout": 60},
+            {"do": "click", "on": "settings.checkbox", "item": "chat.message-search-reasoning"},
+            {"do": "see", "on": "settings.checkboxOn", "item": "chat.message-search-reasoning"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "session.create", "as": "s", "title": "Chat search reasoning"},
+            {"do": "session.send", "session": "s", "prompt": "Think the migration through first."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.answer", "text": "Delete the old quokka table last"},
+            {"do": "press", "key": "f", "mods": ["mod"]},
+            {"do": "see", "on": "chat.search"},
+            {"do": "type", "text": "wombat"},
+            {"do": "see", "on": "chat.searchCount", "text": "2 of 2"},
+            {"do": "see", "on": "chat.reasoningText", "text": "Only then does the wombat index go", "inView": true},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "see", "on": "chat.searchCount", "text": "1 of 2"},
+            {"do": "see", "on": "chat.reasoningText", "text": "The wombat index stays until the copy is done", "inView": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.searchCount", "text": "2 of 2"},
+            {"do": "see", "on": "chat.reasoningText", "text": "Only then does the wombat index go", "inView": true}
+          ]
+        },
+        {
+          "id": "reasoning-text",
+          "kind": "path",
+          "title": "With collapsible thinking off, a word in the thinking is reached the same way",
+          "steps": [
+            {"do": "settings", "values": {"showReasoningTraces": true, "collapsibleThinkingBlocks": false}},
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Chat", "exact": true, "timeout": 60},
+            {"do": "click", "on": "settings.checkbox", "item": "chat.message-search-reasoning"},
+            {"do": "see", "on": "settings.checkboxOn", "item": "chat.message-search-reasoning"},
+            {"do": "click", "on": "settings.close"},
+            {"do": "session.create", "as": "s", "title": "Chat search reasoning"},
+            {"do": "session.send", "session": "s", "prompt": "Think the migration through first."},
+            {"do": "open", "session": "s"},
+            {"do": "click", "on": "chat.answer", "text": "Delete the old quokka table last"},
+            {"do": "press", "key": "f", "mods": ["mod"]},
+            {"do": "see", "on": "chat.search"},
+            {"do": "type", "text": "wombat"},
+            {"do": "see", "on": "chat.searchCount", "text": "2 of 2"},
+            {"do": "see", "on": "chat.reasoningText", "text": "Only then does the wombat index go", "inView": true},
+            {"do": "press", "key": "Enter", "mods": ["shift"]},
+            {"do": "see", "on": "chat.searchCount", "text": "1 of 2"},
+            {"do": "see", "on": "chat.reasoningText", "text": "The wombat index stays until the copy is done", "inView": true},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.searchCount", "text": "2 of 2"},
+            {"do": "see", "on": "chat.reasoningText", "text": "Only then does the wombat index go", "inView": true}
           ]
         }
       ]
@@ -1386,9 +1520,9 @@
       "id": "activity",
       "name": "Collapsed activity",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/components/LiveTurnActivity.tsx", "packages/ui/src/components/chat/components/LiveActivityCollapse.tsx", "packages/ui/src/components/chat/components/useTurnFold.ts", "packages/ui/src/components/chat/lib/turns/timelineRows.ts", "packages/ui/src/components/sections/openchamber/ChatSettings.tsx"],
-      "what": "In Collapsed activity mode a finished turn hides its steps under an Activity header that opens and closes them; an opened turn stays open when the reader comes back to the session, and a search hit inside a closed turn opens it. Show notes hides only the tool rows: what the agent wrote between its steps stays in view, while it works and after.",
-      "reach": "Settings > Chat > Activity: Collapsed or Show notes, then open a session where the agent read, searched, edited and ran a command; Cmd/Ctrl+F searches the open chat.",
-      "proof": "The tool rows are hidden until Activity is clicked and hidden again on the second click; after visiting four other sessions Activity is still open; searching a step's text opens Activity and shows the step. In Show notes the agent's earlier lines show under a closed Activity and during a running turn, and the tool rows do not.",
+      "what": "In Collapsed activity mode a finished turn hides its steps under one line naming what it did, which opens and closes them; an opened turn stays open when the reader comes back to the session, and a search hit inside a closed turn opens it. Grouped shows the agent's text in order, with the calls between behind one line per phase.",
+      "reach": "Settings > Chat > Activity: Collapsed or Grouped, then open a session where the agent read, searched, edited and ran a command; Cmd/Ctrl+F searches the open chat.",
+      "proof": "The tool rows are hidden until Activity is clicked and hidden again on the second click; after visiting four other sessions Activity is still open; searching a step's text opens Activity and shows the step. In Grouped the agent's earlier lines show in order, during a running turn too, and a group's calls show once its line is opened.",
       "scenarios": [
         {
           "id": "toggle",
@@ -1404,47 +1538,43 @@
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
             {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
-            {"do": "see", "on": "chat.fold", "text": "Activity"},
+            {"do": "see", "on": "chat.fold"},
             {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true, "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.fold", "text": "Activity"},
+            {"do": "click", "on": "chat.fold"},
             {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true},
             {"do": "see", "on": "chat.tool", "text": "Shell", "exact": true},
-            {"do": "click", "on": "chat.fold", "text": "Activity"},
+            {"do": "click", "on": "chat.fold"},
             {"do": "gone", "on": "chat.tool", "text": "Read File", "exact": true}
           ]
         },
         {
           "id": "with-text",
           "kind": "path",
-          "title": "Show notes keeps what the agent wrote between its steps in view and the tool rows under Activity",
+          "title": "Grouped keeps what the agent wrote between its steps in view",
           "steps": [
             {"do": "open"},
             {"do": "click", "on": "sidebar.settings"},
             {"do": "click", "on": "dialog.button", "text": "Chat", "exact": true},
-            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "Show notes"},
-            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "Show notes"},
+            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "Grouped"},
+            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "Grouped"},
             {"do": "session.create", "as": "s", "title": "Chat activity with text"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
             {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
-            {"do": "see", "on": "chat.fold", "text": "Activity"},
             {"do": "see", "on": "chat.paragraph", "text": "Перечитаю хелпер", "inView": true},
-            {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true, "count": 0, "timeout": 1},
-            {"do": "click", "on": "chat.fold", "text": "Activity"},
-            {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true},
             {"do": "see", "on": "chat.message", "text": "Перечитаю хелпер"}
           ]
         },
         {
           "id": "with-text-live",
           "kind": "path",
-          "title": "Show notes keeps the agent's earlier text in view while it is still working",
+          "title": "Grouped keeps the agent's earlier text in view while it is still working",
           "steps": [
             {"do": "open"},
             {"do": "click", "on": "sidebar.settings"},
             {"do": "click", "on": "dialog.button", "text": "Chat", "exact": true},
-            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "Show notes"},
-            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "Show notes"},
+            {"do": "click", "on": "settings.chip", "item": "chat.activity-default", "text": "Grouped"},
+            {"do": "see", "on": "settings.chipOn", "item": "chat.activity-default", "text": "Grouped"},
             {"do": "session.create", "as": "s", "title": "Chat activity with text live"},
             {"do": "open", "session": "s"},
             {"do": "session.send", "session": "s", "prompt": "List the files", "model": "perf/agent-20tools-wait3000ms-300cps", "wait": false},
@@ -1474,7 +1604,7 @@
             {"do": "session.send", "session": "o4", "prompt": "Bump TypeScript to 5.7 and fix whatever breaks."},
             {"do": "open", "session": "s"},
             {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
-            {"do": "click", "on": "chat.fold", "text": "Activity"},
+            {"do": "click", "on": "chat.fold"},
             {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true},
             {"do": "click", "on": "sidebar.row", "session": "o1"},
             {"do": "see", "on": "chat.userBubble", "text": "Чому білд у CI падає"},
@@ -1486,7 +1616,7 @@
             {"do": "see", "on": "chat.userBubble", "text": "Bump TypeScript to 5"},
             {"do": "click", "on": "sidebar.row", "session": "s"},
             {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
-            {"do": "see", "on": "chat.foldOpen", "text": "Activity"},
+            {"do": "see", "on": "chat.foldOpen"},
             {"do": "see", "on": "chat.tool", "text": "Read File", "exact": true}
           ]
         },
@@ -1509,7 +1639,7 @@
             {"do": "press", "key": "f", "mods": ["mod"]},
             {"do": "see", "on": "chat.search"},
             {"do": "type", "text": "Перечитаю хелпер"},
-            {"do": "see", "on": "chat.foldOpen", "text": "Activity"},
+            {"do": "see", "on": "chat.foldOpen"},
             {"do": "see", "on": "chat.message", "text": "Перечитаю хелпер", "inView": true}
           ]
         }
@@ -1652,7 +1782,7 @@
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
             {"do": "click", "on": "chat.changedFile", "path": "src/api/retry.ts"},
-            {"do": "see", "on": "panel.surfaceOn", "surface": "diff"},
+            {"do": "see", "on": "panel.surfaceOn", "surface": "git"},
             {"do": "see", "on": "diff.added", "text": "isAbortError"}
           ]
         },
@@ -1701,7 +1831,7 @@
       "id": "selection",
       "name": "Selecting text in an answer",
       "sources": ["packages/ui/src/components/chat/ChatContainer.tsx", "packages/ui/src/components/chat/column/ChatViewport.tsx", "packages/ui/src/components/chat/MessageList.tsx", "packages/ui/src/components/chat/ChatMessage.tsx", "packages/ui/src/components/chat/message/MessageBody.tsx", "packages/ui/src/components/chat/timeline/", "packages/ui/src/components/chat/message/TextSelectionMenu.tsx", "packages/ui/src/components/chat/message/selectionMenuPosition.ts", "packages/ui/src/components/chat/message/parts/ShownToolCard.tsx"],
-      "what": "Selecting text in an answer opens a menu: Comment, By the way, Add to notes. So does text kept in view under Activity in Show notes mode.",
+      "what": "Selecting text in an answer opens a menu: Comment, By the way, Add to notes. So does text between steps in Grouped mode.",
       "reach": "Drag across an answer's text.",
       "proof": "The menu shows over the selection.",
       "scenarios": [
@@ -1721,9 +1851,9 @@
         {
           "id": "kept-text",
           "kind": "path",
-          "title": "Text kept in view under Activity has the selection menu, after the turn and while it runs",
+          "title": "Text between steps in Grouped mode has the selection menu, after the turn and while it runs",
           "steps": [
-            {"do": "settings", "values": {"activityRenderMode": "text"}},
+            {"do": "settings", "values": {"activityRenderMode": "grouped"}},
             {"do": "session.create", "as": "s", "title": "Chat selection kept text"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},
@@ -1753,7 +1883,7 @@
           "kind": "path",
           "title": "Thinking shows as folded blocks with reasoning traces on and disappears with them off",
           "steps": [
-            {"do": "settings", "values": {"showReasoningTraces": true}},
+            {"do": "settings", "values": {"showReasoningTraces": true, "activityRenderMode": "summary"}},
             {"do": "session.create", "as": "s", "title": "Chat reasoning"},
             {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
             {"do": "open", "session": "s"},

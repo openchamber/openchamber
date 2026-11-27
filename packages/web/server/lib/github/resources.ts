@@ -7,6 +7,7 @@ import {
   mapChangeRequest,
   mapCI,
   mapComment,
+  mapCommitStatus,
   mapFile,
   mapIssue,
   mapProject,
@@ -15,10 +16,8 @@ import {
   requireGitHubCheckRuns,
   requireGitHubComment,
   requireGitHubIssue,
-  requireGitHubPullFile,
   requireGitHubPullRequest,
   requireGitHubRepoNetwork,
-  requireGitHubReviewComment,
   requireGitHubStatuses,
   requireGitHubWorkflowJobs,
   requireProviderArray,
@@ -37,17 +36,20 @@ import {
   searchGitHubReferencesAcross,
 } from './reference-search.js';
 import { createContextCache } from './context-cache.js';
+import { repositoryOfApiUrl } from './api-host.js';
+import { readAssignablePeople } from './people.js';
 import { fetchPullStack } from './pull-stack.js';
 import { referencesField } from './references.js';
 import { parseReferenceLink } from './reference-links.js';
 import { fetchReviewState } from './review-draft.js';
+import { readPullContextParts } from './pull-context-reads.js';
+import type { ContextReviewFields } from './review-summaries.js';
 import type { Octokit, RestEndpointMethodTypes } from '@octokit/rest';
 import type { ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
 import type { ContributorProvenanceRead } from '../git/contributor-provenance-storage.js';
 import type { AcrossContext, AcrossGroup, DiscoveryRepository, GitHubEnvelope } from './contracts.js';
 import type { CI } from './mappers.js';
 import { retainedEntry } from './contracts.js';
-
 type ResourceMethods = ProviderImplementation['resources'];
 type ResourceInput<Key extends keyof ResourceMethods> = Parameters<NonNullable<ResourceMethods[Key]>>[0];
 type Rest = RestEndpointMethodTypes;
@@ -55,6 +57,7 @@ type Pull = Rest['pulls']['get']['response']['data'];
 type ListedPull = Rest['pulls']['list']['response']['data'][number];
 type Issue = Rest['issues']['get']['response']['data'];
 type CheckRun = Rest['checks']['listForRef']['response']['data']['check_runs'][number];
+type CommitStatus = Rest['repos']['getCombinedStatusForRef']['response']['data']['statuses'][number];
 type Job = Rest['actions']['listJobsForWorkflowRun']['response']['data']['jobs'][number];
 type Annotation = Rest['checks']['listAnnotations']['response']['data'][number];
 type Identity = Pick<ReturnType<typeof mapProject>, 'provider' | 'instance'>;
@@ -86,7 +89,7 @@ export interface ContextScope {
   primaryRemote: string;
   number: number | undefined;
 }
-export interface PullContext {
+export interface PullContext extends ContextReviewFields {
   identity: Identity;
   fetchedAt: number;
   project: ReturnType<typeof mapProject>;
@@ -133,7 +136,6 @@ const errorCodeStartsWith = (code: GitHubEnvelope['code'], prefix: string) => {
   return Boolean(method.call(code, prefix));
 };
 
-
 const GITHUB_COM = 'github.com';
 const PULL_LIST_STATES = new Set(['open', 'closed', 'merged', 'all']);
 const PULL_LIST_PEOPLE = new Set(['any', 'assigned', 'created', 'reviewRequested']);
@@ -147,7 +149,6 @@ export const responseError = <Body extends { error: unknown }>(status: number, b
 const sourceControlError = (message: string, code: string, status: number) => Object.assign(new Error(message), { code, status });
 
 const notInProject = () => responseError(400, { error: 'Repository is not part of this project' });
-
 const rateLimited = () => Object.assign(new Error('GitHub rate limited'), { status: 503 });
 
 const sameRepository = (left: Pick<DiscoveryRepository, 'owner' | 'repo'>, right: Pick<DiscoveryRepository, 'owner' | 'repo'>) => left.owner.toLowerCase() === right.owner.toLowerCase()
@@ -157,8 +158,6 @@ export const gitHubRefusalMessage = (error: GitHubEnvelope['data']) => {
   const message = errorField(errorField(errorField(error, 'response'), 'data'), 'message');
   return isProviderString(message) && message.trim() ? message : errorField(error, 'message');
 };
-
-
 
 export function createGitHubResources({
   load,
@@ -211,25 +210,18 @@ export function createGitHubResources({
   };
 
   const readChecks = async (octokit: Octokit, repo: DiscoveryRepository, sha: string, { runs: keepRuns = false } = {}) => {
-    const { checks: { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } } = await load();
-    let summary: ReturnType<GitHubResourceModules['checks']['summarizeCheckRuns']> | ReturnType<GitHubResourceModules['checks']['summarizeCombinedStatuses']> | null = null;
-    let checkRuns: CheckRun[] = [];
-    try {
-      const response = await octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref: sha, per_page: 100 });
-      checkRuns = dedupeCheckRuns(requireGitHubCheckRuns(response?.data?.check_runs));
-      if (checkRuns.length > 0) summary = summarizeCheckRuns(checkRuns);
-    } catch {
-      checkRuns = [];
-    }
-    if (!summary) {
-      try {
-        const combined = await octokit.rest.repos.getCombinedStatusForRef({ owner: repo.owner, repo: repo.repo, ref: sha });
-        summary = summarizeCombinedStatuses(requireGitHubStatuses(combined?.data?.statuses));
-      } catch {
-        summary = null;
-      }
-    }
-    return { summary, checkRuns: keepRuns && summary && checkRuns.length > 0 ? checkRuns : [] };
+    const { checks: { dedupeCheckRuns, summarizeCheckRead } } = await load();
+    const ref = { owner: repo.owner, repo: repo.repo, ref: sha };
+    const [checkRuns, statuses]: [CheckRun[] | null, CommitStatus[] | null] = await Promise.all([
+      octokit.rest.checks.listForRef({ ...ref, per_page: 100 })
+        .then((response: Rest['checks']['listForRef']['response']): CheckRun[] => dedupeCheckRuns(requireGitHubCheckRuns(response?.data?.check_runs)))
+        .catch(() => null),
+      octokit.rest.repos.getCombinedStatusForRef({ ...ref, per_page: 100 })
+        .then((combined: Rest['repos']['getCombinedStatusForRef']['response']) => requireGitHubStatuses(combined?.data?.statuses))
+        .catch(() => null),
+    ]);
+    const summary = summarizeCheckRead(checkRuns, statuses);
+    return { summary, checkRuns: keepRuns ? checkRuns ?? [] : [], statuses: keepRuns ? statuses ?? [] : [] };
   };
 
   const readCheckDetails = async (octokit: Octokit, repo: DiscoveryRepository, checkRuns: CheckRun[]) => {
@@ -485,38 +477,33 @@ export function createGitHubResources({
       const route = { owner: repo.owner, repo: repo.repo };
       const projectDTO = mapProject(repo, identity);
       const prData = requireGitHubPullRequest((await octokit.rest.pulls.get({ ...route, pull_number: number }))?.data, 'GitHub returned an invalid pull request');
-      const issueComments = requireProviderArray<Rest['issues']['listComments']['response']['data'][number]>(
-        (await octokit.rest.issues.listComments({ ...route, issue_number: number, per_page: 100 }))?.data,
-        'GitHub returned an invalid issue comment list',
-      ).map((comment) => mapComment(requireGitHubComment(comment, 'GitHub returned an invalid issue comment'), identity));
-      const reviewComments = requireProviderArray(
-        (await octokit.rest.pulls.listReviewComments({ ...route, pull_number: number, per_page: 100 }))?.data,
-        'GitHub returned an invalid review comment list',
-      ).map((comment) => mapReviewComment(requireGitHubReviewComment(comment), identity));
-      const files = requireProviderArray<Rest['pulls']['listFiles']['response']['data'][number]>(
-        (await octokit.rest.pulls.listFiles({ ...route, pull_number: number, per_page: 100 }))?.data,
-        'GitHub returned an invalid pull request file list',
-      ).map((file) => mapFile(requireGitHubPullFile(file)));
-
-      let ci: CI | null = null;
-      const sha = prData.head?.sha;
-      if (sha) {
-        const { summary, checkRuns } = await readChecks(octokit, repo, sha, { runs: true });
-        if (summary && checkRuns.length > 0) {
-          const details = includeCIDetails ? await readCheckDetails(octokit, repo, checkRuns) : () => ({});
-          ci = mapCI(summary, checkRuns.map((run) => mapCheckRun(run, details(run), identity)));
-        } else {
-          ci = mapCI(summary);
-        }
-      }
-
-      let diff;
-      if (includeDiff) {
+      const readDiff = async () => {
+        if (!includeDiff) return undefined;
         const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
           ...route, pull_number: number, headers: { accept: 'application/vnd.github.v3.diff' },
         });
         if (!isProviderString(response?.data)) throw invalidProviderPayload('GitHub returned an invalid pull request diff');
-        diff = response.data;
+        return response.data;
+      };
+      const sha = prData.head?.sha;
+      const { issueComments, reviewComments, files, checks, diff, reviewFields } = await readPullContextParts({
+        octokit, route, number, identity,
+        requestedReviewers: prData.requested_reviewers,
+        readChecks: async () => (sha ? readChecks(octokit, repo, sha, { runs: true }) : null),
+        readDiff,
+      });
+      let ci: CI | null = null;
+      if (checks) {
+        const { summary, checkRuns, statuses } = checks;
+        if (summary && checkRuns.length + statuses.length > 0) {
+          const details = includeCIDetails ? await readCheckDetails(octokit, repo, checkRuns) : () => ({});
+          ci = mapCI(summary, [
+            ...checkRuns.map((run) => mapCheckRun(run, details(run), identity)),
+            ...statuses.map((status) => mapCommitStatus(status, identity)),
+          ]);
+        } else {
+          ci = mapCI(summary);
+        }
       }
 
       const result: PullContext = {
@@ -526,6 +513,7 @@ export function createGitHubResources({
         changeRequest: mapChangeRequest(prData, projectDTO, identity),
         issueComments,
         reviewComments,
+        ...reviewFields,
         files,
         ci,
       };
@@ -560,8 +548,7 @@ export function createGitHubResources({
           if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
             throw invalidProviderPayload('GitHub returned an invalid issue search item');
           }
-          const match = (isProviderString(item.repository_url) ? item.repository_url : '').match(/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/);
-          const repoRef = match ? repos.find((entry) => entry.owner === match[1] && entry.repo === match[2]) : null;
+          const repoRef = isProviderString(item.repository_url) ? repositoryOfApiUrl(repos, item.repository_url, identity.instance) : null;
           if (!repoRef) throw invalidProviderPayload('GitHub issue search returned an invalid repository URL');
           try {
             const issue = await octokit.rest.issues.get({ owner: repoRef.owner, repo: repoRef.repo, issue_number: item.number });
@@ -684,17 +671,11 @@ export function createGitHubResources({
       });
     },
 
-    listReviewerCandidates: async ({ session, directory, project, remote }: ResourceInput<'listReviewerCandidates'>) => {
+    listReviewerCandidates: async ({ session, directory, project, remote, role }: ResourceInput<'listReviewerCandidates'>) => {
       const { octokit } = accountOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) throw notInProject();
-      const response = await octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: 100 });
-      return requireProviderArray<Rest['issues']['listAssignees']['response']['data'][number]>(response?.data, 'GitHub returned an invalid user list').flatMap((user) => {
-        if (!isProviderString(user?.login) || !user.login) return [];
-        return [isProviderString(user.avatar_url) && user.avatar_url
-          ? { id: user.login, login: user.login, avatarUrl: user.avatar_url }
-          : { id: user.login, login: user.login }];
-      });
+      return readAssignablePeople(octokit, repo, role === 'assignee');
     },
 
     references: ({ session, context, directory, remote, kind, state, people, query, labels = [], cursor }: ResourceInput<'references'> & { labels?: string[] }) => pickerRead(async () => {

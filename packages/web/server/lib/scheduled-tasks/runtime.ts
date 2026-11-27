@@ -1,9 +1,10 @@
 import { OpenCode } from '@opencode/client';
 import { DateTime } from 'luxon';
-import { CronExpressionParser } from 'cron-parser';
+import { TASK_DUE_SLACK_MS, computeNextRunAt, sameSchedule, unstartedRunAt } from './next-run.js';
 import { expandSnippets } from '../snippets/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
-import { discoverLoops } from './loops.js';
+import { createFolderWait } from './folder-wait.js';
+import { readProjectLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { createExistingSessionTasks } from './existing-session.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
@@ -41,6 +42,8 @@ export interface ScheduledTasksDependencies extends Omit<ExistingSessionDependen
   createTaskWorktree?: ScheduledWorktreeBridge['create'];
   removeTaskWorktree?: ScheduledWorktreeBridge['remove'] | null;
   isGitRepository?: ScheduledWorktreeBridge['isGitRepository'] | null;
+  isFolderUnreachable?: (directory: string) => Promise<boolean>;
+  folderRecheckMs?: number;
   logger?: Pick<Console, 'warn' | 'info'>;
   maxGlobalConcurrency?: number;
   maxProjectConcurrency?: number;
@@ -96,21 +99,12 @@ type ScheduledSessionModel = Mutable<NonNullable<ScheduledSessionInput['model']>
 const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
 const hasGoal = (value: unknown): value is { goal?: unknown } => value !== null && value !== undefined;
 const hasStatus = (value: unknown): value is { status?: unknown } => value !== null && value !== undefined;
-const isScheduleObject = (value: unknown): value is object => value !== null && typeof value === 'object';
-
-export type ScheduleInput = { timezone?: string } & (
-  | { kind: 'daily'; times?: string[]; time?: string }
-  | { kind: 'weekly'; times?: string[]; time?: string; weekdays?: number[] }
-  | { kind: 'once'; date: string; time: string }
-  | { kind: 'cron'; cron: string }
-);
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
 const DEFAULT_MAX_RUN_MS = 30 * 60 * 1000;
 const JITTER_MAX_MS = 2_000;
 const TASK_TITLE_MAX_LENGTH = 120;
-const TASK_DUE_SLACK_MS = 5_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const readDirectoryIdentity = async (directory: string) => {
   try {
@@ -123,52 +117,6 @@ const readDirectoryIdentity = async (directory: string) => {
 };
 
 const buildTaskKey = (projectID: string, taskID: string) => `${projectID}:${taskID}`;
-
-const parseTimeParts = (time: string | undefined) => {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time ?? '');
-  if (!match) {
-    return null;
-  }
-  return {
-    hour: Number(match[1]),
-    minute: Number(match[2]),
-  };
-};
-
-const applyTimeToDate = (baseDateTime: DateTime, time: string | undefined) => {
-  const parsed = parseTimeParts(time);
-  if (!parsed) {
-    return null;
-  }
-  return baseDateTime.set({
-    hour: parsed.hour,
-    minute: parsed.minute,
-    second: 0,
-    millisecond: 0,
-  });
-};
-
-const resolveScheduleTimes = (schedule: { times?: string[]; time?: string }) => {
-  const times: string[] = [];
-  if (Array.isArray(schedule?.times)) {
-    for (const candidate of schedule.times) {
-      if (isString(candidate) && /^([01]\d|2[0-3]):([0-5]\d)$/.test(candidate)) {
-        times.push(candidate);
-      }
-    }
-  }
-  if (times.length === 0 && isString(schedule?.time) && /^([01]\d|2[0-3]):([0-5]\d)$/.test(schedule.time)) {
-    times.push(schedule.time);
-  }
-  return Array.from(new Set(times)).sort((a, b) => a.localeCompare(b));
-};
-
-const weekdayAsZeroBased = (dateTime: DateTime | null) => {
-  if (!dateTime) {
-    return null;
-  }
-  return dateTime.weekday % 7;
-};
 
 const safeErrorMessage = (cause: unknown, maxLength = 2_000) => {
   const raw = cause instanceof Error
@@ -227,114 +175,6 @@ export const expandCommandGoalObjective = (template: string | undefined, argumen
   }
 
   return rawArguments ? `${template}\n\n${rawArguments}` : template;
-};
-
-export const computeNextRunAt = (task: { enabled: boolean; schedule?: ScheduleInput } | null | undefined, nowMs = Date.now()) => {
-  if (!task?.enabled) {
-    return null;
-  }
-
-  const schedule = task.schedule;
-  if (!schedule || !isScheduleObject(schedule)) {
-    return null;
-  }
-
-  const zone = isString(schedule.timezone) && schedule.timezone.trim().length > 0
-    ? schedule.timezone.trim()
-    : DateTime.local().zoneName;
-
-  const now = DateTime.fromMillis(nowMs, { zone });
-  if (!now.isValid) {
-    return null;
-  }
-
-  if (schedule.kind === 'daily') {
-    const times = resolveScheduleTimes(schedule);
-    if (times.length === 0) {
-      return null;
-    }
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-
-    for (const time of times) {
-      const candidateToday = applyTimeToDate(now, time);
-      if (!candidateToday || !candidateToday.isValid) {
-        continue;
-      }
-      if (candidateToday > minAllowed) {
-        return candidateToday.toMillis();
-      }
-    }
-
-    const tomorrow = now.plus({ days: 1 });
-    const firstTomorrow = applyTimeToDate(tomorrow, times[0]);
-    return firstTomorrow?.isValid ? firstTomorrow.toMillis() : null;
-  }
-
-  if (schedule.kind === 'weekly') {
-    if (!Array.isArray(schedule.weekdays) || schedule.weekdays.length === 0) {
-      return null;
-    }
-    const times = resolveScheduleTimes(schedule);
-    if (times.length === 0) {
-      return null;
-    }
-    const weekdaysSet = new Set(schedule.weekdays);
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-
-    for (let dayOffset = 0; dayOffset <= 14; dayOffset += 1) {
-      const dayCandidate = now.plus({ days: dayOffset });
-      const zeroBasedWeekday = weekdayAsZeroBased(dayCandidate);
-      if (zeroBasedWeekday === null || !weekdaysSet.has(zeroBasedWeekday)) {
-        continue;
-      }
-      for (const time of times) {
-        const withTime = applyTimeToDate(dayCandidate, time);
-        if (!withTime || !withTime.isValid) {
-          continue;
-        }
-        if (withTime > minAllowed) {
-          return withTime.toMillis();
-        }
-      }
-    }
-    return null;
-  }
-
-  if (schedule.kind === 'once') {
-    if (!isString(schedule.date) || !isString(schedule.time)) {
-      return null;
-    }
-
-    const parsed = DateTime.fromFormat(
-      `${schedule.date} ${schedule.time}`,
-      'yyyy-LL-dd HH:mm',
-      { zone },
-    );
-    if (!parsed.isValid) {
-      return null;
-    }
-
-    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-    if (parsed <= minAllowed) {
-      return null;
-    }
-
-    return parsed.toMillis();
-  }
-
-  if (schedule.kind === 'cron') {
-    try {
-      const iterator = CronExpressionParser.parse(schedule.cron, {
-        tz: zone,
-        currentDate: new Date(nowMs),
-      });
-      return iterator.next().getTime();
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
 };
 
 export const formatScheduledSessionTitle = (task: { name?: string; schedule?: { timezone?: string } } | null | undefined, nowMs = Date.now()) => {
@@ -487,7 +327,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     }
 
     const delayBase = Math.max(0, Math.round(nextRunAt - Date.now()));
-    const jitter = Math.floor(Math.random() * (JITTER_MAX_MS + 1));
+    const jitter = delayBase === 0 ? 0 : Math.floor(Math.random() * (JITTER_MAX_MS + 1));
     const delay = delayBase + jitter;
     const boundedDelay = Math.min(delay, MAX_TIMER_DELAY_MS);
 
@@ -521,19 +361,30 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     taskMap.set(nextTask.id, nextTask);
   };
 
-  const syncTaskSchedule = async (projectID: string, task: ScheduledTask) => {
+  const folderWait = createFolderWait({
+    store: projectConfigRuntime,
+    dueMsOf: (task) => computeNextRunAt(task, 0),
+    folderOf: async (projectID) => (isChatsScope(projectID) ? null : ensureProjectPath(projectID)),
+    isUnreachable: deps.isFolderUnreachable,
+    recheckMs: deps.folderRecheckMs,
+  });
+
+  const syncTaskSchedule = async (projectID: string, task: ScheduledTask, live: boolean) => {
     if (!task) {
       return;
     }
-    const nextRunAt = computeNextRunAt(task, Date.now());
+    const nextRunAt = (live ? unstartedRunAt(task) : null) ?? computeNextRunAt(task, Date.now());
     const statePatch = {
+      ...folderWait.staleWaitPatch(task),
       nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
       updatedAt: Date.now(),
     };
     const result = await projectConfigRuntime.updateScheduledTaskState(projectID, task.id, statePatch);
     if (result.task) {
       updateInMemoryTask(projectID, result.task);
-      if (result.task.enabled && Number.isFinite(result.task.state?.nextRunAt)) {
+      const waitingFor = folderWait.pendingFor(result.task);
+      if (waitingFor !== null) armFolderWait(projectID, task.id, waitingFor, 0);
+      else if (result.task.enabled && Number.isFinite(result.task.state?.nextRunAt)) {
         scheduleTask(projectID, result.task.id, result.task.state.nextRunAt);
       }
     }
@@ -572,18 +423,19 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     await ensureProjectPath(projectID);
     const projectPath = projectPathByID.get(projectID) || null;
 
+    const loops = projectPath && !isChatsScope(projectID) ? await readProjectLoops(projectPath, logger) : null;
     let tasks;
-    if (projectPath && !isChatsScope(projectID)) {
-      const loops = await discoverLoops(projectPath);
+    if (loops) {
       tasks = await projectConfigRuntime.reconcileLoopTasks(projectID, loops);
     } else {
       tasks = await projectConfigRuntime.listScheduledTasks(projectID);
     }
 
+    const live = tasksByProject.has(projectID);
     setProjectTasks(projectID, tasks);
 
     for (const task of tasks) {
-      await syncTaskSchedule(projectID, task);
+      await syncTaskSchedule(projectID, task, live);
     }
 
     return tasks;
@@ -1022,10 +874,71 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
     scheduleFutureRun(projectID, taskID, computedNext, base);
   };
 
+  const consumeOneTimeTask = async (projectID: string, task: ScheduledTask) => {
+    try {
+      const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, { ...task, enabled: false });
+      updateInMemoryTask(projectID, consumed.task);
+      return consumed.task || task;
+    } catch (consumeError) {
+      logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
+        projectID,
+        taskID: task.id,
+        error: safeErrorMessage(consumeError),
+      });
+      return task;
+    }
+  };
+
+  const armFolderWait = (projectID: string, taskID: string, due: number, delayMs = folderWait.recheckMs) => {
+    if (!started) return;
+    const taskKey = buildTaskKey(projectID, taskID);
+    clearTimerForKey(taskKey);
+    timersByTaskKey.set(taskKey, setTimeout(async () => {
+      const task = tasksByProject.get(projectID)?.get(taskID);
+      if (!task || folderWait.pendingFor(task) !== due) return;
+      const offline = await folderWait.offlineFolder(projectID);
+      const current = tasksByProject.get(projectID)?.get(taskID);
+      if (!current || folderWait.pendingFor(current) !== due) return;
+      if (offline || !canRunTask(projectID)) {
+        armFolderWait(projectID, taskID, due);
+        return;
+      }
+      queueTaskRun(projectID, taskID, 'scheduled', due);
+      pumpQueue();
+    }, delayMs));
+  };
+
+  const waitForFolder = async (projectID: string, task: ScheduledTask, due: number, claimed = false): Promise<ScheduledTaskRunResult> => {
+    const waited = await folderWait.wait(projectID, task, due, { claimed });
+    if (!waited.task || !waited.updated) return { ok: false, skipped: true };
+    updateInMemoryTask(projectID, waited.task);
+    armFolderWait(projectID, task.id, due);
+    emitTaskRunEvent?.({ projectID, taskID: task.id, ranAt: Date.now(), status: 'queued' });
+    return { ok: false, error: waited.task.state.lastError, statusCode: 503, task: waited.task };
+  };
+
   const runTask = async (projectID: string, taskID: string, reason: RunReason, scheduledFor?: number): Promise<ScheduledTaskRunResult> => {
+    const task = tasksByProject.get(projectID)?.get(taskID);
+    if (!task || runningTaskKeys.has(buildTaskKey(projectID, taskID))) return dispatchTask(projectID, taskID, reason, scheduledFor);
+    const pending = folderWait.pendingFor(task);
+    if (reason === 'manual' && pending === null) return dispatchTask(projectID, taskID, reason);
+    const due = pending ?? scheduledFor;
+    if (task.schedule.kind === 'once' && isFiniteNumber(due) && await folderWait.offlineFolder(projectID)) {
+      return waitForFolder(projectID, task, due);
+    }
+    const current = tasksByProject.get(projectID)?.get(taskID);
+    if (task.schedule.kind === 'once' && (!current || !sameSchedule(current, task))) return { ok: false, skipped: true };
+    return dispatchTask(projectID, taskID, 'scheduled', due);
+  };
+
+  const dispatchTask = async (projectID: string, taskID: string, reason: RunReason, scheduledFor?: number): Promise<ScheduledTaskRunResult> => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
     if (!task || (reason !== 'manual' && !task.enabled)) {
+      return { ok: false, skipped: true };
+    }
+
+    if (reason === 'scheduled' && task.schedule.kind === 'once' && isFiniteNumber(scheduledFor) && computeNextRunAt(task, 0) !== scheduledFor) {
       return { ok: false, skipped: true };
     }
 
@@ -1034,17 +947,11 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       const nextRunAt = computeNextRunAt(task, Math.max(Date.now(), (scheduledFor ?? 0) + 1));
       const result = await existingSessionTasks.run(projectID, task, reason, scheduledFor, nextRunAt);
       if (reason === 'scheduled') {
+        if (task.schedule.kind === 'once' && isFiniteNumber(scheduledFor) && !result.ok && !result.skipped && !result.queued && await folderWait.offlineFolder(projectID)) {
+          return waitForFolder(projectID, task, scheduledFor, true);
+        }
         if (task.schedule.kind === 'once' && result.task && !result.skipped) {
-          try {
-            const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, { ...result.task, enabled: false });
-            updateInMemoryTask(projectID, consumed.task);
-          } catch (consumeError) {
-            logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
-              projectID,
-              taskID,
-              error: safeErrorMessage(consumeError),
-            });
-          }
+          await consumeOneTimeTask(projectID, result.task);
         } else scheduleFutureRun(projectID, taskID, nextRunAt);
       }
       return result;
@@ -1072,6 +979,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
           lastScheduledFor: Math.round(scheduledFor),
           lastRunAt: runStartedAt,
           lastStatus: 'running',
+          waitingForFolder: undefined,
           lastError: undefined,
           lastSessionId: undefined,
           updatedAt: runStartedAt,
@@ -1080,6 +988,9 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
 
         const canClaimOccurrence = (candidate: ScheduledTask) => {
           if (!candidate?.enabled) {
+            return false;
+          }
+          if (task.schedule.kind === 'once' && !sameSchedule(candidate, task)) {
             return false;
           }
           const lastScheduledFor = candidate.state?.lastScheduledFor;
@@ -1232,7 +1143,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       };
 
       try {
-        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
+        const runPromise = runTaskWithWatchdog(projectID, tasksByProject.get(projectID)?.get(taskID) || task, reason, recordCreatedSession);
         let timeoutID: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutID = setTimeout(() => {
@@ -1254,6 +1165,9 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
           { projectID, taskID, status, reason, sessionID, durationMs }
         );
       } catch (error) {
+        if (reason === 'scheduled' && task.schedule.kind === 'once' && isFiniteNumber(scheduledFor) && !createdSessionID && await folderWait.offlineFolder(projectID)) {
+          return await waitForFolder(projectID, task, scheduledFor, true);
+        }
         status = 'error';
         errorMessage = safeErrorMessage(error);
         logger.warn?.('[ScheduledTasks] run failed', {
@@ -1272,20 +1186,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       let latestTask = (tasksByProject.get(projectID)?.get(taskID)) || task;
       const shouldConsumeOneTimeTask = latestTask?.schedule?.kind === 'once' && reason === 'scheduled';
       if (shouldConsumeOneTimeTask && latestTask?.enabled) {
-        try {
-          const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, {
-            ...latestTask,
-            enabled: false,
-          });
-          latestTask = consumed.task || latestTask;
-          updateInMemoryTask(projectID, latestTask);
-        } catch (consumeError) {
-          logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
-            projectID,
-            taskID,
-            error: safeErrorMessage(consumeError),
-          });
-        }
+        latestTask = await consumeOneTimeTask(projectID, latestTask);
       }
 
       const nextRunAt = computeNextRunAt(latestTask, finishedAt);
@@ -1522,12 +1423,12 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
       }
     }
 
-    const runningCount = runningTaskKeys.size;
+    const runningCount = runningTaskKeys.size + (existingSessionTasks?.pendingAdmissions() ?? 0);
     return {
       hasEnabledScheduledTasks: enabledCount > 0,
       hasRunningScheduledTasks: runningCount > 0,
       enabledScheduledTasksCount: enabledCount,
-      runningScheduledTasksCount: runningCount,
+      runningScheduledTasksCount: runningCount, queuedScheduledTasksCount: queuedTaskKeys.size,
     };
   };
 

@@ -120,6 +120,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 | Step | Does |
 |---|---|
 | `session.create` `as`, `title` | Creates a session in the project; `as` names the variable holding its id |
+| `session.seedMetadata` `session`, `patch` | Writes synthetic metadata through the stand's session API. `session` must name a session created in this scenario. Use for preconditions such as a lead's already-written digest. |
 | `session.send` `session`, `prompt`, `model`, `wait`, `goal` | Sends a prompt as another client would; waits for the answer unless `wait` is false; `goal` sends it as a goal the agent keeps working toward |
 | `session.idle`, `session.busy` `session` | Waits for the session's status |
 | `fixture.request` `session`, `prompt` | Waits until the fixture has an active model request for this session whose latest user message contains `prompt` |
@@ -178,6 +179,27 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 - Steps act as a user does: real pointer and keys at element centres, the URL, files on disk, other clients through the CLI. Stores are not set from the page.
 
 ## Decisions
+
+### Why the stand has no network and not only fixture models
+
+OpenCode always offers its own hosted provider, and a scenario once sent its
+text to Big Pickle while the catalog reloaded. Choosing a fixture model in each
+scenario cannot prevent that, so nothing a stand starts can leave the machine.
+`network-guard.cjs` is preloaded into every Node and Bun process, refuses each
+outside connection and records a request to a model; the stand does not start
+until the OpenCode server has loaded it. Dead proxies cover native clients that
+honor them. On macOS `sandbox-exec` also refuses every way out for the server,
+Vite, the CLI and Chrome, which runs without its own sandbox there because
+macOS does not nest them. On Linux, CI included, `namespace.mjs` plays the whole
+run in a network namespace that holds only loopback, entered without root or
+through passwordless sudo; a run that can get neither does not start, and
+`--attach` does not work there. Windows has no such kernel rule: a native
+program that ignores proxies could still connect there, OpenCode cannot.
+
+A model request fails the scenario with its host and model, is never retried
+into a pass, and is still charged after the last scenario, once the server is
+down. `ripgrep.mjs` installs the ripgrep OpenCode would otherwise download;
+the runner fetches it once, checksum verified, into `tmp/verify-tools`.
 
 ### Why shell fixtures run JavaScript files
 
@@ -255,6 +277,8 @@ Sessions created and prompts sent through `openchamber session` reach the app th
 
 Every check polls until it holds or times out, and clicks and hovers wait until the target stops moving, stays the same node (a list or diff that re-renders its rows after opening replaces them in place), and is the topmost element at its centre. A fixed sleep either flakes on a slow machine or wastes time on a fast one; the few `pause` steps left are the behavior under test (a debounced draft save, the 1.2 s Git status cache).
 
+The phone switcher scenario sets the UI font size to 80 percent so the first title's centre falls inside the digest overlap. At the default size its centre is just below the covered part of the title.
+
 ### Why session-load retry fails only the message request
 
 The retry scenario blocks its target's message URL before the page opens, since desktop prefetch can otherwise load that session before the server stops. The session list and event transport stay available. Clearing the block and pressing Try again proves the recovery action; server restarts remain in the sync scenarios that prove reconnection.
@@ -269,7 +293,9 @@ A row drag (move a file, attach it to the chat) and a drop from the desktop are 
 
 ### Why the reset restores settings
 
-Some choices made in the app live on the server, not in the browser: Don't ask again on a file move turned off the confirmation for every later scenario, which then failed where it expected the dialog. The stand copies the server's settings files once it is up and the reset copies them back, so a scenario's choice ends with it.
+Some choices made in the app live on the server, not in the browser: Don't ask again on a file move turned off the confirmation for every later scenario, which then failed where it expected the dialog. The stand copies the server's `settings.json` once it is up and the reset puts it back, with the profile cut down to the stand's model in both files, so a scenario's choice ends with it.
+
+The server watches both files and treats the reset's write as an outside edit. Deleting `preferences.json` or copying a file over in place, as the reset once did, makes the server keep its last valid profile and drop every profile save until a valid file is back, and saves are refused until its watcher takes an edit in. So the reset replaces each file whole by a rename, never deletes the profile file, and waits until a save of the profile it wrote goes through before the scenario starts.
 
 ### Why the reset removes worktrees and their branches
 

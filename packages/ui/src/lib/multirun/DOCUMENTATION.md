@@ -34,6 +34,12 @@ write fails keeps the old title and is reported.
 The run's model and agent are set on the session at creation (`selection`),
 because v2 pins a session to a model instead of taking one per prompt.
 
+A run launched from a draft in an isolated space (`spaceDirectory`) creates every
+session in that space's folder and binds it through the space's own route, since a
+session in the project would run on the host. It gets no worktrees: the host refuses
+worktree routes for a space. Added lanes and fusions follow their first session.
+A launch from a space being made or stopped is refused.
+
 A failed binding attempts to delete only that newly created session. Worktrees
 are retained because setup may already have written files. A lane, added lane
 or code fusion whose new worktree never populated has nothing in it; that

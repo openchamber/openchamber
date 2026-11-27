@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { useChatTimelineScroll, type TimelineListHandle } from './useChatTimelineScroll';
 import { requestMessageFocus, releaseMessageFocusOutside } from '@/lib/router/messageFocus';
-import { dispatchPageWaiting, dispatchTabStep } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { dispatchNavigationRelease, dispatchPageWaiting, dispatchRowExpand, dispatchTabStep } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { isWaitingPageRevealPending, releaseWaitingPageRevealOutside, revealWaitingPage } from '@/sync/request-reveal';
 import { useUIStore } from '@/stores/useUIStore';
 import { KeepAlive } from '@/components/ui/KeepAlive';
@@ -258,6 +258,21 @@ test('a message link opened while the follow glides keeps the reader on the mess
     act(() => requestMessageFocus('session', 'linked-message'));
     for (let i = 0; i < 60; i++) await frame();
     expect(node.scrollTop).toBe(200);
+});
+
+test('a quote reveal leaves the hold of a message link alone, and a search step ends it', async () => {
+    await render('visible'); await frame();
+    alignAnchor = () => { node.scrollTop = 200; return 'aligned'; };
+    act(() => requestMessageFocus('session', 'linked-message'));
+    await frame();
+    dispatchNavigationRelease(node);
+    node.scrollTop = 900;
+    await frame();
+    expect(node.scrollTop).toBe(200);
+    act(() => scroll.takeViewport());
+    node.scrollTop = 900;
+    for (let i = 0; i < 5; i++) await frame();
+    expect(node.scrollTop).toBe(900);
 });
 
 test('does not start a history search from a linked-message check completed after cleanup', async () => {
@@ -521,4 +536,281 @@ test('while the turn runs, a reader who scrolls back to the end is followed at o
         contentLength = 2200;
     });
     expect(scroll.userOwnsScroll).toBe(false);
+});
+
+// The hook installs its landing check from effects that need these observers;
+// the stub hands the content-growth callback back to the test.
+const stubObservers = () => {
+    let grew: (() => void) | null = null;
+    class StubObserver {
+        constructor(callback?: () => void) { if (callback) grew = callback; }
+        observe() {}
+        disconnect() {}
+    }
+    Object.defineProperty(globalThis, 'MutationObserver', { configurable: true, writable: true, value: StubObserver });
+    Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, writable: true, value: StubObserver });
+    return () => grew;
+};
+
+// The stop's glide moves on frame time; a clock that advances one 50 ms step
+// per frame makes each frame move it visibly.
+const steppedClock = () => {
+    let time = performance.now();
+    const spy = spyOn(performance, 'now').mockImplementation(() => time);
+    return {
+        frame: async () => { time += 50; await frame(); },
+        restore: () => spy.mockRestore(),
+    };
+};
+
+// The stop releases the follow before its glide starts, so a downward wheel
+// during that glide used to stop it with no landing check left: the viewport
+// stayed where the wheel put it, past the start of the reply.
+test('a downward wheel during the stop glide still glides to the start of the reply', async () => {
+    const mutation = stubObservers();
+    const clock = steppedClock();
+    try {
+        const reply = document.createElement('div');
+        reply.dataset.streamingReply = '';
+        node.append(reply);
+        // 1,200 px tall, 300 px into the content: its top sits at 284 once the
+        // stop's 16 px gap is subtracted, and it outgrows the 500 px viewport.
+        Object.defineProperty(reply, 'getBoundingClientRect', {
+            value: () => ({ top: 300 - node.scrollTop, bottom: 1500 - node.scrollTop, height: 1200 }),
+        });
+        await render('visible'); await clock.frame();
+        node.scrollTop = 0;
+        act(() => scroll.onTimelineDataChange());
+        await clock.frame();
+        // The stop released the follow and the glide is heading to 284.
+        expect(scroll.userOwnsScroll).toBe(true);
+
+        // A wheel flick writes every frame. The glide answers two yields and
+        // then stops; growth has to re-arm the stop although the follow is
+        // released.
+        node.scrollTop = 350;
+        await clock.frame();
+        node.scrollTop = 500;
+        await clock.frame();
+        node.scrollTop = 700;
+        await clock.frame();
+        act(() => mutation()?.());
+        for (let i = 0; i < 40 && frames.size > 0; i += 1) await clock.frame();
+        expect(node.scrollTop).toBe(284);
+
+        // The landing ended there: later growth starts no glide.
+        act(() => mutation()?.());
+        expect(frames.size).toBe(0);
+        expect(node.scrollTop).toBe(284);
+    } finally {
+        clock.restore();
+    }
+});
+
+// On iOS the glide is the engine's smooth scroll, and a new command restarts
+// its animation even toward the same offset; growth that leaves the reply's
+// start in place used to issue one per mutation.
+test('on the native glide, growth re-aims the stop only when the reply start moves or the glide ends short', async () => {
+    const mutation = stubObservers();
+    Object.defineProperty(globalThis, 'CSS', { configurable: true, writable: true, value: { escape: dom.CSS.escape.bind(dom.CSS), supports: () => true } });
+    const smooth: number[] = [];
+    Object.defineProperty(node, 'scrollTo', {
+        value: (options: ScrollToOptions) => { if (options.behavior === 'smooth') smooth.push(options.top ?? Number.NaN); },
+    });
+    let replyTop = 300;
+    const reply = document.createElement('div');
+    reply.dataset.streamingReply = '';
+    node.append(reply);
+    Object.defineProperty(reply, 'getBoundingClientRect', {
+        value: () => ({ top: replyTop - node.scrollTop, bottom: replyTop + 1200 - node.scrollTop, height: 1200 }),
+    });
+    await render('visible'); await frame();
+    node.scrollTop = 0;
+    act(() => scroll.onTimelineDataChange());
+    await frame();
+    expect(smooth).toEqual([284]);
+
+    act(() => { mutation()?.(); mutation()?.(); mutation()?.(); });
+    expect(smooth).toEqual([284]);
+
+    replyTop = 400;
+    act(() => mutation()?.());
+    expect(smooth).toEqual([284, 384]);
+
+    // The smooth scroll ended short of the start: the landing tries again.
+    node.scrollTop = 200;
+    act(() => { node.dispatchEvent(new window.Event('scrollend')); });
+    expect(smooth).toEqual([284, 384, 384]);
+});
+
+// Enter or Space on a focused tool row opens it with no pointerdown, so no
+// gesture ends the stop's landing; the landing used to carry the viewport on
+// toward the reply's start, away from the row the reader opened.
+test('a row opened from the keyboard during the stop glide keeps the viewport where it was', async () => {
+    const mutation = stubObservers();
+    const clock = steppedClock();
+    try {
+        const reply = document.createElement('div');
+        reply.dataset.streamingReply = '';
+        node.append(reply);
+        Object.defineProperty(reply, 'getBoundingClientRect', {
+            value: () => ({ top: 300 - node.scrollTop, bottom: 1500 - node.scrollTop, height: 1200 }),
+        });
+        const row = document.createElement('div');
+        node.append(row);
+        await render('visible'); await clock.frame();
+        node.scrollTop = 0;
+        act(() => scroll.onTimelineDataChange());
+        await clock.frame();
+        await clock.frame();
+        const opened = node.scrollTop;
+        expect(opened).toBeGreaterThan(0);
+        expect(opened).toBeLessThan(284);
+
+        act(() => dispatchRowExpand(row));
+        act(() => mutation()?.());
+        for (let i = 0; i < 5; i += 1) await clock.frame();
+        expect(node.scrollTop).toBe(opened);
+    } finally {
+        clock.restore();
+    }
+});
+
+test('a downward wheel during the collapsed work stop still lands on the turn start', async () => {
+    stubObservers();
+    useUIStore.getState().setActivityRenderMode('collapsed');
+    try {
+        const rect = (top: number, height: number) => () => ({ top: top - node.scrollTop, bottom: top + height - node.scrollTop, height });
+        const prompt = document.createElement('div');
+        prompt.dataset.turnId = 'turn-1';
+        Object.defineProperty(prompt, 'getBoundingClientRect', { value: rect(100, 20) });
+        const header = document.createElement('div');
+        header.dataset.turnRow = 'turn-1';
+        Object.defineProperty(header, 'getBoundingClientRect', { value: rect(300, 40) });
+        const answer = document.createElement('div');
+        answer.dataset.turnRow = 'turn-1';
+        Object.defineProperty(answer, 'getBoundingClientRect', { value: rect(340, 1200) });
+        node.append(prompt, header, answer);
+
+        await render('visible'); await frame();
+        node.scrollTop = 0;
+        act(() => scroll.onTimelineDataChange());
+        await frame();
+        expect(scroll.userOwnsScroll).toBe(true);
+
+        node.scrollTop = 350;
+        await frame();
+        await frame();
+        expect(node.scrollTop).toBeLessThan(350);
+    } finally {
+        useUIStore.getState().setActivityRenderMode('summary');
+    }
+});
+
+// A waiting page revealed after the stop has put the reader on the question.
+// The stop's pending landing used to re-aim at the reply's start on the next
+// growth and pull the question back below the fold.
+test('a waiting page revealed after a stop keeps the question in view as the list grows', async () => {
+    const mutation = stubObservers();
+    const reply = document.createElement('div');
+    reply.dataset.streamingReply = '';
+    node.append(reply);
+    Object.defineProperty(reply, 'getBoundingClientRect', {
+        value: () => ({ top: 300 - node.scrollTop, bottom: 1500 - node.scrollTop, height: 1200 }),
+    });
+    await render('visible'); await frame();
+    node.scrollTop = 0;
+    act(() => scroll.onTimelineDataChange());
+    await frame();
+    // The stop released the follow and armed its landing on the reply's start.
+    expect(scroll.userOwnsScroll).toBe(true);
+
+    const { block, targets } = waitingPage();
+    act(() => dispatchPageWaiting(block));
+    await frame();
+    expect(targets).toEqual([1300]);
+    // Where the reveal put the reader, below the reply's start at 284.
+    node.scrollTop = 1300;
+
+    act(() => mutation()?.());
+    await frame();
+    expect(node.scrollTop).toBe(1300);
+});
+
+// A resize that moves the reply's start to where the viewport already is ends
+// the landing. The glide it was carrying used to keep heading to the old start.
+test('a resize that puts the reply start at the viewport mid-glide stops the glide there', async () => {
+    const mutation = stubObservers();
+    const clock = steppedClock();
+    try {
+        let replyTop = 300;
+        const reply = document.createElement('div');
+        reply.dataset.streamingReply = '';
+        node.append(reply);
+        Object.defineProperty(reply, 'getBoundingClientRect', {
+            value: () => ({ top: replyTop - node.scrollTop, bottom: replyTop + 1200 - node.scrollTop, height: 1200 }),
+        });
+        await render('visible'); await clock.frame();
+        node.scrollTop = 0;
+        act(() => scroll.onTimelineDataChange());
+        await clock.frame();
+        expect(scroll.userOwnsScroll).toBe(true);
+        await clock.frame();
+        const midGlide = node.scrollTop;
+        expect(midGlide).toBeGreaterThan(0);
+        expect(midGlide).toBeLessThan(284);
+
+        // The reply's start, less the stop's 16 px gap, is now the viewport's
+        // own position; nothing writes scrollTop.
+        replyTop = midGlide + 16;
+        act(() => mutation()?.());
+        for (let i = 0; i < 5; i += 1) await clock.frame();
+        expect(node.scrollTop).toBe(midGlide);
+    } finally {
+        clock.restore();
+    }
+});
+
+// A waiting question already in view while the stop's landing is pending
+// needs no scroll, but the reveal still owns the viewport: the old stop must
+// not carry the question out of view as the list grows.
+test('an already visible waiting page during a pending stop stays in view as the list grows', async () => {
+    const mutation = stubObservers();
+    const clock = steppedClock();
+    try {
+        const reply = document.createElement('div');
+        reply.dataset.streamingReply = '';
+        node.append(reply);
+        Object.defineProperty(reply, 'getBoundingClientRect', {
+            value: () => ({ top: 300 - node.scrollTop, bottom: 1500 - node.scrollTop, height: 1200 }),
+        });
+        await render('visible'); await clock.frame();
+        node.scrollTop = 0;
+        act(() => scroll.onTimelineDataChange());
+        await clock.frame();
+        expect(scroll.userOwnsScroll).toBe(true);
+        await clock.frame();
+        const scrollAtReveal = node.scrollTop;
+        expect(scrollAtReveal).toBeLessThan(284);
+
+        const page = { top: scrollAtReveal + 200, bottom: scrollAtReveal + 480 };
+        const block = document.createElement('div');
+        block.dataset.waitingPage = 'page-1';
+        node.append(block);
+        Object.defineProperty(block, 'getBoundingClientRect', {
+            value: () => ({ top: page.top - node.scrollTop, bottom: page.bottom - node.scrollTop }),
+        });
+        const targets: number[] = [];
+        Object.defineProperty(node, 'scrollTo', { value: (options: ScrollToOptions) => { targets.push(options.top ?? Number.NaN); } });
+        act(() => dispatchPageWaiting(block));
+        await clock.frame();
+        expect(targets).toEqual([]);
+
+        act(() => mutation()?.());
+        for (let i = 0; i < 5; i += 1) await clock.frame();
+        expect(node.scrollTop).toBeLessThanOrEqual(page.top - 12);
+        expect(node.scrollTop + 500).toBeGreaterThanOrEqual(page.bottom);
+    } finally {
+        clock.restore();
+    }
 });

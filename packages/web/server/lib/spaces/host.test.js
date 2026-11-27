@@ -48,6 +48,39 @@ describe('readOrCreateOwner', () => {
   });
 });
 
+describe.skipIf(process.platform === 'win32')('the SSH connection of the place on another machine', () => {
+  it('opens with the first request, carries the docker commands, and ends when the host closes', async () => {
+    const folder = fs.mkdtempSync('/tmp/oc-host-');
+    folders.push(folder);
+    const pidFile = path.join(folder, 'pid');
+    fs.writeFileSync(path.join(folder, 'ssh'), `#!/bin/sh\necho $$ >> ${pidFile}\nexec cat\n`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${folder}:${process.env.PATH}`);
+    try {
+      const paths = [];
+      const host = createSpacesHost({
+        dataDir: folder,
+        sshDockerHost: 'ssh://box',
+        runCommand: async (file, args, options) => { if (args[0] === '--host') paths.push(options.env?.PATH); return { code: 0, stdout: '', stderr: '' }; },
+        logger: { warn: () => {} },
+      });
+      hosts.push(host);
+      expect(fs.existsSync(pidFile)).toBe(false);
+      const place = host.places().find((candidate) => candidate.id === 'docker-ssh');
+      await place.list();
+      expect(paths.every((value) => value === undefined)).toBe(true);
+      await vi.waitFor(async () => { await place.list(); expect(paths.at(-1)).toBeDefined(); }, { timeout: 8_000 });
+      const [pid, ...more] = fs.readFileSync(pidFile, 'utf8').trim().split('\n').map(Number);
+      expect(more).toEqual([]);
+      expect(paths.length).toBeGreaterThan(0);
+      for (const value of paths.filter(Boolean)) expect(value.startsWith(path.join(fs.realpathSync(folder), 'spaces', 'ssh'))).toBe(true);
+      host.close();
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 4_000 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 describe('restartOpenCodeInside', () => {
   // The server inside, as the dispatcher hands back its answer: a status and a body to read.
   const answering = (statusCode, body) => {
@@ -82,10 +115,13 @@ describe('restartOpenCodeInside', () => {
 describe('createSpacesHost', () => {
   it('starts no process of its own when it is made, and answers through the place it was given', async () => {
     let started = 0;
+    let time = 1_000_000;
     const place = createMemoryPlace();
+    const dataDir = temporary();
     const host = createSpacesHost({
-      dataDir: temporary(),
+      dataDir,
       place,
+      now: () => time,
       runCommand: async () => { started += 1; throw new Error('no process here'); },
       openCommandStream: () => { started += 1; throw new Error('no process here'); },
       logger: { warn: () => {} },
@@ -113,6 +149,13 @@ describe('createSpacesHost', () => {
     expect(byDirectory.status).toBe(502);
     expect(await byDirectory.json()).toMatchObject({ code: 'space_setup_failed' });
     expect((await fetch(url('/api/host?directory=/home/me'))).status).toBe(200);
+
+    // One listing answers both questions of a request: whether the space is known, and whether its place answers.
+    createSpaceRecords({ dataDir }).write(id, { placeId: 'memory', network: { mode: 'allowlist', domains: [] } });
+    const list = vi.spyOn(place, 'list');
+    time += 60_000;
+    await fetch(url(`/api/spaces/${id}/health`));
+    expect(list).toHaveBeenCalledTimes(1);
 
     expect(host.skipsBodyParsing({ url: `/api/spaces/${id}/fs/raw`, headers: {} })).toBe(true);
     expect(host.skipsBodyParsing({ url: '/api/fs/raw', headers: { 'x-opencode-directory': `/spaces/${id}/repo` } })).toBe(true);

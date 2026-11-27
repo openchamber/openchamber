@@ -94,6 +94,14 @@ const buildReadCoalesceKey = (targetUrl: string, headers: Record<string, string>
   return `GET ${targetUrl}\n${canonicalHeaders}`;
 };
 
+const UNDELIVERED_FETCH_ERROR_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+
+const isUndeliveredFetchFailure = (error: unknown): boolean => {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined;
+  return typeof code === 'string' && UNDELIVERED_FETCH_ERROR_CODES.has(code);
+};
+
 const normalizeHeaderKeys = (headers: Record<string, string> | undefined): Record<string, string> =>
   Object.fromEntries(Object.entries(headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]));
 
@@ -305,7 +313,7 @@ export async function handleProxyBridgeMessage(
         return { id, type, success: true, data };
       }
 
-      const vcsInitRefused = vcsInitRefusal(normalizedMethod, resolvedPath, normalizeHeaderKeys(headers));
+      const vcsInitRefused = await vcsInitRefusal(normalizedMethod, resolvedPath, normalizeHeaderKeys(headers));
       if (vcsInitRefused) {
         const data: ApiProxyResponsePayload = {
           status: 400,
@@ -412,7 +420,8 @@ export async function handleProxyBridgeMessage(
     case 'api:session:message': {
       const apiUrl = await waitForApiUrl(ctx?.manager);
       if (!apiUrl) {
-        const data = deps.buildUnavailableApiResponse();
+        const unavailable = deps.buildUnavailableApiResponse();
+        const data = { ...unavailable, headers: { ...unavailable.headers, 'x-openchamber-error': 'opencode-unreachable' } };
         return { id, type, success: true, data };
       }
 
@@ -499,7 +508,9 @@ export async function handleProxyBridgeMessage(
         });
         const data: ApiProxyResponsePayload = {
           status: isTimeout ? 504 : 503,
-          headers: { 'content-type': 'application/json' },
+          headers: !isTimeout && isUndeliveredFetchFailure(error)
+            ? { 'content-type': 'application/json', 'x-openchamber-error': 'opencode-unreachable' }
+            : { 'content-type': 'application/json' },
           bodyText: body,
         };
         return { id, type, success: true, data };

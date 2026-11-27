@@ -28,13 +28,30 @@ const REVIEWER_STATES = new Map<string, GitHubReviewerState['state']>([
   ['DISMISSED', 'pending'],
 ]);
 
+type Opinion = 'approved' | 'changes_requested';
+type ReviewTrack = { login: string; avatarUrl?: string | undefined; opinion?: Opinion | undefined; latest: GitHubReviewerState['state'] };
+
+const opinionOf = (state: string): Opinion | undefined => (
+  state === 'APPROVED' ? 'approved' : state === 'CHANGES_REQUESTED' ? 'changes_requested' : undefined
+);
+
 export const toReviewerStates = (reviews: ReviewNode[], reviewRequests: ReviewRequest[]): GitHubReviewerState[] => {
-  const states = new Map<string, GitHubReviewerState>();
+  const tracked = new Map<string, ReviewTrack>();
   const created = (review: ReviewNode) => Date.parse(review.createdAt ?? '') || 0;
   for (const review of [...reviews].sort((left, right) => created(left) - created(right))) {
     const login = review.author?.login;
-    const state = REVIEWER_STATES.get(review.state);
-    if (login && state) states.set(login, { id: login, login, avatarUrl: review.author?.avatarUrl ?? undefined, state });
+    const latest = REVIEWER_STATES.get(review.state);
+    if (!login || !latest) continue;
+    const track = tracked.get(login) ?? { login, latest };
+    track.avatarUrl = review.author?.avatarUrl ?? track.avatarUrl;
+    track.latest = latest;
+    if (review.state === 'DISMISSED') track.opinion = undefined;
+    else track.opinion = opinionOf(review.state) ?? track.opinion;
+    tracked.set(login, track);
+  }
+  const states = new Map<string, GitHubReviewerState>();
+  for (const [login, track] of tracked) {
+    states.set(login, { id: login, login, avatarUrl: track.avatarUrl, state: track.opinion ?? track.latest });
   }
   for (const { requestedReviewer: reviewer } of reviewRequests) {
     if (reviewer?.__typename !== 'User' || !reviewer.login || states.has(reviewer.login)) continue;

@@ -19,6 +19,7 @@ for (const [name, value] of Object.entries({
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { ProviderAuthMethodCards } = await import('./ProviderAuthMethodCards');
+const { ProviderAuthMethodsLoading } = await import('./ProviderAuthMethodsLoading');
 
 afterAll(async () => {
   await browser.happyDOM.close();
@@ -70,6 +71,7 @@ const render = async (input: {
         } : undefined}
         canAdd={input.canAdd ?? true}
         inUseWithoutCredential={input.inUseWithoutCredential ?? null}
+        directory={null}
         connectKey={async () => {}}
         onKeySaved={() => {}}
         onSignedIn={() => {}}
@@ -192,4 +194,18 @@ test('machine credentials without a card of their kind mark the key card', async
   const view = await render({ signInMethods: [], credentials: [], inUseWithoutCredential: 'external' });
   expect(view.cards().length).toBe(1);
   expect(view.card('API key').textContent).toContain('In use');
+});
+
+test('while sign-in methods load, the section holds the place of an open API key card out of reach', async () => {
+  const { host: loaded } = await render({ signInMethods: [] });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<I18nProvider><ProviderAuthMethodsLoading integrationId="opencode-go" canAdd /></I18nProvider>));
+  cleanups.push(() => { act(() => root.unmount()); host.remove(); });
+  const reserved = host.querySelector('[data-reserved-space]');
+  expect(reserved?.hasAttribute('inert')).toBe(true);
+  expect(reserved?.querySelectorAll('input').length).toBe(1);
+  expect(loaded.querySelectorAll('input').length).toBe(1);
+  expect(reserved?.querySelectorAll('*').length).toBe(loaded.querySelectorAll('*').length);
 });

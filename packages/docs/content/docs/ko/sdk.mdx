@@ -146,11 +146,11 @@ VS Code는 확장을 불러오지 않으므로 VS Code가 실행하는 OpenCode�
 ```
 
 - `identifier.keys`는 최대 8개의 고정된 대문자 키입니다. `DEMO`는 `DEMO-12`가 하나의 단어로 있을 때만 인식합니다. 코드, 링크, 경로, `XDEMO-1` 같은 단어, `DEMO-1.5` 같은 버전은 텍스트로 남습니다.
-- `urls`는 하나의 https origin에 있는 링크를 인식하며, origin은 정확히 일치해야 합니다. `item`은 트래커가 쓰는 형태 그대로의 링크 템플릿입니다. `{id}`는 경로 안이나 `?name={id}`로 한 번만 쓰고, 바뀌는 부분에는 `{segment}`나 `{segments+}`를 씁니다. `identifier`는 `{id}`의 모양을 정하며 `key-number`, `number`, `short-code` 중 하나입니다. 정규식은 직접 쓰지 않습니다. OpenChamber가 템플릿을 컴파일합니다.
+- `urls`는 하나의 https origin에 있는 링크를 인식하며, origin은 정확히 일치해야 합니다. `https://*.example.com`으로 쓰면 도메인의 모든 하위 도메인을 인식합니다. `acme.example.com`과 `acme.eu.example.com`은 포함되고 `example.com` 자체는 포함되지 않습니다. 와일드카드에는 링크를 만들 호스트가 없으므로 텍스트 속 식별자에는 `url`이 없습니다. `item`은 트래커가 쓰는 형태 그대로의 링크 템플릿입니다. `{id}`는 경로 안이나 `?name={id}`로 한 번만 쓰고, 바뀌는 부분에는 `{segment}`나 `{segments+}`를 씁니다. `identifier`는 `{id}`의 모양을 정하며 `key-number`, `number`, `short-code` 중 하나입니다. 정규식은 직접 쓰지 않습니다. OpenChamber가 템플릿을 컴파일합니다.
 - `action: "open"`은 `ready.item`(또는 `onItem`)을 `{ kind: "link", identifier, url? }`로 설정해 확장을 엽니다. `attach`가 `"dialog"`이면 내 대화상자에서, 아니면 레일 패널에서 열립니다. `isGuestLinkItem`으로 타입을 좁히세요. `panel.entry`가 필요합니다. `url`은 클릭한 링크에서 프래그먼트와, 템플릿 자체에 없는 쿼리 매개변수를 뺀 것입니다. 텍스트 속 식별자라면 `{segment}`가 없는 템플릿이 있고 식별자가 `urls.identifier`에 선언한 모양일 때 그중 첫 템플릿이 만드는 링크입니다(`DEMO-12`는 `number`에 들어가지 않습니다).
-- `action: "attach"`는 대신 식별자가 담긴 칩을 채팅창에 붙이며, 칩이 자기 링크를 가리킬 수 있도록 `{segment}`나 `{segments+}`가 없는 템플릿이 필요합니다. `identifier.keys`를 쓰면 `urls.identifier`는 `number`일 수 없습니다.
+- `action: "attach"`는 대신 식별자가 담긴 칩을 채팅창에 붙이며, 칩이 자기 링크를 가리킬 수 있도록 `{segment}`나 `{segments+}`가 없는 템플릿이 필요합니다. `identifier.keys`를 쓰면 `urls.identifier`는 `number`일 수 없고, `urls.origin`에 와일드카드를 쓸 수 없습니다.
 
-인식은 에이전트 답변과 사용자 자신의 메시지에서 이루어지며, 추론, 도구 출력, Files 보기에서는 이루어지지 않습니다. 메시지를 복사하면 쓰인 그대로의 텍스트가 복사됩니다. OpenChamber가 직접 읽는 링크, 즉 트래커 항목, 저장소의 issue나 pull request, 커밋은 평소대로 동작하고, 보조 키를 누른 채 클릭하면 브라우저의 원래 동작이 유지됩니다. `links`를 선언하면 `links` 권한이 추가됩니다. 승인 대화상자에는 키와 origin, 클릭하면 무엇을 하는지가 표시되고, 그중 하나라도 바꾸는 버전은 다시 승인을 요청합니다. `examples/tasks-demo`는 `DEMO-2`와 `https://example.com/tasks/DEMO-2`를 인식합니다.
+인식은 에이전트 답변과 사용자 자신의 메시지에서 이루어지며, 추론, 도구 출력, Files 보기에서는 이루어지지 않습니다. 메시지를 복사하면 쓰인 그대로의 텍스트가 복사됩니다. `action: "open"`이면 내 확장이 인식하는 링크는 OpenChamber가 세션의 링크를 나열하는 곳, 즉 작업 상태의 컨텍스트 소스와 사이드바에서도 내 확장을 엽니다. `"attach"`이면 이런 곳에서는 브라우저로 열립니다. 칩이 화면에 있는 채팅창에 들어가는데, 그 채팅창이 다른 세션의 것일 수 있기 때문입니다. OpenChamber가 직접 읽는 링크, 즉 트래커 항목, 저장소의 issue나 pull request, 커밋은 평소대로 동작하고, 보조 키를 누른 채 클릭하면 브라우저의 원래 동작이 유지됩니다. `links`를 선언하면 `links` 권한이 추가됩니다. 승인 대화상자에는 키와 origin, 클릭하면 무엇을 하는지가 표시되고, 그중 하나라도 바꾸는 버전은 다시 승인을 요청합니다. `examples/tasks-demo`는 `DEMO-2`와 `https://example.com/tasks/DEMO-2`를 인식합니다.
 
 ## 텍스트 생성
 

@@ -30,7 +30,23 @@ const BODY = '<p>Use <strong>bold</strong> text here.</p><p>fix it now</p><p>the
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 260));
 
-const mountPage = (answerState?: HtmlRenderAnswerState, body = BODY) => {
+// Timers the page script schedules run only when the test moves the clock.
+type ManualClock = ReturnType<typeof manualClock>;
+const manualClock = () => {
+    let now = 0;
+    const due: { at: number; run: () => void }[] = [];
+    return {
+        setTimeout: (run: () => void, delay = 0) => due.push({ at: now + delay, run }),
+        advance: (ms: number) => {
+            now += ms;
+            for (let next = due.findIndex((timer) => timer.at <= now); next !== -1; next = due.findIndex((timer) => timer.at <= now)) {
+                due.splice(next, 1)[0].run();
+            }
+        },
+    };
+};
+
+const mountPage = (answerState?: HtmlRenderAnswerState, body = BODY, clock?: ManualClock) => {
     const win = new Window({ url: 'http://localhost' });
     // What the page posted, as the host reads it, and as JSON.
     const reports: FrameReport[] = [];
@@ -73,7 +89,7 @@ const mountPage = (answerState?: HtmlRenderAnswerState, body = BODY) => {
         ResizeObserver: win.ResizeObserver,
         getComputedStyle: win.getComputedStyle.bind(win),
         requestAnimationFrame: win.requestAnimationFrame.bind(win),
-        setTimeout: win.setTimeout.bind(win),
+        setTimeout: clock ? clock.setTimeout : win.setTimeout.bind(win),
         clearTimeout: win.clearTimeout.bind(win),
         URL: win.URL,
     };
@@ -731,5 +747,72 @@ describe('a page that waits for an answer', () => {
         const page = mountPage({ waiting: true, answer: null });
         expect(page.win.document.querySelector('[data-oc-decline]')).toBeNull();
         expect(page.reports.some((report) => report?.kind === 'decline-placed' && !report.placed)).toBe(true);
+    });
+});
+
+describe('a page whose own script throws', () => {
+    const scriptErrors = (page: ReturnType<typeof mountPage>) => page.reports.filter((report) => report?.kind === 'script-error');
+    const mount = (body: string) => {
+        const clock = manualClock();
+        return { page: mountPage({ waiting: true, answer: null }, body, clock), clock };
+    };
+    const throwInPage = (page: ReturnType<typeof mountPage>, message: string) => {
+        page.win.dispatchEvent(new page.win.ErrorEvent('error', { message }));
+    };
+    const load = (page: ReturnType<typeof mountPage>, clock: ManualClock) => {
+        page.win.dispatchEvent(new page.win.Event('load'));
+        clock.advance(0);
+    };
+    // Past the short wait a page gets to draw a late control.
+    const drawWait = 400;
+    const failure = 'Uncaught InvalidCharacterError: The string to be decoded is not correctly encoded.';
+
+    test('tells the host what it threw when it loads with nothing to answer with, and again when the host waits', () => {
+        const { page, clock } = mount('<main id="app"></main>');
+        throwInPage(page, failure);
+        load(page, clock);
+        clock.advance(drawWait - 1);
+        expect(scriptErrors(page)).toEqual([]);
+        clock.advance(1);
+        expect(scriptErrors(page)).toEqual([{ kind: 'script-error', errors: [failure] }]);
+
+        page.send(htmlRenderAnswerStateMessage({ waiting: false, answer: null }));
+        page.send(htmlRenderAnswerStateMessage({ waiting: true, answer: null }));
+        expect(scriptErrors(page)).toHaveLength(2);
+    });
+
+    for (const [control, body] of [
+        ['a button', '<button class="oc-button">Send</button>'],
+        ['an option tile', '<div class="oc-option">Red</div>'],
+        ['a link', '<a href="https://example.com">Open</a>'],
+    ]) {
+        test(`says nothing when it still shows ${control} to answer with`, () => {
+            const { page, clock } = mount(body);
+            throwInPage(page, 'Uncaught ReferenceError: chart is not defined');
+            load(page, clock);
+            clock.advance(drawWait);
+
+            expect(scriptErrors(page)).toEqual([]);
+        });
+    }
+
+    test('says nothing when its script draws a button shortly after it loads', () => {
+        const { page, clock } = mount('<main id="app"></main>');
+        throwInPage(page, 'Uncaught ReferenceError: chart is not defined');
+        load(page, clock);
+        clock.advance(drawWait / 2);
+        page.win.document.getElementById('app')?.append(page.win.document.createElement('button'));
+        clock.advance(drawWait);
+
+        expect(scriptErrors(page)).toEqual([]);
+    });
+
+    test('says nothing about a throw after it loaded, as in a click handler', () => {
+        const { page, clock } = mount('<main id="app"></main>');
+        load(page, clock);
+        throwInPage(page, 'Uncaught Error: first click fails');
+        clock.advance(drawWait);
+
+        expect(scriptErrors(page)).toEqual([]);
     });
 });

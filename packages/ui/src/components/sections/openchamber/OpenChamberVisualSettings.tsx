@@ -25,6 +25,7 @@ import {
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
+import { saveAppearanceLocale } from '@/lib/settings/appearanceLocale';
 import { CODE_FONT_OPTIONS, CUSTOM_FONT_ID, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, UI_FONT_WEIGHT_OPTIONS, type MonoFontOption, type UiFontOption, type UiFontWeight } from '@/lib/fontOptions';
 import { useI18n } from '@/lib/i18n';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
@@ -153,7 +154,7 @@ interface OpenChamberVisualSettingsProps {
 }
 
 export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps> = ({ visibleSettings }) => {
-    const { locale, locales, setLocale, label, t } = useI18n();
+    const { locale, locales, label, t } = useI18n();
     const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
     const { isMobile } = useDeviceInfo();
     const { browserTab } = usePwaDetection();
@@ -199,9 +200,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const handleLocaleChange = React.useCallback((value: string) => {
         const next = locales.find((candidate) => candidate === value);
         if (!next) return;
-        setLocale(next);
-        void updateDesktopSettings({ locale: next });
-    }, [locales, setLocale]);
+        void saveAppearanceLocale(next);
+    }, [locales]);
 
     const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
         setDesktopWindowControlsPosition(value);

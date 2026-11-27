@@ -18,7 +18,6 @@ This module fetches quota and usage signals for supported providers in the web s
 - Codex usage requests reject redirects because the bearer credential belongs to the fixed usage origin.
 - Expanded Work Status usage reads stored credentials without activating or refreshing them. Only normalized account rows cross the HTTP boundary. Credential values, home paths, and provider payloads stay on the server.
 - Unreadable API-key file or environment references resolve to no credential. Sending the unresolved reference as a bearer token would misreport missing configuration as an authentication failure.
-- Google quota accepts the direct login methods `oauth` and `gemini-cli` (what OpenCode stores for "OAuth with Google (Gemini CLI)") and legacy credentials without a method ID. Other methods belong to their plugins and are not sent to Google quota endpoints.
 
 Node server entrypoints apply `../network-defaults.js` before serving requests,
 including the daemon launched directly through `server/index.js`. Connection
@@ -29,8 +28,6 @@ extension applies the same policy in its own process at activation.
 - `packages/web/server/lib/quota/index.ts`: public entrypoint loaded by the runtime and feature-route composition through its `.js` specifier.
 - `packages/web/server/lib/quota/routes.ts`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
-- `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.
-- `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.
 - `packages/web/server/lib/quota/providers/claude/`: Claude credential discovery, usage transforms, and rate-limit handling.
 - `packages/web/server/lib/quota/utils/`: shared auth, transform, and formatting helpers.
 
@@ -53,7 +50,6 @@ the list loses its usage card with no error.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
-| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent) |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
@@ -61,7 +57,6 @@ the list loses its usage card with no error.
 | `deepinfra` | DeepInfra | `providers/deepinfra.js` | `deepinfra`, `deep-infra`, `deep_infra` (API key under `key` or `token`) |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` (API key under `key` or `token`) |
 | `exe-dev` | exe.dev | `providers/exe-dev.js` | Usage API token stored under `~/.config/openchamber/quota/` |
-| `google` | Google | `providers/google/index.js` | `google`, `google.oauth` |
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
@@ -129,19 +124,24 @@ OpenCode Go has two credential shapes and they are not interchangeable. An API k
 
 - **Credential selection**: OpenCode marks exactly one credential active per integration and credentials are global, so the active `opencode` OAuth credential is the selected account and organization. The reader carries only the Console `server` and `orgID` metadata; a credential whose `server` is not `https://opencode.ai/console`, whose `orgID` is missing or malformed, or that is an API key does not count as a Console sign-in. When both exist, the `opencode` credential (sign-in or API key) serves Go and the `opencode-go` key is the fallback: when there is no `opencode` credential, when the sign-in's read fails, and when the Console refuses the `opencode` key (no Go subscription, expired, rejected). A temporary failure of the `opencode` key (network, HTTP 5xx, unreadable answer) is reported as that key's failure and never falls back, because OpenCode keeps Go on that key through it. The sign-in's error surfaces only when there is no key.
 - **API key meters**: an API key reads the Console Go status first and uses its meters exactly like a sign-in does. The usage API reports each window as a floored integer `percent`, so with it the rows sat up to a point below the Console page, which rounds `used / limit` (#5278); rounding on our side cannot recover the lost fraction. The Console read is best-effort for a key: any failure (HTTP error, a `product` other than Go, no usable meter, network) falls through to the usage API, which owns every API-key error message below. A key that fails both ways costs two requests per refresh. Verified live on 2026-10-22 with an `oc_sk_` key: the status answers 200 with the same meters as the sign-in, and an expired `sk-` key gets 401 `api_key_expired` there too. The billing status answers a key with 403, so the key path never shows a credits row.
-- **API key on `opencode`**: an API key on the shared `opencode` integration is read the same way as an `opencode-go` key, and ahead of it. OpenCode loads the Console workspace's providers with that key and binds OpenCode Go to the `opencode` integration when the workspace has Go (the Console config lists `opencode-go`, and `ConfigProviderPlugin.integrate` gives it the document's integration ID), so requests to Go models carry that key and an `opencode-go` key beside it is never used. When the Console refuses the key, its config carries no `opencode-go` and OpenCode keeps Go on its own integration, which the fallback to the `opencode-go` key mirrors; after that fallback the `opencode-go` key's own error is shown, since that is the key OpenCode uses. Verified live with OpenCode 2.3.2 on 2026-11-21 (#6679): a working `opencode` key with an invalid `opencode-go` key answers Go prompts, and the swap does too. The usage API accepts any key of a Console workspace and answers 403 when the workspace has no Go subscription; for this key a 403 is reported as the absent subscription, the same message as the Console sign-in path. That 403 meaning comes from the Console's own handler for legacy `sk-` keys; new `oc_sk_` keys and keys of migrated workspaces are proxied to a separate inference service, so re-check its answer there when the endpoint changes. An API key and a Console sign-in never coexist on `opencode`, since OpenCode keeps one active credential per integration.
+- **API key on `opencode`**: an API key on the shared `opencode` integration is read the same way as an `opencode-go` key, and ahead of it. OpenCode loads the Console workspace's providers with that key and binds OpenCode Go to the `opencode` integration when the workspace has Go (the Console config lists `opencode-go`, and `ConfigProviderPlugin.integrate` gives it the document's integration ID), so requests to Go models carry that key and an `opencode-go` key beside it is never used. When the Console refuses the key, its config carries no `opencode-go` and OpenCode keeps Go on its own integration, which the fallback to the `opencode-go` key mirrors; after that fallback the `opencode-go` key's own error is shown, since that is the key OpenCode uses. Verified live with OpenCode 2.3.2 on 2026-11-21 (#6679): a working `opencode` key with an invalid `opencode-go` key answers Go prompts, and the swap does too. The usage API accepts any key of a Console workspace and answers 403 when the workspace has no Go subscription; for this key a 403 is the absent subscription, the same as on the Console sign-in path. That 403 meaning comes from the Console's own handler for legacy `sk-` keys; new `oc_sk_` keys and keys of migrated workspaces are proxied to a separate inference service, so re-check its answer there when the endpoint changes. An API key and a Console sign-in never coexist on `opencode`, since OpenCode keeps one active credential per integration.
 - **Read-only and per-call**: the access token is read through `../opencode/auth.js` on every fetch, so switching accounts drops the previous account instead of showing stale numbers. OpenChamber never refreshes the token itself: OpenCode owns that, and an expired access token (local `expires`, or a 401/403) is surfaced as "sign in again" rather than a competing refresh.
 - **Account name**: a successful Go usage read carries `accountLabel` when the credential has a display label in OpenCode. The label comes from the sign-in or key that supplied the meters, including a fallback key. A failed Go read or an unnamed credential has no account label. The shared response parser (`packages/ui/src/lib/quota/fetchQuota.ts`) keeps the field for all surfaces.
 - **Meters**: the response's `product` must be `go`, `go-plus` or `go-teams`, the plan ids OpenCode's Go page and docs use; anything else is an absent subscription. The same holds for a Go product with no `access` object: a subscription that ended, was refunded, or was never active keeps `product: "go"` and sends `access: null`, which is the absent subscription and not a body we failed to read (#6779). Only an `access` that is present and carries no usable meter is the malformed response. `access.meters.fiveHour` / `week` / `month` map to the existing `5h` / `weekly` / `monthly` windows. `limitMicroCents` and `usedMicroCents` are decimal strings; the percentage is `used / limit`, never a hardcoded plan limit. A missing meter, a non-positive or unparseable limit, or an invalid reset timestamp skips that window alone; no usable window is a failed refresh, not zero usage.
 - **Credits balance**: the Go status response carries no credit balance. Alongside the Console read (never with a locally expired sign-in), the provider also reads the billing status, so a slow billing endpoint adds no time beyond the slower of the two requests. When the Go read succeeds, it surfaces its `availableMicroCents` (integer micro-cents as a decimal string; the Console counts `1_000_000` micro-cents per cent, so `100_000_000` is one USD) as a `credits_balance` window with a money `valueLabel` and no percent or reset. This read is best-effort: any failure (network, HTTP, malformed, or an absent amount) drops the row rather than failing the refresh or reporting a `$0.00` balance, and it never runs on the API-key path.
 - **Trusted origin**: Console requests, with a sign-in token or an API key, go only to the fixed Console URLs with `redirect: 'error'`, so the bearer token is never forwarded to another origin.
 - **Failure classes stay distinct**: not configured (no credential), expired sign-in (expired local token or 401/403), expired API key, absent subscription (unexpected `product`, a Go product without `access`, or a 403 for an `opencode` API key), malformed response, and temporary request failure each return their own configured flag and message.
+- **No Go means not configured**: when the `opencode` credential reports an absent subscription and there is no `opencode-go` key, the result is `configured: false` with `Not configured`, so no surface draws a Go card for a Zen-only account (#6663). With an `opencode-go` key the absent subscription stays a configured failure: the fallback key's own error, or the Console's when that key expired.
 - **Expired API key**: Console keys carry an expiry and nothing renews them; the usage API answers an expired one with 401 and `error.code: 'api_key_expired'`. The message points to the "OpenCode Console account" row on the OpenCode card in Providers, because that sign-in serves Go and OpenCode renews it. When a Console sign-in exists and its own read failed before the key fallback, the Console error is shown instead, so the advice never asks for an account that is already connected. Any other 401 stays "authentication failed".
 - Keep `packages/web/server/lib/quota/providers/opencode-go.js` and `packages/vscode/src/opencodeGoQuota.ts` in sync — the VS Code extension duplicates this logic rather than importing the web provider.
 
-### Why an ended subscription is the absent-subscription message and not its own
+### Why an ended subscription is the absent-subscription class and not its own
 
-A refunded or cancelled Go subscription keeps `product: "go"` and sends `access: null` (#6779). A dedicated message would name the state more precisely, but the card already answers "no active subscription" every other way a workspace can lack Go — an unexpected `product`, a 403 on the shared key — and "it ended" is that same fact with a date on it. One message keeps the advice, and the tests asserting it, in one place; the ended-at date lives in the status response, not in a quota window we would have to render.
+A refunded or cancelled Go subscription keeps `product: "go"` and sends `access: null` (#6779). A dedicated class would name the state more precisely, but every other way a workspace can lack Go (an unexpected `product`, a 403 on the shared key) is already the absent subscription, and "it ended" is that same fact with a date on it. The ended-at date lives in the status response, not in a quota window we would have to render.
+
+### Why an absent subscription hides the card and is not an error
+
+Everyone signed in to the Console for Zen holds an `opencode` credential, so `isConfigured` lists Go for them, and a red "No active OpenCode Go subscription" on every refresh told them about a product they never bought (#6663). Nothing is broken there, so the result says Go is not configured and the UI hides the card the way it hides any provider without a credential. `isConfigured` still answers from the credential alone, because knowing the subscription costs a request and the list is read without network calls.
 
 ### Why the `opencode` credential comes before the `opencode-go` key
 
@@ -157,7 +157,7 @@ The OpenCode Go result also carries the active Console sign-in's monthly spend b
 
 ### Invariants
 
-- A failed Go read for a subscribed workspace stays failed so the page retains its last meters. Budgets turn that failure into a sample only when the workspace has no Go subscription, leaving the Go error alongside the budgets.
+- A failed Go read for a subscribed workspace stays failed so the page retains its last meters. Budgets turn that failure into a sample only when the workspace has no Go subscription. A not-configured Go result becomes the budgets alone, without an error; a configured failure keeps its Go error alongside them.
 - A malformed budget is dropped independently, so it cannot hide other valid budgets.
 
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
@@ -342,7 +342,7 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:
    - Simple providers: create `packages/web/server/lib/quota/providers/<provider>.js`.
-   - Complex providers (multi-source auth, multiple API calls, non-trivial transforms): create `packages/web/server/lib/quota/providers/<provider>/` with split modules like Google (`index.js`, `auth.js`, `api.js`, `transforms.js`).
+   - Complex providers (multi-source auth, multiple API calls, non-trivial transforms): create `packages/web/server/lib/quota/providers/<provider>/` with split modules like Claude (`index.js`, `transforms.js`).
 2. Export `providerId`, `providerName`, `aliases`, `isConfigured`, and `fetchQuota`.
 3. Use shared helpers from `packages/web/server/lib/quota/utils/index.js` (`buildResult`, `toUsageWindow`, auth/conversion helpers) to keep payload shape consistent.
 4. Register the provider in `packages/web/server/lib/quota/providers/index.js`.
@@ -350,45 +350,19 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 6. Update this file with the new provider ID, module path, and alias/auth details.
 7. Validate with `bun run type-check`, `bun run lint`, and `bun run build`.
 
-## Google OAuth client compatibility
+## Why there is no Google or Antigravity quota
 
-The `google` quota provider reads the active OpenCode login. Gemini CLI and
-Antigravity both pack project context into the refresh token with `|`, and a
-generic OAuth method with empty metadata does not identify its issuing client.
-The provider keeps the Gemini model keys and quota parsing for either login.
-
-Expired or missing access tokens first use the Gemini CLI OAuth client. Only
-HTTP 400/401 with the parsed OAuth code `unauthorized_client` permits one attempt
-with the Antigravity client. This compatibility probe leaves the selected
-credential unchanged. Other authorization errors, bare HTTP failures, malformed
-responses, rate limits, and transport failures never trigger the alternate
-client. A valid access token requires no exchange.
-
-`providers/google/oauth.js` owns the shared refresh logic and installed-app
-client constants for web/Electron and VS Code, including direct Antigravity
-refreshes which use only their own client. Exchanges go to the fixed Google token
-URL, reject redirects, and have a 15-second deadline each. Failures preserve HTTP
-status and an allowlisted OAuth code, or a transport/response category internally.
-The panel keeps its existing refresh failure text; raw error bodies and exception
-messages never reach the quota result. Failed refreshes
-return configured failure without querying quota with expired access.
-
-Refreshes are read-only with respect to OpenCode credentials. Neither a guessed
-client nor refreshed tokens are written back. Refresh-token rotation and changes
-to quota endpoint semantics are outside this compatibility fix.
-
-## Antigravity quota and limit semantics
-
-Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE accounts, querying Google's `retrieveUserQuotaSummary` endpoint (falling back to `daily-cloudcode-pa.googleapis.com` and `fetchAvailableModels` flat quotaInfo).
-
-- **Windows**: each model row carries its group's rolling 5-hour (`5h`) and 7-day weekly (`weekly`) limits across Gemini and 3P (Claude/GPT) model groups. The provider card itself exposes no top-level windows (`windows: {}`), matching the Google provider: one overview row could only reflect a single group and would mislead a user whose tighter limit lives in the other group.
-- **Bottleneck prioritization**: when a group's weekly limit is exhausted or more constrained than its 5-hour limit, the weekly window is prioritized first in the model's window map.
-- **Runtime parity**: `packages/web/server/lib/quota/providers/antigravity/` and `packages/vscode/src/quotaProviders.ts` (`fetchAntigravityQuota`) implement the same summary parsing, fallback chain, and bottleneck ordering — keep them in sync.
-- **Client identity**: both runtimes take their request headers from `providers/antigravity/client.js`. The `User-Agent` is `antigravity/<ANTIGRAVITY_CLIENT_VERSION> <os>/<arch>`, with the platform of the machine the request runs on. Google gates the "Gemini Models" group of the daily host's `retrieveUserQuotaSummary` by that version: `antigravity/1.11.5` got the Claude/GPT group alone, answered 200, and the Gemini rows disappeared without an error (#5138). Keep the constant at the version Antigravity's own updater lists, the `version:` line of its [updater manifest](https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml). A summary that has groups but none for Gemini logs one server-side warning per process that names the constant. The Google provider keeps its own headers.
-
-### Why a pinned client version and not one read from Antigravity's updater
-
-Reading the updater manifest on every start would track releases without a code change, but it adds a request to a Google host the quota card does not otherwise need, and a failed or changed manifest would still need a fallback version in code. A single constant plus the missing-group warning keeps the requests the same and makes the next stale version show up in the server log.
+Google publishes no quota API for Gemini or Antigravity sign-ins. The only
+numbers sit behind `cloudcode-pa.googleapis.com/v1internal`
+(`retrieveUserQuota`, `retrieveUserQuotaSummary`, `fetchAvailableModels`),
+which Google's own clients call with their own OAuth clients and headers.
+Reading them from here meant borrowing the Antigravity OAuth client and
+sending an `antigravity/<version>` User-Agent. Section 6 of the
+[Google Antigravity Additional Terms of Service](https://antigravity.google/terms/)
+makes third-party software using the user's Antigravity sign-in grounds for
+suspending their Antigravity and Gemini CLI accounts. A usage card is not worth
+that risk to someone's account, so both providers were removed from web and
+VS Code.
 
 ## MiniMax M3 / Token Plan migration
 
@@ -540,12 +514,19 @@ where entitlement is unbounded (`-1` or null), `credits_used` provides the only
 meaningful consumption indicator. It crosses the quota response as numeric
 `creditsUsed` so changing the UI locale translates the message without refetching.
 
-The label is fixed to the used axis, so with the display preference set to
-`remaining` the bar and its caption flip to remaining while the number still reads
-`… used`. That mismatch is accepted deliberately: the Kimi section of this document
-declined a `valueLabel` for exactly this reason, and the label suppressing the
-percent is the defect this change removes, so shipping the percent instead would
-trade a wrong number for no number.
+The window also carries the two numbers behind the label as `credits: { used,
+limit }`. Shared UI formats them itself, so the figure follows the used/remaining
+display preference like a percent does: `4,074.9 / 20,000` while showing usage,
+`15,925.1 / 20,000` while showing what is left, with no axis word, since the
+preference already names the axis. The fixed `… used` label stays on the wire for
+clients built before `credits` existed (their quota schema drops the unknown
+field and keeps showing the label) and for the agent's usage tool.
+
+### Why structured credits and not a new `value` kind
+
+`value` is a discriminated union that every client parses with a closed list of
+kinds, so a new kind would fail the whole quota response on an older mobile or
+VS Code build. An extra optional field is stripped by those parsers instead.
 
 ## OpenRouter key semantics
 
@@ -604,7 +585,6 @@ provider-specific request and on-demand meters.
 
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
-- Keep Google behavior changes isolated and review `providers/google/*` together.
 - Z.ai Coding Plan exposes separate 5-hour and weekly token/credit limit entries plus a monthly `TIME_LIMIT` for MCP tools. The API renamed the limit type from `TOKENS_LIMIT` to `CREDIT_LIMIT` (same `unit`/`number` window semantics); `CREDIT_LIMIT` entries additionally carry `usage` (total), `currentValue` (consumed), and `remaining`, surfaced as a credit `valueLabel`, and the payload's `data.level` becomes `planLabel`. Web and VS Code must preserve these windows and stay in sync.
 - Z.ai gift (bonus) resets come from a supplementary `GET https://api.z.ai/api/biz/customer-package-reset/list?targetType=PERSONAL` with the same bearer token, fetched after a successful quota fetch. `expireTime` strings (`YYYY-MM-DD HH:mm:ss`) are parsed as UTC+8. Only `available: true` records with a numeric `recordId` and a parseable, non-expired `expireTime` are considered; the nearest expiry wins and is attached as `giftReset` (`{recordId, expireAt, grantType?}`) on the window matching `windowSeconds` (`fiveHourResets` → 5h, `weekResets` → weekly). `grantType` is a server-side enum delivered per record (the z.ai frontend threads the record's value into its activation request; no literal values are hardcoded client-side); when present as a non-empty string it is kept on `giftReset`. Expired records are never shown. The request is supplementary: any failure, non-ok response, or malformed payload leaves the quota result untouched with no `giftReset`. Activation goes through `POST /api/quota/:providerId/gift-reset/use` (z.ai aliases only), which posts `{targetType: 'PERSONAL', resetType, recordId, requestId: <uuid>, grantType}` to `https://api.z.ai/api/biz/customer-package-reset/use` (`resetType` is `'FIVE_HOUR'` for the 5h window and `'WEEK'` for the weekly window — the weekly value was verified live against a real weekly reset). `grantType` is threaded unchanged from the list record the user activates; `'GLOBAL'` — the only value observed so far, verified live in late October 2026, when z.ai made the field required — is the fallback when a record carries none. An explicitly supplied value that is not a non-empty string is rejected before the upstream request. Activation fails without the field. Both runtimes must keep this in sync.
 

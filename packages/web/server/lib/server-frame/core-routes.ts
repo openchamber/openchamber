@@ -7,7 +7,7 @@ import { getBearerTokenFromRequest } from '../ui-auth/ui-auth.js';
 import { candidateUrlType, isLocalOnlyCandidateSet, isLoopbackCandidateUrl, normalizeCandidateUrl } from '../client-auth/pairing-candidates.js';
 import { isBoolean, isString } from '../shared/object-guards.js';
 import { createApiAuthGate, isRouteGatedApiRequest } from './api-auth-gate.js';
-import type { AddressInfo, Server } from 'node:net';
+import { registerHealthRoute } from './health-route.js';
 import type { Application, ExpressFactory, NextFunction, Request, RequestHandler, Response } from '../shared/http-contracts.js';
 import type { DiagnosticJournal, OpenCodeLoad } from '../diagnostics/contracts.js';
 import type { AuthContext, createUiAuth } from '../ui-auth/ui-auth.js';
@@ -20,6 +20,8 @@ import type { TunnelRoutesDependencies } from '../tunnels/routes.js';
 import type { createThemeRuntime } from '../appearance/theme-runtime.js';
 import type { createClientPushAccess } from '../notifications/client-push-access.js';
 import type { createOpenCodeLifecycleRuntime } from '../opencode/lifecycle.js';
+
+const FORWARDING_HEADERS = ['forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip'];
 
 type UiAuthController = ReturnType<typeof createUiAuth>;
 type TunnelAuthController = ReturnType<typeof createTunnelAuth>;
@@ -111,7 +113,6 @@ const hasRouteInput = (value: unknown): value is RouteInput => value != null;
 const readBody = (req: Request) => hasRouteInput(req.body) ? req.body : undefined;
 const hasErrorDetails = (value: unknown): value is { message?: unknown; statusCode?: unknown } => value != null;
 const isNumber = (value: unknown): value is number => typeof value === 'number';
-const isAddressInfo = (value: ReturnType<Server['address']>): value is AddressInfo => Boolean(value) && typeof value === 'object';
 
 export const registerHttpResponseDiagnostics = (app: Application, journal: DiagnosticJournal = serverDiagnosticJournal) => {
   app.use((req, res, next) => {
@@ -182,30 +183,6 @@ export const registerServerStatusRoutes = (app: Application, dependencies: Serve
       cachedServerId = null;
     }
     return cachedServerId;
-  };
-
-  const allocateLoopbackPort = async () => {
-    const net = await import('node:net');
-    return await new Promise<number>((resolve, reject) => {
-      const server = net.createServer();
-      server.on('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        try {
-          const address = server.address();
-          const port = isAddressInfo(address) ? address.port : 0;
-          server.close(() => {
-            resolve(port);
-          });
-        } catch (error) {
-          try {
-            server.close();
-          } catch {
-            void 0;
-          }
-          reject(error);
-        }
-      });
-    });
   };
 
   const compatibility = {
@@ -329,25 +306,15 @@ export const registerServerStatusRoutes = (app: Application, dependencies: Serve
     }
   };
 
-  app.get('/health', async (_req, res) => {
-    const serverId = await resolveServerId();
-    const identity: ServerIdentity = {};
-    if (serverId) identity.serverId = serverId;
-    res.json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      openchamberVersion,
-      runtime: runtimeName,
-      compatibility,
-      ...identity,
-      ...getHealthSnapshot(),
-    });
-  });
+  const isLocalPeer = (req: Request) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress ?? '')
+    && !req.headers['x-openchamber-relay-connection']
+    && !FORWARDING_HEADERS.some((header) => req.headers[header] !== undefined)
+    && (!tunnelAuthController?.classifyRequestScope || tunnelAuthController.classifyRequestScope(req) === 'local');
+
+  registerHealthRoute({ app, getHealthSnapshot, resolveServerId, openchamberVersion, runtimeName, compatibility, isLocalPeer });
 
   const requireLocalDiagnostics: RequestHandler = (req, res, next) => {
-    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket?.remoteAddress ?? '')
-      || req.headers['x-openchamber-relay-connection']
-      || (tunnelAuthController?.classifyRequestScope && tunnelAuthController.classifyRequestScope(req) !== 'local')) {
+    if (!isLocalPeer(req)) {
       res.status(403).json({ error: 'Local diagnostics require a loopback connection' });
       return;
     }
@@ -494,19 +461,6 @@ export const registerServerStatusRoutes = (app: Application, dependencies: Serve
     }
     res.json(info);
   });
-
-  app.get('/api/system/free-port', async (_req, res) => {
-    try {
-      const port = await allocateLoopbackPort();
-      if (!Number.isFinite(port) || port <= 0) {
-        return res.status(500).json({ error: 'Failed to allocate port' });
-      }
-      return res.json({ port });
-    } catch (error) {
-      return res.status(500).json({ error: (hasErrorDetails(error) && error.message) || 'Failed to allocate port' });
-    }
-  });
-
 };
 
 export const registerAuthAndAccessRoutes = (app: Application, dependencies: AuthAndAccessDependencies) => {
@@ -1205,8 +1159,7 @@ export const registerCommonRequestMiddleware = (app: Application, dependencies: 
       req.path.startsWith('/api/config/mcp') ||
       req.path.startsWith('/api/config/snippets') ||
       req.path.startsWith('/api/config/settings') ||
-      req.path.startsWith('/api/config/skills') ||
-      req.path === '/api/config/skill-switch' ||
+      req.path.startsWith('/api/config/skill') ||
       req.path.startsWith('/api/config/plugins') ||
       req.path.startsWith('/api/config/websearch') ||
       req.path.startsWith('/api/config/warming') ||

@@ -85,6 +85,7 @@ describe('Z.ai quota provider', () => {
       windowSeconds: 5 * 60 * 60,
       resetAt: 1787257978907,
       valueLabel: '65 / 12k credits',
+      credits: { used: 65, limit: 12000, remaining: 11934 },
     });
     expect(windows.weekly).toMatchObject({
       usedPercent: 1,

@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import assert from 'node:assert/strict';
 
@@ -87,6 +90,16 @@ const { SessionEditorPanelProvider } = await import('./SessionEditorPanelProvide
 const { ChatViewProvider } = await import('./ChatViewProvider');
 const { getWebviewHtml } = await import('./webviewHtml');
 
+// A built extension folder: the webview HTML takes its entry file from the
+// build manifest.
+const extensionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-ext-'));
+fs.mkdirSync(path.join(extensionDir, 'dist', 'webview'), { recursive: true });
+fs.writeFileSync(path.join(extensionDir, 'dist', 'webview', 'manifest.json'), JSON.stringify({
+  'index.html': { file: 'assets/index-AbC123.js', isEntry: true },
+  '../ui/src/apps/renderVSCodeApp.tsx': { file: 'assets/renderVSCodeApp-XyZ789.js', isDynamicEntry: true },
+}));
+afterAll(() => fs.rmSync(extensionDir, { recursive: true, force: true }));
+
 const createContext = () => ({
   extensionMode: 2, // Production: no dev-server HMR URL
   subscriptions: [],
@@ -95,10 +108,10 @@ const createContext = () => ({
   },
 });
 
-const createProvider = () => new SessionEditorPanelProvider(createContext(), { fsPath: '/ext' });
+const createProvider = () => new SessionEditorPanelProvider(createContext(), { fsPath: extensionDir });
 
 describe('VS Code webview content security policy', () => {
-  const extensionUri = { fsPath: '/extension' };
+  const extensionUri = { fsPath: extensionDir };
   const webviewStub = {
     cspSource: 'vscode-webview://test',
     asWebviewUri: (value) => value,
@@ -118,6 +131,13 @@ describe('VS Code webview content security policy', () => {
     assert.ok(directives.get('worker-src')?.includes('blob:'));
     assert.ok(directives.has('script-src'));
     assert.ok(!directives.get('script-src')?.includes('blob:'));
+  });
+
+  test('loads the hashed entry named by the build manifest', () => {
+    const webview = { ...webviewStub, asWebviewUri: (value) => ({ toString: () => value.fsPath }) };
+    const html = getWebviewHtml({ webview, extensionUri,
+      workspaceFolder: '/workspace', initialStatus: 'connecting', cliAvailable: true });
+    assert.ok(html.includes(JSON.stringify(`${extensionDir}/dist/webview/assets/index-AbC123.js`)));
   });
 
   test('installs a CSP document before changing sidebar webview options', () => {
@@ -353,5 +373,73 @@ describe('Settings editor panel', () => {
     expect(settings.messages.filter((message) => message.command === 'showSettings')).toEqual([
       { type: 'command', command: 'showSettings', payload: { page: 'mcp' } },
     ]);
+  });
+
+  it('validates panel-only commands and keeps them from falling through to executeCommand', async () => {
+    const provider = createProvider();
+    provider.createOrShow('ses_1', 'Initial Title');
+    const chat = panel;
+    provider.showSettings({ page: 'appearance' });
+    const settings = panel;
+    executeCommand.mockClear();
+    const replyOf = (entry, id) => entry.messages.find((message) => message.id === id);
+
+    await settings.receive({ id: 'bad-ready', type: 'vscode:command', payload: { command: 'openchamber.settingsReady', args: ['unexpected'] } });
+    expect(replyOf(settings, 'bad-ready')).toEqual({
+      id: 'bad-ready',
+      type: 'vscode:command',
+      success: false,
+      error: 'Invalid arguments for command: openchamber.settingsReady',
+    });
+    expect(settings.messages.some((message) => message.command === 'showSettings')).toBe(false);
+
+    await settings.receive({ id: 'ok-ready-empty-args', type: 'vscode:command', payload: { command: 'openchamber.settingsReady', args: [] } });
+    expect(replyOf(settings, 'ok-ready-empty-args')).toEqual({ id: 'ok-ready-empty-args', type: 'vscode:command', success: true, data: { result: true } });
+    expect(settings.messages.some((message) => message.command === 'showSettings')).toBe(true);
+
+    await settings.receive({ id: 'wrong-panel-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', 'Hijacked'] } });
+    expect(replyOf(settings, 'wrong-panel-title')).toEqual({
+      id: 'wrong-panel-title',
+      type: 'vscode:command',
+      success: false,
+      error: 'Command is not allowed: openchamber.updateSessionEditorTitle',
+    });
+
+    await chat.receive({ id: 'wrong-panel-ready', type: 'vscode:command', payload: { command: 'openchamber.settingsReady', args: [] } });
+    expect(replyOf(chat, 'wrong-panel-ready')).toEqual({
+      id: 'wrong-panel-ready',
+      type: 'vscode:command',
+      success: false,
+      error: 'Command is not allowed: openchamber.settingsReady',
+    });
+
+    const malformedTitleArgs = [[], [null, 'Title'], [123, 'Title'], ['ses_1', 42], ['ses_1', 'Title', 'extra']];
+    for (let index = 0; index < malformedTitleArgs.length; index++) {
+      const id = `bad-title-${index}`;
+      await chat.receive({ id, type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: malformedTitleArgs[index] } });
+      expect(replyOf(chat, id)).toEqual({
+        id,
+        type: 'vscode:command',
+        success: false,
+        error: 'Invalid arguments for command: openchamber.updateSessionEditorTitle',
+      });
+      expect(chat.title).toBe('Initial Title');
+    }
+
+    await chat.receive({ id: 'ok-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', '  Renamed Session  '] } });
+    expect(chat.title).toBe('Renamed Session');
+    expect(replyOf(chat, 'ok-title')).toEqual({ id: 'ok-title', type: 'vscode:command', success: true, data: { result: true } });
+
+    await chat.receive({ id: 'blank-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', '   '] } });
+    expect(chat.title).toBe('Session');
+
+    await chat.receive({ id: 'long-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', 'y'.repeat(5000)] } });
+    expect(chat.title).toBe('y'.repeat(4096));
+
+    chat.dispose();
+    await chat.receive({ id: 'disposed-title', type: 'vscode:command', payload: { command: 'openchamber.updateSessionEditorTitle', args: ['ses_1', 'After Dispose'] } });
+    expect(chat.title).toBe('y'.repeat(4096));
+
+    expect(executeCommand).not.toHaveBeenCalled();
   });
 });

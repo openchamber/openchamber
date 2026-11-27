@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { workStatusAccountsI18n } from './work-status-accounts.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
@@ -62,10 +63,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { diffReviewedI18n } from './diff-reviewed.i18n';
 import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
+import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
@@ -116,21 +120,24 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Nécessite un Small Model. Connectez-vous à un fournisseur de modèles ou choisissez-en un dans Paramètres → Sessions.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Sélectionner une pull request',
+  'pullRequestComparison.searchShort': 'Rechercher des pull requests',
   'pullRequestComparison.pickAbove': 'Choisissez une pull request ci-dessus',
   'pullRequestComparison.diffUnavailable': "{provider} ne fournit pas le diff des pull requests : impossible de les afficher ou de les parcourir ici",
   'pullRequestComparison.partial': "Certaines pull requests n'ont pas pu être chargées",
   'commitComparison.select': 'Choisir un commit',
+  'commitComparison.branchDividerSingle': 'Au-dessus : le commit présent seulement dans {branch}. En dessous : déjà dans {base}.',
+  'commitComparison.branchDividerPlural': 'Au-dessus : {count} commits présents seulement dans {branch}. En dessous : déjà dans {base}.',
+  'commitComparison.backToList': 'Retour aux commits',
   'commitComparison.search': 'Rechercher des commits...',
   'commitComparison.loadError': 'Impossible de charger les commits',
   'commitComparison.noCommits': 'Aucun commit trouvé',
   'commitComparison.emptyDiff': 'Aucune modification dans ce commit',
-  'chat.liveActivity.title': 'Activité',
-  'chat.liveActivity.moreRows': '+{count} de plus',
   'chat.liveActivity.changedFile': '{count} fichier modifié',
   'chat.liveActivity.changedFiles': '{count} fichiers modifiés',
-  'chat.liveActivity.explored': 'Base de code explorée',
+  'chat.liveActivity.working': 'En cours…',
   'chat.liveActivity.ranCommand': '{count} commande exécutée',
   'chat.liveActivity.ranCommands': '{count} commandes exécutées',
+  'chat.liveActivity.explored': 'Base de code explorée',
   'chat.liveActivity.researched': 'Recherche sur le web effectuée',
   'chat.liveActivity.usedSubagent': '{count} sous-agent utilisé',
   'chat.liveActivity.usedSubagents': '{count} sous-agents utilisés',
@@ -213,7 +220,7 @@ export const dict = {
   ...htmlRenderI18n.fr,
   ...documentToolbarI18n.fr,
   ...uiBlocksI18n.fr,
-  ...updateDialogCanaryI18n.fr,
+  ...updateDialogCanaryI18n.fr, ...updateIdleI18n.fr,
   ...aboutReleaseNotesI18n.fr,
   ...updateCheckErrorsI18n.fr,
   ...secretRequestI18n.fr,
@@ -223,6 +230,7 @@ export const dict = {
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
   ...sessionWarmingI18n.fr,
+  ...sessionCostI18n.fr,
   ...connectionHeartbeatI18n.fr,
   ...workStatusAccountsI18n.fr,
   ...compactionSettingsI18n.fr,
@@ -260,10 +268,13 @@ export const dict = {
   ...pluginsGridI18n.fr,
   ...integrationsCatalogI18n['fr'],
   ...diffFindI18n['fr'],
+  ...diffReviewedI18n['fr'],
   ...contextWindowI18n['fr'],
   ...markdownOutlineI18n['fr'],
   ...markdownGithubI18n['fr'],
   ...autocompleteScopeI18n['fr'],
+  ...chatExchangeI18n['fr'],
+  ...integrateConflictI18n['fr'],
   ...workflowsI18n['fr'],
   ...subagentsI18n['fr'],
   ...sessionReferencesI18n['fr'],
@@ -537,6 +548,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Afficher la section en cours',
   'sessions.sidebar.header.displayMode.showPinned': 'Afficher la section épinglées',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Afficher les sessions des sous-agents',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Lignes détaillées',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Nommer les worktrees d’après leur branche',
   'sessions.sidebar.activity.pinnedTitle': 'Épinglées',
@@ -564,6 +576,7 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.description': 'Essayez un autre titre ou une autre branche.',
   'sessions.sidebar.activity.chatsTitle': 'Discussions',
   'sessions.sidebar.activity.chatsEmpty': 'Aucune discussion pour le moment.',
+  'sessions.sidebar.timeline.noSessionsYet': 'Pas encore de session',
   'chat.chatInput.chooseProject': 'Choisir un projet',
   'sessions.sidebar.header.projectDisplay.label': 'Afficher les projets',
   'sessions.sidebar.header.projectDisplay.all': 'Tous les projets',
@@ -712,6 +725,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Déplacement de la session vers un nouveau worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Autorisation requise',
   'sessions.sidebar.session.status.questionPending': 'Question en attente',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Autorisation requise. Ouvre la session qui le demande',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Question en attente. Ouvre la session qui le demande',
   'sessions.sidebar.session.status.activeFor': 'Active depuis {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Le dernier tour a duré {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Réduire les sous-sessions',
@@ -1416,6 +1431,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'Il n’y a encore aucune modification dans cette portée.',
   'walkthrough.blocked.contextTooSmall.title': 'Ce diff est trop volumineux pour le modèle actuel',
   'walkthrough.blocked.contextTooSmall.description': '{model} accepte environ {available} k caractères et ce diff en demande environ {required} k. Rien n’est tronqué : choisissez un modèle au contexte plus large.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model} a refusé ce diff, car il est trop long. Choisissez un modèle au contexte plus large ou une portée plus étroite.',
   'walkthrough.blocked.structuredOutput.title': 'Ce modèle ne produit pas de sortie structurée',
   'walkthrough.blocked.structuredOutput.description': '{model} ne prend pas en charge les réponses structurées nécessaires à un parcours.',
   'walkthrough.blocked.chooseModel': 'Choisissez le petit modèle',
@@ -1750,6 +1766,8 @@ export const dict = {
   'diffView.state.loadingDiff': 'Chargement du différentiel...',
   'diffView.state.loadingChanges': 'Chargement des modifications...',
   'diffView.state.largeDiff': 'Diff volumineux ({count} lignes modifiées)',
+  'diffView.state.largeDiffLongLines': 'Diff volumineux (lignes très longues)',
+  'diffView.state.largeFile': 'Fichier volumineux',
   'diffView.state.largeDiffDescription': 'Le rendu peut être lent. Vous pouvez tout de même afficher le diff avec le bouton ci-dessous.',
   'diffView.summary.changedFilesSingle': 'Le fichier {count} a été modifié',
   'diffView.summary.changedFilesPlural': 'Fichiers {count} modifiés',
@@ -1774,6 +1792,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Vue côte à côte',
   'diffView.actions.wrapLines': 'Retour à la ligne',
   'diffView.actions.moreActions': 'Plus d’actions',
+  'diffView.actions.viewOptions': 'Options d’affichage du diff',
+  'gitView.sidebar.resizeAria': 'Redimensionner la barre latérale Git',
+  'gitView.commit.stagedCountSummary': '{count} indexé(s)',
+  'gitView.commit.collapseAria': 'Réduire le formulaire de commit',
   'diffView.actions.openFileInEditorAtChange': 'Ouvrez ce fichier dans l\'éditeur lors du changement',
   'diffView.actions.openFileAtFirstChangedLine': 'Ouvrez ce fichier à la première ligne modifiée',
   'diffView.actions.reviewAria': 'Revoir les changements',
@@ -2162,6 +2184,9 @@ export const dict = {
   'session.githubPrPicker.empty.noPullRequestsFound': 'Aucune PR trouvée',
   'session.githubPrPicker.loading.pullRequests': 'Chargement des PR...',
   'session.githubPrPicker.actions.loadMore': 'Charger plus',
+  'session.githubPrPicker.filter.group.repository': 'Dépôt',
+  'session.githubPrPicker.filter.group.author': 'Auteur',
+  'session.githubPrPicker.filter.clearAll': 'Effacer les filtres',
   'session.newWorktree.title': 'Nouveau worktree',
   'session.newWorktree.mode.newBranch': 'Nouvelle branche',
   'session.newWorktree.mode.existingBranch': 'Branche existante',
@@ -2283,6 +2308,7 @@ export const dict = {
   'chat.revert.toast.undo': 'Revenu à {preview}',
   'chat.revert.toast.redo': 'Refait',
   'chat.revert.toast.restored': 'Restauré tous les messages',
+  "chat.revert.toast.filesUnchanged": "Retour en arrière dans la conversation. Les fichiers n'ont pas été modifiés.",
   'chat.toast.opencodeRestartInterrupted.title': 'Discussion interrompue',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode a redémarré alors qu’une réponse était encore en cours. Envoyez un message pour continuer.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode a redémarré alors qu’une réponse était encore en cours. La discussion reprendra automatiquement ; envoyez un message si elle ne reprend pas.',
@@ -2399,6 +2425,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'Enregistrer le texte sélectionné dans les notes',
   'chat.messageBody.actions.revertAria': 'Revenir à ce message',
   'chat.messageBody.actions.revert': 'Revenir à partir d\'ici',
+  'chat.messageBody.status.waitingForAgent': 'En attente de l\'agent',
   'chat.messageBody.actions.forkAria': 'Fork à partir de ce message',
   'chat.messageBody.actions.fork': 'Fork à partir d\'ici',
   'chat.messageBody.actions.copyMessageAria': 'Copier le texte du message',
@@ -2485,6 +2512,7 @@ export const dict = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'Échec de l\'envoi des pièces jointes. Essayez moins de fichiers ou des images plus petites.',
   'chat.chatInput.toast.messageSendFailed': 'Le message n\'a pas pu être envoyé. Pièces jointes restaurées.',
   'chat.chatInput.toast.agentUnavailable': 'L\'agent "{agent}" n\'est pas disponible dans le dossier de cette session. Choisissez un autre agent et renvoyez le message.',
+  'chat.chatInput.toast.skillLoadFailed': 'Le skill "{skill}" n\'a pas pu être chargé depuis son serveur MCP. Vérifiez dans les Réglages que le serveur est connecté, puis renvoyez le message.',
   'chat.chatInput.toast.noModelSelected': 'Sélectionnez un fournisseur et un modèle avant d\'envoyer.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Échec de la pièce jointe de l\'image du presse-papiers',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'Échec de la pièce jointe du texte collé comme fichier',
@@ -2825,6 +2853,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Copier le chemin',
   'openInApp.actions.refreshApps': 'Actualiser les applications',
   'openInApp.toast.pathCopied': 'Chemin copié dans le presse-papiers',
+  'openInApp.toast.sshOpenFailed': 'Impossible d\'ouvrir {app}. Vérifiez qu\'il est installé sur cet ordinateur.',
+  'openInApp.toast.sshInstanceChanged': 'Cette fenêtre est passée à une autre instance avant l\'ouverture de {app}. Réessayez.',
+  'openInApp.toast.sshSettingsMismatch': '{app} ne se connecterait pas comme cette instance : sa commande SSH définit {settings}, que {app} ne lit pas. Déplacez ces réglages dans l\'entrée de l\'hôte dans ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'Impossible de lire les réglages SSH de cette instance, {app} n\'a donc pas été ouvert. Vérifiez sa commande SSH.',
+  'openInApp.toast.sshUnsupported': '{app} ne peut pas ouvrir ce projet via SSH.',
   'projectActions.actions.addActionAria': 'Ajouter une action',
   'projectActions.actions.addAction': 'Ajouter une action',
   'projectActions.actions.addNewAction': 'Ajouter une nouvelle action',
@@ -3413,10 +3446,6 @@ export const dict = {
   'mobile.menu.update': 'Mettre à jour',
   'mobile.menu.settings': 'Paramètres',
   'mobile.sessions.newChatCta': 'Nouveau chat dans {project}',
-  'mobile.sessions.dateGroup.today': 'Aujourd’hui',
-  'mobile.sessions.dateGroup.yesterday': 'Hier',
-  'mobile.sessions.dateGroup.thisWeek': 'Plus tôt cette semaine',
-  'mobile.sessions.dateGroup.older': 'Plus ancien',
   'mobile.sessions.section.worktrees': 'Worktrees',
   'mobile.sessions.section.otherProjects': 'Changer de projet',
   'mobile.sessions.section.projects': 'Projets',
@@ -3571,6 +3600,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'Ceci est une sélection annotée du navigateur intégré.',
   'contextPanel.browser.annotate.attached': 'Annotation jointe à la discussion',
   'contextPanel.browser.annotate.noSession': 'Ouvrez une session de discussion avant de joindre une annotation',
+  'contextPanel.browser.annotate.readOnly': 'Cette discussion est en lecture seule : impossible d’y joindre une annotation',
   'contextPanel.browser.annotate.noPage': 'Chargez une page avant d’annoter',
   'contextPanel.browser.annotate.failed': 'Impossible d’annoter cette page',
   'contextPanel.browser.annotate.tool.element': 'Élément',

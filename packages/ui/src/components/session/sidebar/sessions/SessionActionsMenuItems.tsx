@@ -54,11 +54,12 @@ import { getWorkFolderScope } from './sessionFolderIdentity';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled } from './sessionNodeItemUtils';
 import { collectSessionMoveDescendants } from './sessionSubtreeActions';
 import { HandToLeadMenu } from './HandToLeadMenu';
+import { TrackBlockedByPinItem } from './TrackBlockedByPinItem';
 
 type SessionMenuWork = {
   inWork: boolean;
   toggle: () => void;
-};
+} | 'blocked-by-pin';
 
 export type SessionMenuFolders = {
   ownerKey: string | null;
@@ -497,7 +498,7 @@ export function SessionActionsMenuItems({
       <SessionAiRenameMenuItem sessionID={session.id} directory={directory} open={open} Item={Item} />
       <Separator />
 
-      {work ? (
+      {work === 'blocked-by-pin' ? <TrackBlockedByPinItem Item={Item} touch={touch} /> : work ? (
         <SessionMenuItemHint hint={work.inWork ? t('sessions.sidebar.session.menuHint.markDone') : t('sessions.sidebar.session.menuHint.track')}>
           <Item onClick={work.toggle} className="[&>svg]:me-1">
             <Icon name={work.inWork ? 'check' : 'eye'} className="me-1 h-4 w-4" />

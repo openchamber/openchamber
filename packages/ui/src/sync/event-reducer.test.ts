@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import type { SyncEvent } from "@/lib/opencode/events"
-import type { Message, Part, PermissionRequest, Session } from "@/lib/opencode/model"
+import { translateWireEvent, type SyncEvent } from "@/lib/opencode/events"
+import { isWaitingSteer, type CompactionMessage, type Message, type Part, type PermissionRequest, type Session } from "@/lib/opencode/model"
 import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 import { applyDirectoryEvent, reduceGlobalEvent } from "./event-reducer"
+import { materializeSessionSnapshots } from "./materialization"
 import { INITIAL_STATE, type State } from "./types"
 
 const session = (overrides: Partial<Session> = {}): Session => ({
@@ -159,7 +160,7 @@ describe("session events", () => {
 })
 
 describe("compaction events", () => {
-  const running = (): Message => ({
+  const running = (): CompactionMessage => ({
     id: "msg_compact", sessionID: "ses_1", role: "compaction", time: { created: 5 }, status: "running", reason: "auto", summary: "",
   })
 
@@ -186,6 +187,68 @@ describe("compaction events", () => {
     const compactions = draft.message.ses_1.filter((message) => message.role === "compaction")
     expect(compactions).toHaveLength(1)
     expect(compactions[0]).toMatchObject({ id: "msg_compact", time: { created: 5 }, status: "completed", summary: "Done." })
+  })
+
+  // What OpenCode puts on `session.compaction.ended` and copies into the record it settles.
+  const settlement = (summary: string, input = 1200) => ({
+    status: "completed" as const,
+    summary,
+    model: { providerID: "fake", id: "compactor" },
+    cost: input / 1000,
+    tokens: { input, output: 80, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+
+  const ended = (summary: string, input?: number, created = 9): SyncEvent => ({
+    type: "message.updated",
+    properties: {
+      info: { id: `msg_evt_${created}`, sessionID: "ses_1", role: "compaction", time: { created }, reason: "auto", ...settlement(summary, input) },
+    },
+  })
+
+  const compactions = (draft: State) => draft.message.ses_1.filter((message) => message.role === "compaction")
+
+  for (const summary of ["Done.", ""]) {
+    test(`an ended event delayed past the history page that settled the compaction adds no second card (summary ${JSON.stringify(summary)})`, () => {
+      const draft = state({ message: { ses_1: [assistant(), running()] } })
+      const settled: Message = { ...running(), ...settlement(summary) }
+      const merged = materializeSessionSnapshots(draft, "ses_1", [{ info: assistant(), parts: [] }, { info: settled, parts: [] }])
+      draft.message = merged.message
+      draft.part = merged.part
+
+      apply(draft, ended(summary))
+
+      expect(compactions(draft)).toHaveLength(1)
+      expect(compactions(draft)[0]).toMatchObject({ id: "msg_compact", time: { created: 5 }, ...settlement(summary) })
+    })
+  }
+
+  test("an ended event for a compaction this client never saw start still adds its card", () => {
+    const settled: Message = { ...running(), ...settlement("Earlier.") }
+    const draft = state({ message: { ses_1: [assistant(), settled] } })
+
+    apply(draft, ended("Done."))
+
+    expect(compactions(draft).map((message) => message.id)).toEqual(["msg_compact", "msg_evt_9"])
+  })
+
+  test("a missed start with the same summary as an earlier compaction still adds its own card", () => {
+    const earlier: Message = { ...running(), ...settlement("Done.", 1200) }
+    const draft = state({ message: { ses_1: [assistant(), earlier] } })
+
+    apply(draft, ended("Done.", 3400))
+
+    expect(compactions(draft).map((message) => message.id)).toEqual(["msg_compact", "msg_evt_9"])
+    expect(compactions(draft)[0]).toEqual(earlier)
+  })
+
+  test("a delayed ended event leaves a compaction that started after it running", () => {
+    const first: Message = { ...running(), ...settlement("Done.") }
+    const second: Message = { ...running(), id: "msg_compact_2", time: { created: 12 } }
+    const draft = state({ message: { ses_1: [assistant(), first, second] } })
+
+    apply(draft, ended("Done."))
+
+    expect(compactions(draft)).toEqual([first, second])
   })
 })
 
@@ -238,11 +301,85 @@ describe("message events", () => {
     })
   })
 
-  test("inbox delivery moves a user message to its delivery time", () => {
-    const user: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 } }
+  test("inbox delivery moves a user message to its delivery time and clears its pending mark", () => {
+    const user: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 }, pending: true }
     const draft = state({ message: { ses_1: [user, assistant()] } })
     apply(draft, { type: "message.patched", properties: { sessionID: "ses_1", messageID: "msg_u", patch: { time: { created: 30 } } } })
     expect(draft.message.ses_1.map((m) => m.id)).toEqual(["msg_a", "msg_u"])
+    expect(draft.message.ses_1[1]).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 30 } })
+  })
+
+  test("inbox delivery clears the pending mark of a user message even when created time matches", () => {
+    const user: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 }, pending: true }
+    const draft = state({ message: { ses_1: [user] } })
+    const changed = apply(draft, {
+      type: "message.patched",
+      properties: { sessionID: "ses_1", messageID: "msg_u", patch: { time: { created: 5 } } },
+    })
+    expect(changed).toBe(true)
+    expect(draft.message.ses_1[0]).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 5 } })
+    expect("pending" in draft.message.ses_1[0]).toBe(false)
+  })
+
+  for (const { label, enqueuedAt } of [
+    { label: "earlier", enqueuedAt: 20 },
+    { label: "same millisecond", enqueuedAt: 30 },
+  ]) test(`an older enqueue replayed after reconnect leaves the delivered record from history alone (${label})`, () => {
+    // History returned the delivered prompt (stamped at delivery) before the replay reached the reducer.
+    const delivered: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 30 } }
+    const historyParts: Part[] = [{ id: "prt_history", sessionID: "ses_1", messageID: "msg_u", type: "text", text: "steered" }]
+    const draft = state({ message: { ses_1: [assistant(), delivered] }, part: { msg_u: historyParts } })
+    const replay = translateWireEvent({
+      id: "evt_old",
+      created: enqueuedAt,
+      location: { directory: "/repo" },
+      type: "session.inbox.enqueued",
+      durable: { aggregateID: "ses_1", seq: 1, version: 1 },
+      data: { sessionID: "ses_1", inboxID: "msg_u", item: { type: "user", delivery: "steer", payload: { text: "steered", files: [] } } },
+    })
+    expect(replay.map((event) => event.type)).toEqual(["message.updated", "message.parts.replaced"])
+    for (const event of replay) expect(apply(draft, event)).toBe(false)
+    expect(draft.message.ses_1).toEqual([assistant(), delivered])
+    expect(draft.part.msg_u).toBe(historyParts)
+    expect(isWaitingSteer(draft.message.ses_1[1]!)).toBe(false)
+  })
+
+  test("a genuinely pending steer still takes its enqueue and clears on delivery", () => {
+    const optimistic: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 15 }, pending: true, steer: true }
+    const draft = state({ message: { ses_1: [assistant(), optimistic] } })
+    const wire = { location: { directory: "/repo" }, durable: { aggregateID: "ses_1", seq: 1, version: 1 as const } }
+    for (const event of translateWireEvent({
+      ...wire,
+      id: "evt_enqueue",
+      created: 20,
+      type: "session.inbox.enqueued",
+      data: { sessionID: "ses_1", inboxID: "msg_u", item: { type: "user", delivery: "steer", payload: { text: "steered", files: [] } } },
+    })) apply(draft, event)
+    expect(isWaitingSteer(draft.message.ses_1[1]!)).toBe(true)
+    expect(draft.part.msg_u?.map((part) => part.type)).toEqual(["text"])
+    for (const event of translateWireEvent({
+      ...wire,
+      id: "evt_delivered",
+      created: 40,
+      type: "session.inbox.delivered",
+      data: { sessionID: "ses_1", inboxID: "msg_u" },
+    })) apply(draft, event)
+    expect(draft.message.ses_1[1]).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 40 } })
+  })
+
+  test("an ordinary send's enqueue marks it pending without making it a waiting steer", () => {
+    const optimistic: Message = { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 15 } }
+    const draft = state({ message: { ses_1: [assistant(), optimistic] } })
+    for (const event of translateWireEvent({
+      id: "evt_enqueue",
+      created: 20,
+      location: { directory: "/repo" },
+      durable: { aggregateID: "ses_1", seq: 1, version: 1 },
+      type: "session.inbox.enqueued",
+      data: { sessionID: "ses_1", inboxID: "msg_u", item: { type: "user", delivery: "queue", payload: { text: "hello", files: [] } } },
+    })) apply(draft, event)
+    expect(draft.message.ses_1[1]).toMatchObject({ pending: true })
+    expect(isWaitingSteer(draft.message.ses_1[1]!)).toBe(false)
   })
 
   test("inbox delivery clears the pending mark of a synthetic message", () => {

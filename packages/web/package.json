@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "private": false,
   "type": "module",
   "main": "./build/server/index.js",
@@ -42,6 +42,7 @@
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src && bun run lint:server",
     "lint:server": "node scripts/check-server-types.mjs --lint",
     "smoke:server-build": "node scripts/smoke-server-build.mjs",
+    "check:packed-install": "node scripts/check-packed-install.mjs",
     "test": "vitest run && node --test opencode-server/*.test.mjs",
     "start": "bun bin/cli.js serve"
   },
@@ -53,9 +54,9 @@
     "@lydell/node-pty": "1.2.0-beta.12",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.3.2",
+    "@opencode/client": "2.4.2",
     "@opencode/pty": "0.6.0",
-    "@opencode/schema": "2.3.2",
+    "@opencode/schema": "2.4.2",
     "@parcel/watcher": "2.5.1",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
@@ -78,14 +79,18 @@
     "yaml": "^2.8.1",
     "zod": "^4.3.6"
   },
+  "bundleDependencies": [
+    "bun-pty",
+    "zod"
+  ],
   "devDependencies": {
-    "@base-ui/react": "^1.4.0",
+    "@base-ui/react": "^1.9.0",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-go": "^6.0.1",
     "@effect/platform-node": "4.1.0",
-    "@opencode/plugin": "2.3.2",
-    "@opencode/server": "2.3.2",
-    "@opencode/util": "2.3.2",
+    "@opencode/plugin": "2.4.2",
+    "@opencode/server": "2.4.2",
+    "@opencode/util": "2.4.2",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

@@ -13,7 +13,7 @@ Wybierz, jak odpowiedzi są wymawiane:
 
 - **browser** korzysta z głosów dostępnych w przeglądarce. Na pulpicie Linux zainstaluj `speech-dispatcher`, jego bibliotekę kliencką `libspeechd` i silnik mowy, np. `espeak-ng`. Włącz usługę speech-dispatcher, jeśli dystrybucja nie uruchamia jej automatycznie, a następnie uruchom ponownie OpenChamber.
 - **OpenAI** — głosy OpenAI; wklej swój klucz API i wybierz głos
-- **OpenAI-compatible** — dowolna usługa mówiąca w formacie OpenAI; wprowadź jej adres URL oraz, jeśli go potrzebuje, klucz API
+- **OpenAI-compatible** — dowolna usługa mówiąca w formacie OpenAI; wprowadź jej adres URL oraz, jeśli go potrzebuje, klucz API. Jeśli usługa podaje listę głosów, **Głos** jest listą rozwijaną zakończoną pozycją **Własny…** dla dowolnej innej nazwy głosu; w przeciwnym razie wpisz nazwę
 - **macOS say** — wbudowane polecenie `say`, na Macach, które je mają
 
 Po włączeniu na wiadomościach pojawia się przycisk odtwarzania, aby je odsłuchać.
@@ -38,6 +38,8 @@ Modele Whisper i Qwen3-ASR same rozpoznają język i przy krótkiej frazie mogą
 Włącz **Poprawiaj źle usłyszane słowa**, a Twój Small Model (Ustawienia → Sesje → Small Model) przejrzy tekst po zakończeniu dyktowania. Zastępuje słowa, które model mowy źle usłyszał, i usuwa wtrącenia takie jak "yyy". Tekst trafia wtedy do dostawcy Small Model i pojawia się sekundę lub dwie później. Bez Small Model tekst jest wstawiany tak, jak został usłyszany.
 
 Klucze API wpisane dla tych usług przechowuje serwer OpenChamber, a nie przeglądarka. Wpisz klucz i naciśnij Enter, aby go zapisać; pole pokaże potem, że klucz jest zapisany, a krzyżyk go usuwa.
+
+**Klucz dostawcy OpenCode** znajduje się pod polem klucza API. Dzięki niemu usługa używa klucza dostawcy skonfigurowanego już w OpenCode, więc nie wpisujesz go ponownie. OpenChamber wybiera dostawcę za Ciebie tylko wtedy, gdy dokładnie jeden dostawca z kluczem ma ten sam adres (schemat, host i port) co usługa; jeśli mają go dwaj albo żaden, nic nie jest wybierane. Taki wybór jeszcze nie wysyła żadnego klucza. Wybierz dostawcę albo **Brak**, aby zdecydować samodzielnie. Klucz wpisany w polu klucza API ma pierwszeństwo. Serwer OpenChamber odczytuje klucz dostawcy, gdy go potrzebuje, i nigdy nie wysyła go do przeglądarki. Wysyła klucz na serwer dopiero po tym, jak dla tego dostawcy i tego adresu naciśniesz **Wyślij klucz**, także gdy jest to adres, którego OpenCode używa dla tego dostawcy. Zatwierdzenie dotyczy klucza, który dostawca ma w tej chwili: po zmianie konta lub klucza, także pod tą samą nazwą, naciskasz **Wyślij klucz** ponownie.
 
 ## Uwaga dla telefonów
 

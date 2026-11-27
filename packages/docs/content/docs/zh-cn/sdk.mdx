@@ -146,11 +146,11 @@ VS Code 不加载扩展，所以插件不会到达它运行的 OpenCode。手机
 ```
 
 - `identifier.keys` 是最多 8 个固定的大写键。`DEMO` 只在 `DEMO-12` 作为完整单词出现时识别它；代码、链接、路径、`XDEMO-1` 这样的词和 `DEMO-1.5` 这样的版本号都保持为文本。
-- `urls` 识别某一个 https 源上的链接，源必须完全匹配。`item` 是按跟踪器自己的链接形式写的链接模板：`{id}` 只出现一次，在路径中或作为 `?name={id}`，会变化的部分用 `{segment}` 或 `{segments+}`。`identifier` 说明 `{id}` 的样子：`key-number`、`number` 或 `short-code`。你不需要写正则表达式；OpenChamber 会编译这些模板。
+- `urls` 识别某一个 https 源上的链接，源必须完全匹配；写成 `https://*.example.com` 则识别该域名的所有子域名，`acme.example.com` 和 `acme.eu.example.com` 都算，`example.com` 本身不算。通配符没有可以用来拼出链接的主机，所以文本中的标识符不带 `url`。`item` 是按跟踪器自己的链接形式写的链接模板：`{id}` 只出现一次，在路径中或作为 `?name={id}`，会变化的部分用 `{segment}` 或 `{segments+}`。`identifier` 说明 `{id}` 的样子：`key-number`、`number` 或 `short-code`。你不需要写正则表达式；OpenChamber 会编译这些模板。
 - `action: "open"` 会打开你的扩展，并把 `ready.item`（或 `onItem`）设为 `{ kind: "link", identifier, url? }`：当 `attach` 为 `"dialog"` 时在你的对话框中打开，否则在侧栏面板中打开。用 `isGuestLinkItem` 收窄类型。它需要 `panel.entry`。`url` 是被点击的链接，去掉片段，并去掉模板自身以外的查询参数；对于文本中的标识符，如果你有不含 `{segment}` 的模板，并且标识符符合 `urls.identifier` 声明的形式，它就是其中第一个模板生成的链接（`DEMO-12` 永远不会填入 `number`）。
-- `action: "attach"` 则会在聊天框中放上一个带有该标识符的标签，它需要一个不含 `{segment}` 或 `{segments+}` 的模板，这样标签才能指明自己的链接；使用 `identifier.keys` 时，`urls.identifier` 不能是 `number`。
+- `action: "attach"` 则会在聊天框中放上一个带有该标识符的标签，它需要一个不含 `{segment}` 或 `{segments+}` 的模板，这样标签才能指明自己的链接；使用 `identifier.keys` 时，`urls.identifier` 不能是 `number`，`urls.origin` 也不能使用通配符。
 
-识别在智能体回复和用户自己的消息中进行，不在推理、工具输出或 Files 视图中进行；复制消息时，文本保持原样。OpenChamber 自己会读取的链接，即跟踪器条目、仓库的 issue 或 pull request、提交，仍按原来的方式处理；按住修饰键点击时，保持浏览器原本的行为。声明 `links` 会加上 `links` 能力：批准对话框会列出你的键和源，并说明点击后做什么；更改其中任何一项的版本会再次请求批准。`examples/tasks-demo` 能识别 `DEMO-2` 和 `https://example.com/tasks/DEMO-2`。
+识别在智能体回复和用户自己的消息中进行，不在推理、工具输出或 Files 视图中进行；复制消息时，文本保持原样。使用 `action: "open"` 时，你的扩展识别的链接在 OpenChamber 列出会话链接的地方也会打开你的扩展：工作状态中的上下文来源和侧边栏。使用 `"attach"` 时，这些地方会在浏览器中打开它，因为标签会落到屏幕上当前的聊天框里，而那个聊天框可能属于另一个会话。OpenChamber 自己会读取的链接，即跟踪器条目、仓库的 issue 或 pull request、提交，仍按原来的方式处理；按住修饰键点击时，保持浏览器原本的行为。声明 `links` 会加上 `links` 能力：批准对话框会列出你的键和源，并说明点击后做什么；更改其中任何一项的版本会再次请求批准。`examples/tasks-demo` 能识别 `DEMO-2` 和 `https://example.com/tasks/DEMO-2`。
 
 ## 生成文本
 

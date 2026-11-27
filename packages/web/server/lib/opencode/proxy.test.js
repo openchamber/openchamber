@@ -5,11 +5,17 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { describe, expect, it } from 'vitest';
 
 import {
-  createDirectoryQueryCanonicalizer,
   createOpenCodeProxyAgent,
   normalizeForwardedDirectoryHeaders,
   sanitizeSessionListItem,
 } from './proxy.js';
+import {
+  canonicalizeCreateBodyDirectory,
+  canonicalizeMoveBodyDirectory,
+  createDirectoryQueryCanonicalizer,
+  createSessionDirectoryCanonicalizer,
+  relocateSessionsFromDriveTargets,
+} from './directory-canonicalization.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
   it('canonicalizes directory query params and preserves other params', async () => {
@@ -50,9 +56,7 @@ describe('createDirectoryQueryCanonicalizer', () => {
 
     const first = canonicalize('/session?directory=/link/project');
     const second = canonicalize('/session?directory=/link/project');
-    await Promise.resolve();
-
-    expect(calls).toBe(1);
+    await expect.poll(() => calls).toBe(1);
     release();
     await expect(Promise.all([first, second])).resolves.toEqual([
       '/session?directory=%2Freal%2Fproject',
@@ -125,6 +129,151 @@ describe('normalizeForwardedDirectoryHeaders', () => {
     expect(headers).toEqual({
       'x-opencode-directory': '/Users/example/project%20literal',
     });
+  });
+});
+
+const aliasRealpath = async (value) => {
+  if (value === '/home/me/work') return '/data/home/me/work';
+  if (value === '/missing/work') throw new Error('missing');
+  return value;
+};
+const localCanonicalizer = () => createSessionDirectoryCanonicalizer({ sharesFilesystem: () => true, realpath: aliasRealpath })();
+
+describe('createSessionDirectoryCanonicalizer', () => {
+  it('resolves absolute directories while OpenCode shares this filesystem', async () => {
+    await expect(localCanonicalizer()('/home/me/work')).resolves.toBe('/data/home/me/work');
+  });
+
+  it('gives no canonicalizer while OpenCode runs on another filesystem', () => {
+    let shared = false;
+    const current = createSessionDirectoryCanonicalizer({ sharesFilesystem: () => shared, realpath: aliasRealpath });
+    expect(current()).toBeNull();
+    shared = true;
+    expect(current()).toBeTypeOf('function');
+  });
+
+  it('keeps relative, home-relative and unresolvable directories as they were sent', async () => {
+    const canonicalize = localCanonicalizer();
+    await expect(canonicalize('~/work')).resolves.toBe('~/work');
+    await expect(canonicalize('work')).resolves.toBe('work');
+    await expect(canonicalize('/missing/work')).resolves.toBe('/missing/work');
+  });
+
+  it('resolves the exact name, trailing whitespace included', async () => {
+    const seen = [];
+    const canonicalize = createSessionDirectoryCanonicalizer({
+      sharesFilesystem: () => true,
+      realpath: async (value) => { seen.push(value); return value; },
+    })();
+    await expect(canonicalize('/home/me/work ')).resolves.toBe('/home/me/work ');
+    expect(seen).toEqual(['/home/me/work ']);
+  });
+});
+
+describe('relocateSessionsFromDriveTargets', () => {
+  const sessionClient = (pages, active = {}) => {
+    const moves = [];
+    const client = {
+      session: {
+        list: async ({ cursor }) => pages[cursor ?? 0],
+        active: async () => active,
+        move: async (input) => { moves.push(input); },
+      },
+    };
+    return { client, moves };
+  };
+  const relocate = (projects, client, platform = 'win32') => relocateSessionsFromDriveTargets({
+    projects,
+    client,
+    platform,
+    resolve: async (value) => value,
+    resolveTarget: async (value) => value.replace(/^\/r\//, '/net/share/'),
+    checkDirectory: async () => 'available',
+  });
+  const page = (directories, next = null) => ({
+    data: directories.map((directory, index) => ({ id: `${directory}#${index}`, location: { directory } })),
+    cursor: { next },
+  });
+
+  it('moves sessions stored under a mapped drive network path back under the project, on every page', async () => {
+    const { client, moves } = sessionClient([
+      page(['/net/share/work/demo', '/elsewhere'], 1),
+      page(['/net/share/work/demo/sub']),
+    ]);
+    await expect(relocate(['/r/work/demo'], client)).resolves.toBe(2);
+    expect(moves).toEqual([
+      { sessionID: '/net/share/work/demo#0', directory: '/r/work/demo' },
+      { sessionID: '/net/share/work/demo/sub#0', directory: '/r/work/demo/sub' },
+    ]);
+  });
+
+  it('leaves a running session, and one in a project added under its network path, where they are', async () => {
+    const running = sessionClient([page(['/net/share/work/demo'])], { '/net/share/work/demo#0': {} });
+    await expect(relocate(['/r/work/demo'], running.client)).resolves.toBe(0);
+    const unc = sessionClient([page(['/net/share/work/demo/other'])]);
+    await expect(relocate(['/r/work/demo', '/net/share/work/demo/other'], unc.client)).resolves.toBe(0);
+    expect([...running.moves, ...unc.moves]).toEqual([]);
+  });
+
+  it('moves a session under the drive whose network path is the deepest match', async () => {
+    const { client, moves } = sessionClient([page(['/net/share/work/demo/x'])]);
+    const nested = relocateSessionsFromDriveTargets({
+      projects: ['/s', '/r/work/demo'],
+      client,
+      platform: 'win32',
+      resolve: async (value) => value,
+      resolveTarget: async (value) => (value === '/s' ? '/net/share' : value.replace(/^\/r\//, '/net/share/')),
+      checkDirectory: async () => 'available',
+    });
+    await expect(nested).resolves.toBe(1);
+    expect(moves).toEqual([{ sessionID: '/net/share/work/demo/x#0', directory: '/r/work/demo/x' }]);
+  });
+
+  it('does nothing outside Windows', async () => {
+    const { client, moves } = sessionClient([page(['/net/share/work/demo'])]);
+    await expect(relocate(['/r/work/demo'], client, 'linux')).resolves.toBe(0);
+    expect(moves).toEqual([]);
+  });
+});
+
+describe('canonicalizeMoveBodyDirectory', () => {
+  it('rewrites an absolute alias to the path OpenCode should store', async () => {
+    await expect(canonicalizeMoveBodyDirectory({ directory: '/home/me/work' }, localCanonicalizer()))
+      .resolves.toEqual({ directory: '/data/home/me/work' });
+  });
+
+  it('leaves a body without a directory alone', async () => {
+    const body = { branch: 'main' };
+    await expect(canonicalizeMoveBodyDirectory(body, localCanonicalizer())).resolves.toBe(body);
+  });
+
+  it('keeps the original body when the directory does not resolve', async () => {
+    const body = { directory: '/missing/work' };
+    await expect(canonicalizeMoveBodyDirectory(body, localCanonicalizer())).resolves.toBe(body);
+  });
+});
+
+describe('canonicalizeCreateBodyDirectory', () => {
+  it('rewrites an absolute alias in location.directory', async () => {
+    await expect(canonicalizeCreateBodyDirectory({ location: { directory: '/home/me/work' } }, localCanonicalizer(), null))
+      .resolves.toEqual({ location: { directory: '/data/home/me/work' } });
+  });
+
+  it('keeps a directory inside the chats tree as it was addressed', async () => {
+    const body = { location: { directory: '/home/me/chats/2026-11-19/session-a' } };
+    await expect(canonicalizeCreateBodyDirectory(body, localCanonicalizer(), '/home/me/chats')).resolves.toBe(body);
+  });
+
+  it('keeps relative and home-relative directories as OpenCode reads them', async () => {
+    const relative = { location: { directory: 'work' } };
+    const home = { location: { directory: '~/work' } };
+    await expect(canonicalizeCreateBodyDirectory(home, localCanonicalizer(), null)).resolves.toBe(home);
+    await expect(canonicalizeCreateBodyDirectory(relative, localCanonicalizer(), null)).resolves.toBe(relative);
+  });
+
+  it('leaves a body without a location alone', async () => {
+    const body = { title: 'Untitled' };
+    await expect(canonicalizeCreateBodyDirectory(body, localCanonicalizer(), null)).resolves.toBe(body);
   });
 });
 

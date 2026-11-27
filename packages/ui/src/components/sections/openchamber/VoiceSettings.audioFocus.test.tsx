@@ -16,6 +16,7 @@ const state = {
     openaiCompatibleUrl: 'https://voice.example.test/v1',
     openaiCompatibleVoice: 'test-voice',
     openaiCompatibleTtsModel: 'test-model',
+    sttServerUrl: '',
     showMessageTTSButtons: true,
     speechRate: 1,
     speechPitch: 1,
@@ -40,7 +41,7 @@ mock.module('@/components/ui', () => ({ toast: { error: () => {} } }));
 mock.module('@/components/icon/Icon', () => ({ Icon: ({ name }: { name: string }) => <span data-icon={name} /> }));
 mock.module('@/components/ui/select', () => ({
     Select: () => null, SelectContent: () => null, SelectItem: () => null,
-    SelectTrigger: () => null, SelectValue: () => null,
+    SelectTrigger: () => null, SelectValue: () => null, SelectSeparator: () => null,
 }));
 const Wrapper = ({ children }: PropsWithChildren) => <div>{children}</div>;
 mock.module('@/components/sections/shared/SettingsSection', () => ({
@@ -77,6 +78,7 @@ let response = deferred<Response>();
 const requests: Array<{ path: string; method?: string }> = [];
 mock.module('@/lib/runtime-fetch', () => ({
     runtimeFetch: (path: string, options?: RequestInit) => {
+        if (path === '/api/tts/voices') return Promise.resolve(Response.json({ voices: [] }));
         if (options?.method !== 'POST') return Promise.resolve(Response.json({ available: true }));
         requests.push({ path, method: options.method });
         return response.promise;

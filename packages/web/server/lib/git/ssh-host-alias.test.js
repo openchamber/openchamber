@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { createSshHostResolver, isSshHostName, sshHostReaches, sshUserOf } from './ssh-host-alias.js';
+import { createSshHostResolver, isSshHostName, sshHostNameOf, sshHostReaches, sshUserOf } from './ssh-host-alias.js';
 import { resolveGiteaReposFromDirectory } from '../gitea/repo.js';
 
 describe('SSH host aliases', () => {
@@ -159,5 +159,13 @@ describe('SSH hosts reaching an instance', () => {
 
     await expect(sshHostReaches('forgejo', 'git.example.com', '', resolve)).resolves.toBe(false);
     await expect(sshHostReaches('forgejo', 'git.example.com', '', async () => null)).resolves.toBe(false);
+  });
+
+  it('names the host an alias resolves to, and nothing for a value that is not a host name', async () => {
+    const resolve = resolver({ 'gh-work': { hostname: 'github.com', hostKeyAlias: null }, broken: { hostname: '-oProxyCommand=x' } });
+
+    await expect(sshHostNameOf('gh-work', 'git', resolve)).resolves.toBe('github.com');
+    await expect(sshHostNameOf('broken', 'git', resolve)).resolves.toBeNull();
+    await expect(sshHostNameOf('gh-work', 'git', async () => null)).resolves.toBeNull();
   });
 });

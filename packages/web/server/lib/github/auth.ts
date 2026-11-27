@@ -4,6 +4,8 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { readSettingsFileForUpdateSync } from '../settings/settings-update-read.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { createSourceControlAuthStore } from '../source-control/auth-storage.js';
 import { hasSourceControlErrorCode, isSourceControlFiniteNumber, isSourceControlInteger } from '../source-control/input-guards.js';
@@ -492,7 +494,7 @@ function readSettingsFile(): Settings {
   return {};
 }
 
-function writeSettingsFile(settings: Settings) {
+function writeSettingsFile(settings: SettingsDocument) {
   fsSync.mkdirSync(STORAGE_DIR, { recursive: true });
   const tmpFile = `${SETTINGS_FILE}.${process.pid}.${Date.now()}.tmp`;
   fsSync.writeFileSync(tmpFile, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
@@ -579,7 +581,7 @@ export function isGhCliDisabled() {
 }
 
 export function setGhCliDisabled(disabled: boolean) {
-  const settings = readSettingsFile();
+  const settings = readSettingsFileForUpdateSync(SETTINGS_FILE);
   settings.ghCliDisabled = Boolean(disabled);
   if (settings.ghCliDisabled) {
     settings.ghCliActive = false;
@@ -594,7 +596,7 @@ function isGhCliActive() {
 }
 
 export function setGhCliActive(active: boolean, login?: string | null) {
-  const settings = readSettingsFile();
+  const settings = readSettingsFileForUpdateSync(SETTINGS_FILE);
   settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
   const requested = isString(login) && login.trim() ? login.trim() : null;
   const existing = isString(settings.ghCliLogin) && settings.ghCliLogin.trim() ? settings.ghCliLogin.trim() : null;

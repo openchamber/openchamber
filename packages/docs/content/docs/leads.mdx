@@ -29,7 +29,7 @@ A lead shows a mountain peak with a flag in the sidebar instead of the arrow, an
 - **Names the direction.** It renames the session after the work, so you find it by topic in the sidebar, tabs and search. A name you gave it yourself stays.
 - **Hands out results, not steps.** Each piece of work goes to a separate session with the result it should reach, such as "find and fix the login timeout", and that session works out the steps itself. These sessions sit under the lead in the sidebar. You can open and read them, and **Take over** in a session's menu makes one yours if you want to talk to it.
 - **Checks what comes back.** A report that only says "I found the cause" is not the result it asked for, so the lead sends the work back instead of passing it to you. Each session has to show proof of what it did, such as which checks it ran and what they showed, and a report without proof goes back too. The lead checks something itself only where the proof has a gap.
-- **Cleans up.** It archives the sessions whose results it has used.
+- **Cleans up.** When a session worked in a worktree and its work has landed, it removes that worktree. The session stays for you to read.
 - **Asks you only what matters.** It decides on its own unless the answer changes what you would see in your project, or two reasonable options really differ. A large change alone is not a reason to ask. Questions from its sessions go to the lead, not to you, and reach you only when they pass the same test.
 
 ## The digest
@@ -61,7 +61,7 @@ The lead changes only the parts of the brief that changed, and OpenChamber puts 
 
 ## Leads that sleep
 
-A lead can wait for hours while its sessions work. When it wakes up, the model normally has to read the whole conversation again from scratch, because providers keep the conversation cached only for a few minutes. On a long conversation that one read costs as much as a lot of work, and on a subscription it eats your usage limit.
+A lead can wait for hours while its sessions work. When it wakes up, the model normally has to read the whole conversation again from scratch, because providers keep the conversation cached only for a limited time, often from a few minutes to an hour. On a long conversation that one read costs as much as a lot of work, and on a subscription it eats your usage limit.
 
 So when a lead has been idle longer than its provider keeps the cache, and its conversation is long, OpenChamber shortens it before it wakes. The older part of the conversation is replaced with a short note: the lead's digest and the state of its sessions. No model is called to write the note, so this costs nothing. The brief and the latest messages stay as they are, and the lead can still read the full earlier conversation whenever it needs to.
 
@@ -73,7 +73,7 @@ A lead can split a large job into a [workflow](/workflows/). Under **Start runs 
 
 ## Where leads work
 
-Leads need the [Agent Control Tool](/agent-control-tool/), which is on by default, and OpenChamber's own OpenCode server. They work on desktop, in the browser and on the phone. The VS Code extension shows existing leads with their mark and digest, but cannot start one.
+Leads need the [Agent Control Tool](/agent-control-tool/), which is on by default. On an OpenCode server you run yourself, they also need the [OpenChamber plugin registered](/opencode-server/#enable-openchamber-tools-on-an-external-local-server). They work on desktop, in the browser and on the phone. The VS Code extension shows existing leads with their mark and digest, but cannot start one.
 
 ## Related
 

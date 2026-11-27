@@ -24,6 +24,7 @@ interface ChangeScopeSelectorProps {
     prCount: number | null;
     showCommitOption: boolean;
     showBranchOption: boolean;
+    hideStagedOption?: boolean;
     changeRequestTerm: ChangeRequestTerm;
     onScopeChange?: (scope: PendingDiffScope) => void;
 }
@@ -39,6 +40,7 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
     prCount,
     showCommitOption,
     showBranchOption,
+    hideStagedOption = false,
     changeRequestTerm,
     onScopeChange,
 }) => {
@@ -60,10 +62,10 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                 <DropdownMenuTrigger asChild>
                     <button
                         type="button"
-                        className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label={t('diffView.scope.selectorAria')}
                     >
-                        <span className="whitespace-nowrap">
+                        <span className="change-scope__label min-w-0 truncate whitespace-nowrap">
                             {currentLabel}{currentCount !== null && <span className="diff-toolbar__scope-count">: {currentCount}</span>}
                         </span>
                         <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
@@ -100,12 +102,14 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                             <span className="typography-meta text-muted-foreground">{workingCount}</span>
                         </span>
                     </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="staged">
-                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                            <span>{t('diffView.scope.staged')}</span>
-                            <span className="typography-meta text-muted-foreground">{stagedCount}</span>
-                        </span>
-                    </DropdownMenuRadioItem>
+                    {!hideStagedOption && (
+                        <DropdownMenuRadioItem value="staged">
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                                <span>{t('diffView.scope.staged')}</span>
+                                <span className="typography-meta text-muted-foreground">{stagedCount}</span>
+                            </span>
+                        </DropdownMenuRadioItem>
+                    )}
                     {showCommitOption && (
                         <DropdownMenuRadioItem value="commit">
                             <span className="flex min-w-0 flex-1 items-center justify-between gap-3">

@@ -28,11 +28,10 @@ import { reportSettingsSaveState } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { RoutingCategory, RoutingConfig } from '@/lib/routing/routingApi';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { modelVariantNames } from '@/lib/modelVariants';
-import { isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
+import { useFallbackPrefill } from '@/hooks/useFallbackPrefill';
 
 const DEFAULT_VARIANT_VALUE = '__default__';
 const SAVE_DEBOUNCE_MS = 500;
@@ -150,7 +149,7 @@ const CategoryRow: React.FC<{
               <ModelSelector
                 providerId={category.model?.providerID ?? ''}
                 modelId={category.model?.modelID ?? ''}
-                onChange={(providerID, modelID) => onChange({ model: { providerID, modelID }, variant: null })}
+                onChange={(providerID, modelID) => onChange({ model: providerID && modelID ? { providerID, modelID } : null, variant: null })}
                 className={cn(SETTINGS_CUSTOM_TRIGGER_CLASS, 'w-full')}
                 placeholder={t('settings.routing.model.useFallback')}
               />
@@ -252,19 +251,6 @@ export const RoutingPage: React.FC = () => {
 
   const settingsDefaultModel = useConfigStore((state) => state.settingsDefaultModel);
   const settingsDefaultVariant = useConfigStore((state) => state.settingsDefaultVariant);
-  const prefilledRef = React.useRef(false);
-  React.useEffect(() => {
-    if (prefilledRef.current || !loaded || !serverConfig || serverConfig.fallback) return;
-    const parsed = parseModelIdentifier(settingsDefaultModel);
-    if (!parsed || isAutoModel(parsed.providerId, parsed.modelId)) return;
-    prefilledRef.current = true;
-    update((config) => (config.fallback ? config : {
-      ...config,
-      fallback: { model: { providerID: parsed.providerId, modelID: parsed.modelId }, variant: settingsDefaultVariant ?? null },
-    }));
-  // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, serverConfig, settingsDefaultModel, settingsDefaultVariant]);
-
   const update = React.useCallback((mutate: (config: RoutingConfig) => RoutingConfig) => {
     setDraft((current) => {
       if (!current) return current;
@@ -275,6 +261,8 @@ export const RoutingPage: React.FC = () => {
       return next;
     });
   }, [flush]);
+
+  const chooseFallback = useFallbackPrefill(loaded, serverConfig, settingsDefaultModel, settingsDefaultVariant, update);
 
   const updateCategory = React.useCallback((id: string, patch: Partial<RoutingCategory>) => {
     update((config) => ({ ...config, categories: config.categories.map((category) => (category.id === id ? { ...category, ...patch } : category)) }));
@@ -370,7 +358,7 @@ export const RoutingPage: React.FC = () => {
                 <ModelSelector
                   providerId={draft.fallback?.model.providerID ?? ''}
                   modelId={draft.fallback?.model.modelID ?? ''}
-                  onChange={(providerID, modelID) => update((config) => ({ ...config, fallback: { model: { providerID, modelID }, variant: null } }))}
+                  onChange={chooseFallback}
                   className={SETTINGS_CUSTOM_TRIGGER_CLASS}
                   placeholder={t('settings.routing.model.placeholder')}
                 />

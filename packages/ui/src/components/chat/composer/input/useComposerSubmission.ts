@@ -23,11 +23,11 @@ import type { useComposerColumn } from './useComposerColumn';
 import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
 import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import type { ComposerSendHandlers } from './composerSendHandlers';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { isServerOwnedMessageQueue, type QueuedMessage } from '@/stores/messageQueueStore';
 import { readEffortRevision } from '@/lib/modelEfforts';
 import { useSessionUIStore, type SendMessageOptions, type SentMessage } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { isSessionModelChosen } from '@/sync/session-selection';
 import { useInputStore } from '@/sync/input-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
@@ -54,11 +54,11 @@ import { trackUnconfirmedSend } from '@/lib/unconfirmedSends';
 import { filterMissingInlineAttachments } from '../../composer/attachments/inlineMentionAttachments';
 import { buildOutgoingMessage, expandCommentSnippets } from '../../composer/submit/buildOutgoingMessage';
 import { buildCommandVariables, canRunCommand, findMagicPromptCommand, planLocalSlashCommand } from '../../composer/submit/slashCommands';
-import { spaceModelRefusal, stoppedSpaceOfTarget } from '@/lib/spaces/space-model-access';
+import { refuseSpaceModel, stoppedSpaceText } from './refuseSpaceModel';
+import { stoppedSpaceOfTarget } from '@/lib/spaces/space-model-access';
 import { runSpaceAction } from '@/lib/spaces/space-repair';
-import type { PendingSpaceSend } from '@/lib/spaces/space-send';
+import { settleShownSpaceModel, toSendModel, type PendingSpaceSend } from '@/lib/spaces/space-send';
 import { useSendWhenSpaceReady } from '@/hooks/useSendWhenSpaceReady';
-import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { withRegisteredSharedPages } from '../../sharePages/received/takeShareLink';
 import { buildChatInputHistorySubmissions } from '../../inputHistory';
 import type { ChatInputProps, SubmitOptions } from './chatInputProps';
@@ -81,7 +81,7 @@ type Dependencies = {
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>;
     sendHandlers: Pick<ComposerSendHandlers, 'handleSubmitRef'>;
     sendAvailability: Pick<ReturnType<typeof useComposerSendAvailability>, 'pendingFirstSend' | 'composerQueuedMessages' | 'getCurrentInputSnapshot' | 'hasQueuedMessages'>;
-    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'currentSessionId' | 'btwPanel' | 'newSessionDraftOpen' | 'newSessionDraft' | 'btwDirectory' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'attachedFiles' | 'inputMode' | 'btwSessionId' | 'activeRuntimeKey' | 'chatDraftIdentity' | 'immediateBtwSubmitRef' | 'sendHeldByMissingFolder' | 'setReviewDialogOpen' | 'consumePendingSyntheticParts' | 'isPromotedBtwSession' | 'projectActionsRef' | 'clearAttachedFiles' | 'btwComposerSessionId' | 'sessionFolder'>;
+    sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'currentSessionId' | 'btwPanel' | 'newSessionDraftOpen' | 'newSessionDraft' | 'btwDirectory' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'attachedFiles' | 'inputMode' | 'btwSessionId' | 'activeRuntimeKey' | 'chatDraftIdentity' | 'immediateBtwSubmitRef' | 'sendHeldByMissingFolder' | 'setReviewDialogOpen' | 'consumePendingSyntheticParts' | 'isPromotedBtwSession' | 'projectActionsRef' | 'clearAttachedFiles' | 'btwComposerSessionId' | 'sessionFolder' | 'spaceTarget'>;
     parallelRun: Pick<ReturnType<typeof useComposerParallelRun>, 'parallel'>;
     sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'sessionPhase' | 'autoReviewRunning'>;
     queueState: Pick<ReturnType<typeof useComposerQueueState>, 'messageQueueTarget' | 'takeForSend'>;
@@ -120,7 +120,7 @@ export function useComposerSubmission({
         currentSessionDirectoryForSync, currentDirectory, attachedFiles, inputMode, btwSessionId,
         activeRuntimeKey, chatDraftIdentity, immediateBtwSubmitRef, sendHeldByMissingFolder,
         setReviewDialogOpen, consumePendingSyntheticParts, isPromotedBtwSession, projectActionsRef,
-        clearAttachedFiles, btwComposerSessionId, sessionFolder,
+        clearAttachedFiles, btwComposerSessionId, sessionFolder, spaceTarget,
     } = sessionScope;
     const { parallel } = parallelRun;
     const { sessionPhase, autoReviewRunning } = sessionLifecycle;
@@ -151,11 +151,14 @@ export function useComposerSubmission({
         setPendingSpaceSend(null);
         if (send) void handleSubmitRef.current(pending.options);
     }, [handleSubmitRef]);
-    useSendWhenSpaceReady(pendingSpaceSend, {
-        draftKey: chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null,
-        providerId: currentProviderId,
-        modelId: currentModelId,
-    }, settlePendingSpaceSend);
+    const draftKey = chatDraftIdentity ? getChatDraftIdentityKey(chatDraftIdentity) : null;
+    const shownModel = toSendModel(isBtwActive ? effectiveBtwSelection.model : { providerId: currentProviderId, modelId: currentModelId });
+    const pendingSpaceModel = pendingSpaceSend?.options?.queuedOnly ? pendingSpaceSend.model : shownModel;
+    const readShown = useSendWhenSpaceReady(pendingSpaceSend, {
+        draftKey,
+        providerId: pendingSpaceModel?.providerId ?? '',
+        modelId: pendingSpaceModel?.modelId ?? '',
+    }, shownModel, settlePendingSpaceSend);
 
     const getSubmitErrorMessage = createComposerSubmitErrorMessage(t);
     const handleSubmit = async (options?: SubmitOptions) => {
@@ -195,6 +198,12 @@ export function useComposerSubmission({
         const modelIdToSend = capturedSendConfig?.modelID ?? (isBtwActive ? effectiveBtwSelection.model?.modelId : currentModelId);
         const agentNameToSend = capturedSendConfig?.agent ?? (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
         const variantToSend = capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
+        const sendSessionId = isBtwActive ? btwSessionId : currentSessionId;
+        const agentPick = sendSessionId ? useSelectionStore.getState().getSessionAgentPick(sendSessionId) : null;
+        const keepSessionModel = capturedSendConfig
+            ? capturedSendConfig.keepSessionModel === true
+            : Boolean(sendSessionId && providerIdToSend && modelIdToSend && !isSessionModelChosen(sendSessionId, providerIdToSend, modelIdToSend)
+                && !(agentPick && agentPick === agentNameToSend));
         const effortRevision = providerIdToSend && modelIdToSend
             ? readEffortRevision(providerIdToSend, modelIdToSend)
             : undefined;
@@ -295,19 +304,19 @@ export function useComposerSubmission({
             return;
         }
 
-        const spaceTarget = currentSessionId
-            ? { requestId: null, directory: currentSessionDirectoryForSync ?? currentDirectory ?? null }
-            : newSessionDraftOpen
-                ? { requestId: newSessionDraft?.pendingWorktreeRequestId ?? null, directory: newSessionDraft?.directoryOverride ?? null }
-                : null;
         const stoppedSpace = spaceTarget ? stoppedSpaceOfTarget(spaceTarget) : null;
+        const sendModel = toSendModel({ providerId: providerIdToSend, modelId: modelIdToSend });
         if (stoppedSpace) {
-            toast.error(t(stoppedSpace.reason === 'gone' ? 'spaces.draft.spaceGone' : stoppedSpace.reason === 'unreachable' ? 'spaces.draft.spaceUnreachable' : 'spaces.draft.spaceStopped'), stoppedSpace.start ? {
+            toast.error(stoppedSpaceText(t, stoppedSpace.reason), stoppedSpace.start ? {
                 action: {
-                    label: t('spaces.actions.startAndSend'),
+                    label: t(sendModel ? 'spaces.actions.startAndSend' : 'spaces.actions.start'),
                     onClick: () => {
-                        if (chatDraftIdentity) {
-                            setPendingSpaceSend({ spaceId: stoppedSpace.spaceId, directory: spaceTarget?.directory ?? null, sessionId: currentSessionId ?? null, draftKey: getChatDraftIdentityKey(chatDraftIdentity), options });
+                        if (!isSubmitRuntime()) return;
+                        const shown = readShown();
+                        const model = queuedOnly ? sendModel : shown.model;
+                        if (model && draftKey && shown.draftKey === draftKey) {
+                            if (!queuedOnly && !isBtwActive) settleShownSpaceModel(model, stoppedSpace.spaceId);
+                            setPendingSpaceSend({ spaceId: stoppedSpace.spaceId, directory: spaceTarget?.directory ?? null, draftKey, model, options: { ...options, spaceSendModel: model } });
                         }
                         void runSpaceAction(stoppedSpace.spaceId, 'start');
                     },
@@ -322,19 +331,11 @@ export function useComposerSubmission({
             return;
         }
 
-        const spaceRefusal = spaceTarget ? spaceModelRefusal(spaceTarget, providerIdToSend) : null;
-        if (spaceRefusal) {
-            const provider = useConfigStore.getState().providers.find((entry) => entry.id === spaceRefusal.providerId)?.name ?? spaceRefusal.providerId;
-            toast.error(spaceRefusal.reason === 'opencode'
-                ? t('spaces.draft.modelOpenCode')
-                : spaceRefusal.reason === 'needs_again'
-                    ? t('spaces.draft.modelNeedsKeyAgain', { provider })
-                    : t('spaces.draft.modelNotGranted', { provider }), {
-                action: {
-                    label: t('spaces.group.access.give'),
-                    onClick: () => useSpacesStore.getState().openAccessDialog(spaceRefusal.spaceId, spaceRefusal.reason === 'opencode' ? null : spaceRefusal.providerId),
-                },
-            });
+        if (spaceTarget && refuseSpaceModel(t, spaceTarget, options?.spaceSendModel?.providerId ?? providerIdToSend)) return;
+
+        const heldModel = options?.spaceSendModel;
+        if (heldModel && (heldModel.providerId !== providerIdToSend || heldModel.modelId !== modelIdToSend)) {
+            toast.error(t('spaces.draft.modelChanged'));
             return;
         }
 
@@ -380,7 +381,15 @@ export function useComposerSubmission({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
-        sendMessageOptions = { ...sendMessageOptions, isCurrentRuntime: isSubmitRuntime, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
+        sendMessageOptions = {
+            ...sendMessageOptions,
+            isCurrentRuntime: isSubmitRuntime,
+            userInitiated: true,
+            recordEffort: !isBtwActive && !queuedOnly,
+            effortRevision,
+            keepSessionModel,
+            keepSessionAgent: capturedSendConfig?.keepSessionAgent === true,
+        };
         let sent: SentMessage | undefined;
         if (deferredQuestions.length > 0) sendMessageOptions.onSent = (route) => { sent = route; };
 

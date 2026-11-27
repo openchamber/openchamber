@@ -105,8 +105,10 @@ const providerModelSchema = z.union([
     limit: z.object({ context: z.unknown().optional(), output: z.unknown().optional() }).passthrough().optional().catch(undefined),
     context_window: z.unknown().optional(),
     contextWindow: z.unknown().optional(),
+    context_length: z.unknown().optional(),
     max_input_tokens: z.unknown().optional(),
     max_output_tokens: z.unknown().optional(),
+    max_completion_tokens: z.unknown().optional(),
     maxOutputTokens: z.unknown().optional(),
     modalities: z.object({ input: z.unknown().optional(), output: z.unknown().optional() }).passthrough().optional().catch(undefined),
     input_modalities: z.array(z.unknown()).optional().catch(undefined),
@@ -332,8 +334,8 @@ const normalizeProviderModel = <Value>(value: Value) => {
   const raw: Extract<z.infer<typeof providerModelSchema>, { name?: unknown }> = parsed.data;
   const model: DiscoveredModel = { id: raw.id, name: optionalString(raw.name) ?? raw.id };
   withOptional(model, 'limit', buildLimit(
-    firstPositive(raw.limit?.context, raw.context_window, raw.contextWindow, raw.max_input_tokens),
-    firstPositive(raw.limit?.output, raw.max_output_tokens, raw.maxOutputTokens),
+    firstPositive(raw.limit?.context, raw.context_window, raw.contextWindow, raw.context_length, raw.max_input_tokens),
+    firstPositive(raw.limit?.output, raw.max_output_tokens, raw.max_completion_tokens, raw.maxOutputTokens),
   ));
   withOptional(model, 'capabilities', buildCapabilities(
     optionalStringList(raw.capabilities?.input) ?? optionalStringList(raw.modalities?.input) ?? optionalStringList(raw.input_modalities),

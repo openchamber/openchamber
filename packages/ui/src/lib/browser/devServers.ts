@@ -82,18 +82,25 @@ const portOf = (url: string): number | null => {
   }
 };
 
+const byPort = (urls: ReadonlyArray<string>): Map<number, string> => {
+  const result = new Map<number, string>();
+  for (const url of urls) {
+    const port = portOf(url);
+    if (port !== null && !result.has(port)) result.set(port, url);
+  }
+  return result;
+};
+
 export const mergeDevServerCandidates = ({
   announced,
+  actionUrls = [],
   discovered,
 }: {
   announced: ReadonlyArray<string>;
+  actionUrls?: ReadonlyArray<string>;
   discovered: ReadonlyArray<DiscoveredDevServer> | null;
 }): DevServerCandidate[] => {
-  const announcedByPort = new Map<number, string>();
-  for (const url of announced) {
-    const port = portOf(url);
-    if (port !== null && !announcedByPort.has(port)) announcedByPort.set(port, url);
-  }
+  const announcedByPort = byPort(announced);
 
   if (!discovered) {
     return [...announcedByPort.entries()]
@@ -101,11 +108,12 @@ export const mergeDevServerCandidates = ({
       .sort((left, right) => left.port - right.port);
   }
 
+  const actionUrlByPort = byPort(actionUrls);
   return discovered
     .map((server) => {
       const announcedUrl = announcedByPort.get(server.port);
       return {
-        url: announcedUrl ?? server.url,
+        url: announcedUrl ?? actionUrlByPort.get(server.port) ?? server.url,
         port: server.port,
         announced: announcedUrl !== undefined,
         command: server.command,

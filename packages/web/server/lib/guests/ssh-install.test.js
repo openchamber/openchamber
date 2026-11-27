@@ -6,13 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { resolveBunExecutable } from '../../../../../scripts/lib/bun-executable.mjs';
 
-import { cloneGitRepository, parseGitInstallUrl, prepareGuestGitNetwork } from './clone.js';
+import { cloneGitRepository, parseGitInstallUrl } from './clone.js';
 import { installGuestFromGitSource, parseInstallRequest } from './install.js';
 import { listInstalledGuests } from './catalog.js';
 import { readExtensionStore } from './persist.js';
 import { checkGuestUpdate, updateGuest } from './updates.js';
 
-const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
 const source = 'git@github.com:acme/fixture.git';
 const testPath = fileURLToPath(import.meta.url);
 const bunExecutable = resolveBunExecutable();
@@ -136,36 +135,40 @@ afterAll(async () => {
 });
 
 describe('SSH extension installs', () => {
-  test('accepts SSH and scp URLs with refs, but rejects credentials, private targets and shell syntax', () => {
+  test('accepts SSH, private-network, and SSH host alias URLs with refs, while rejecting credentials, metadata targets, and shell syntax', () => {
     expect(parseGitInstallUrl(`${source}#main`)).toEqual({ url: source, ref: 'main' });
     expect(parseGitInstallUrl('ssh://git@github.com:2222/acme/fixture.git')).toEqual({ url: 'ssh://git@github.com:2222/acme/fixture.git' });
     expect(parseGitInstallUrl('SSH://git@github.com/acme/fixture.git')).toEqual({ url: 'ssh://git@github.com/acme/fixture.git' });
-    for (const url of ['ssh://git:password@github.com/acme/repo', 'ssh://git@127.0.0.1/repo', 'git@localhost:repo', 'ssh://git@github.com:99999/repo', 'git@github.com:repo;id', 'ssh://git@github.com/repo?command=id', 'ssh://git@bad\'host.com/repo', `${source}\n`]) {
+    expect(parseGitInstallUrl('git@work-gitlab:acme/fixture.git#main')).toEqual({ url: 'git@work-gitlab:acme/fixture.git', ref: 'main' });
+    expect(parseGitInstallUrl('ssh://work-gitlab/acme/fixture.git')).toEqual({ url: 'ssh://work-gitlab/acme/fixture.git' });
+    expect(parseGitInstallUrl('ssh://git@127.0.0.1/repo')).toEqual({ url: 'ssh://git@127.0.0.1/repo' });
+    expect(parseGitInstallUrl('git@localhost:repo')).toEqual({ url: 'git@localhost:repo' });
+    expect(parseGitInstallUrl('git@10.0.0.5:acme/fixture.git')).toEqual({ url: 'git@10.0.0.5:acme/fixture.git' });
+    for (const url of ['ssh://git:password@github.com/acme/repo', 'ssh://git@169.254.169.254/repo', 'git@169.254.169.254:repo', 'ssh://git@-oProxyCommand=id/repo', 'git@-oProxyCommand=id:repo', 'ssh://git@github.com:99999/repo', 'git@github.com:repo;id', 'ssh://git@github.com/repo?command=id', 'ssh://git@bad\'host.com/repo', 'data:acme/repo', `${source}\n`]) {
       expect(parseGitInstallUrl(url)).toBeNull();
     }
     expect(parseInstallRequest({ url: source, gitIdentityId: 'work' })).toEqual({ url: source, gitIdentityId: 'work' });
     expect(parseInstallRequest({ url: source, gitIdentityId: {} })).toBeNull();
   });
 
-  test('global identity uses host SSH configuration and inherits its agent', async () => {
-    expect(await cloneGitRepository(source, path.join(root, 'global-clone'), { lookup })).toEqual({ ok: true });
+  test('global identity uses host SSH configuration, inherits its agent, and supports local SSH host aliases', async () => {
+    expect(await cloneGitRepository(source, path.join(root, 'global-clone'))).toEqual({ ok: true });
     const call = (await sshCalls()).at(-1);
     expect(call.args).toContain(globalKey);
     expect(call.agent).toBe(process.env.SSH_AUTH_SOCK);
     expect(call.args).toContain('BatchMode=yes');
-    expect(call.args).toContain('Hostname=93.184.216.34');
-    expect(call.args).toContain('HostKeyAlias=github.com');
-    expect(await cloneGitRepository('ssh://git@github.com:2222/acme/fixture.git', path.join(root, 'port-clone'), { lookup })).toEqual({ ok: true });
+    expect(call.args).toContain('StrictHostKeyChecking=accept-new');
+    expect(call.args.some((arg) => arg.startsWith('ProxyCommand='))).toBe(false);
+    expect(call.args.some((arg) => arg.startsWith('ProxyJump='))).toBe(false);
+    expect(await cloneGitRepository('ssh://git@github.com:2222/acme/fixture.git', path.join(root, 'port-clone'))).toEqual({ ok: true });
     expect((await sshCalls()).at(-1).args).toContain('2222');
-  });
-
-  test('rejects DNS answers into private networks', async () => {
-    expect(await prepareGuestGitNetwork(source, { lookup: async () => [{ address: '10.0.0.1', family: 4 }] })).toBeNull();
+    expect(await cloneGitRepository('git@work-gitlab:acme/fixture.git', path.join(root, 'alias-clone'))).toEqual({ ok: true });
+    expect((await sshCalls()).at(-1).args).toContain('git@work-gitlab');
   });
 
   test('persists the selected identity and re-resolves it for update checks and replacement clones', async () => {
     const persistPath = path.join(root, 'extensions.json');
-    const result = await installGuestFromGitSource(source, persistPath, { gitIdentityId: 'work', ref: 'main', lookup });
+    const result = await installGuestFromGitSource(source, persistPath, { gitIdentityId: 'work', ref: 'main' });
     expect(result.ok).toBe(true);
     const [guest] = await listInstalledGuests({ persistPath });
     expect(guest.gitOrigin).toEqual({ url: source, ref: 'main', gitIdentityId: 'work' });
@@ -175,21 +178,21 @@ describe('SSH extension installs', () => {
     const rotatedKey = path.join(root, 'rotated key');
     await writeProfiles(rotatedKey);
     await publishVersion('1.1.0');
-    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin, lookup })).toMatchObject({ available: true, version: '1.1.0' });
+    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toMatchObject({ available: true, version: '1.1.0' });
     expect((await sshCalls()).at(-1).args).toContain(rotatedKey);
-    expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath, lookup })).toMatchObject({ ok: true });
+    expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath })).toMatchObject({ ok: true });
     expect((await sshCalls()).at(-1).args).toContain(rotatedKey);
 
     await writeProfiles(null);
-    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin, lookup })).toMatchObject({ available: false, error: 'fetch-failed' });
-    expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath, lookup })).toMatchObject({ ok: false, code: 'clone-failed' });
+    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toMatchObject({ available: false, error: 'fetch-failed' });
+    expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath })).toMatchObject({ ok: false, code: 'clone-failed' });
     const [preserved] = await listInstalledGuests({ persistPath });
     expect(preserved.version).toBe('1.1.0');
   });
 
   test('an identity whose stored SSH key is not a path clones with the host SSH configuration', async () => {
     await writeProfiles(42);
-    expect(await cloneGitRepository(source, path.join(root, 'non-path-key-clone'), { gitIdentityId: 'work', lookup })).toEqual({ ok: true });
+    expect(await cloneGitRepository(source, path.join(root, 'non-path-key-clone'), { gitIdentityId: 'work' })).toEqual({ ok: true });
     expect((await sshCalls()).at(-1).args).toContain(globalKey);
   });
 });

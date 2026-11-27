@@ -54,7 +54,7 @@ const trackedWorkItemOf = (item: TrackerItemSummary): TrackedWorkItem | null => 
     isSettledTrackerState(item.state?.category) ? null : workItem(item.provider, item.identifier)
 );
 
-type PullPatch = Partial<Pick<RepositoryChangeRequestReference, 'state' | 'draft' | 'title' | 'headSha'>>;
+type PullPatch = Partial<Pick<RepositoryChangeRequestReference, 'state' | 'draft' | 'title' | 'headSha' | 'base'>>;
 type IssuePatch = Partial<Pick<RepositoryIssueReference, 'state' | 'title'>>;
 type DiscussionPatch = Partial<Pick<RepositoryDiscussionReference, 'state' | 'title' | 'answered'>>;
 
@@ -62,8 +62,9 @@ function referencePatch(reference: RepositoryReference, record: TrackedItemState
     if (reference.kind === 'pull' && record.type === 'pull' && record.state) {
         const { state, draft, title } = record.state;
         const headSha = record.state.headSha ?? reference.headSha;
-        if (state === reference.state && draft === reference.draft && title === reference.title && headSha === reference.headSha) return null;
-        return { state, draft, title, headSha };
+        const base = record.state.base ?? reference.base;
+        if (state === reference.state && draft === reference.draft && title === reference.title && headSha === reference.headSha && base === reference.base) return null;
+        return { state, draft, title, headSha, base };
     }
     if (reference.kind === 'issue' && record.type === 'issue' && record.state) {
         const { state, title } = record.state;

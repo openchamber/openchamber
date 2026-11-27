@@ -2,7 +2,6 @@ import { renderFileContent } from './files/view/renderFileContent';
 import { renderFileExtensionNotice } from './files/view/renderFileExtensionNotice';
 import { renderFileSourceEditor } from './files/view/renderFileSourceEditor';
 import { renderFileHtmlPreview } from './files/view/renderFileHtmlPreview';
-import { renderFileHtmlUnavailable } from './files/view/renderFileHtmlUnavailable';
 import { renderFileMarkdownPreview } from './files/view/renderFileMarkdownPreview';
 import { renderFileDiscardDialog } from './files/view/renderFileDiscardDialog';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -146,7 +145,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   const markdownContent = () => renderFileMarkdownPreview({
     fileComments, fileDocument, fileEditorExtensions, filePreviewRendering, markdownPreview, tabs, t,
   });
-  const htmlUnavailableContent = () => renderFileHtmlUnavailable({ tabs, viewModes, t });
   const htmlContent = () => renderFileHtmlPreview({ fileAssets, fileDocument, tabs, runtime, t });
   const sourceEditor = () => renderFileSourceEditor({
     draft, editor, fileComments, fileDocument, fileEditorExtensions, fileKinds, filePreviewRendering, mobileKeyboard,
@@ -155,7 +153,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ visible = true, onCloseFil
   const extensionNotice = renderFileExtensionNotice({ fileCanvas, fileKinds, t });
   const content = renderFileContent({
     artifacts, diagram, draft, fileAssets, fileCanvas, fileDocument, fileKinds, filePreviewModes, filePreviewRendering,
-    tabs, viewModes, htmlContent, htmlUnavailableContent, markdownContent, sourceEditor, t,
+    tabs, viewModes, htmlContent, markdownContent, sourceEditor, t,
   });
   const fileViewer = renderFileViewer({
     commentPanel: fileComments.wholeFileCommentPanel, content, discardDialog, extensionNotice,

@@ -19,6 +19,7 @@ const hitSchema = z.object({
   directory: z.string(),
   snippet: z.string(),
   archived: z.boolean().optional(),
+  matchCount: z.number().int().nonnegative().optional(),
 });
 
 const indexSchema = z.object({

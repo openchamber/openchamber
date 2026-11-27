@@ -32,7 +32,6 @@ import {
   updateSkill,
   deleteSkill,
   renameSkill,
-  isManagedSkillPath,
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile,
@@ -79,6 +78,7 @@ import { magicPromptRequestSchema, type MagicPromptHttpResponse, type MagicPromp
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { appendInstalledSources, removeInstalledSources } from '../../web/server/lib/skills-catalog/installed-sources.js';
+import { buildSkillsListResponse } from './skills-list-response';
 
 type BridgeMessageInput = {
   id: string;
@@ -91,6 +91,7 @@ type ConfigRuntimeDeps = {
   persistSettings: (changes: Record<string, unknown>, ctx?: BridgeContext) => Promise<Record<string, unknown>>;
   handleMagicPromptRequest: (request: MagicPromptRequest) => Promise<MagicPromptHttpResponse>;
   fetchOpenCodeSkillsFromApi: (ctx: BridgeContext | undefined, workingDirectory?: string) => Promise<DiscoveredSkill[] | null>;
+  loadSkillBody: (ctx: BridgeContext | undefined, skill: DiscoveredSkill, workingDirectory?: string) => Promise<DiscoveredSkill>;
   clientReloadDelayMs: number;
 };
 
@@ -684,23 +685,7 @@ export async function handleConfigBridgeMessage(
 
       if (!name && normalizedMethod === 'GET') {
         const openCodeSkills = await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory);
-        const skills = mergeDiscoveredSkills(openCodeSkills || [], discoverSkills(workingDirectory));
-        return {
-          id,
-          type,
-          success: true,
-          data: {
-            ...(openCodeSkills === null ? { openCodeSkillsUnavailable: true } : {}),
-            skills: skills.map((skill) => ({
-              ...skill,
-              renamable: Boolean(
-                skill.path
-                && skill.path !== '<built-in>'
-                && isManagedSkillPath(skill.path, workingDirectory)
-              ),
-            })),
-          },
-        };
+        return { id, type, success: true, data: buildSkillsListResponse(openCodeSkills, workingDirectory, ctx?.manager?.getManagedLaunchEnvironment() ?? null) };
       }
 
       const skillName = typeof name === 'string' ? name.trim() : '';
@@ -709,8 +694,9 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'GET') {
-        const discoveredSkill = (await resolveDiscoveredSkills(deps, ctx, workingDirectory))
+        const listedSkill = (await resolveDiscoveredSkills(deps, ctx, workingDirectory))
           .find((skill) => skill.name === skillName);
+        const discoveredSkill = listedSkill && await deps.loadSkillBody(ctx, listedSkill, workingDirectory);
         const sources = getSkillSources(skillName, workingDirectory, discoveredSkill || null);
         return {
           id,

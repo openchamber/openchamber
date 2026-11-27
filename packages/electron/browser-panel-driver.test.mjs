@@ -107,3 +107,54 @@ test('a key press that outlives its deadline sends no key release', async (t) =>
   const events = commands.filter(({ method }) => method === 'Input.dispatchKeyEvent');
   assert.deepEqual(events.map(({ params }) => params.type), ['keyDown']);
 });
+
+test('annotation messages cross CDP as data in the overlay context', async () => {
+  const overlayContextId = 41;
+  const overlayStarted = Promise.withResolvers();
+  const overlayClosed = Promise.withResolvers();
+  const declarationFor = [];
+  const received = [];
+  const debuggerSession = new EventEmitter();
+  debuggerSession.isAttached = () => true;
+  debuggerSession.sendCommand = async (method, params) => {
+    switch (method) {
+      case 'Page.getFrameTree':
+        return { frameTree: { frame: { id: 'fixture' } } };
+      case 'Page.createIsolatedWorld':
+        return { executionContextId: overlayContextId };
+      case 'Runtime.evaluate':
+        if (!params.awaitPromise) return { exceptionDetails: {} };
+        overlayStarted.resolve();
+        return overlayClosed.promise;
+      case 'Runtime.callFunctionOn':
+        assert.equal(params.executionContextId, overlayContextId);
+        declarationFor.push(params.functionDeclaration);
+        received.push(params.arguments[0].value);
+        return { result: { value: { 'too late': false, queued: 'submitting' }[params.arguments[0].value.text] } };
+      default:
+        return {};
+    }
+  };
+  const contents = { debugger: debuggerSession };
+  const driver = createBrowserPanelDriver();
+  const overlay = driver.run(contents, 'annotate', { expression: 'null', sessionId: 1 });
+
+  await Promise.race([overlay, overlayStarted.promise]);
+  const messages = [
+    { type: 'insert', text: 'Review the "Daisy" button.' },
+    { type: 'voice', phase: 'idle', note: 'Ready.' },
+  ];
+  try {
+    for (const message of messages) {
+      assert.deepEqual(await driver.run(contents, 'annotationSend', { message }), { delivered: true, submitting: false });
+    }
+    assert.deepEqual(received, messages);
+    assert.deepEqual(await driver.run(contents, 'annotationSend', { message: { type: 'insert', text: 'too late' } }), { delivered: false, submitting: false });
+    assert.deepEqual(await driver.run(contents, 'annotationSend', { message: { type: 'insert', text: 'queued', ends: true } }), { delivered: true, submitting: true });
+    assert.equal(declarationFor[0], declarationFor[1]);
+  } finally {
+    overlayClosed.resolve({ result: { value: null } });
+    await overlay;
+  }
+  assert.deepEqual(await driver.run(contents, 'annotationSend', { message: messages[0] }), { delivered: false, submitting: false });
+});

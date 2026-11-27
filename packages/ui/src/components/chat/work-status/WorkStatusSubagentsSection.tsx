@@ -49,7 +49,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       icon="ai-agent"
       defaultExpanded
       summary={busyChildren > 0 ? `${busyChildren}/${rows.length}` : rows.length}
-      action={panelAvailable && directory ? (
+      titleAction={panelAvailable && directory ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="inline-flex shrink-0">

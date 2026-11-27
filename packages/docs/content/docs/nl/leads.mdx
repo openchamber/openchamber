@@ -29,7 +29,7 @@ Een lead toont in de zijbalk een bergtop met een vlag in plaats van het pijltje.
 - **Geeft de richting een naam.** Hij hernoemt de sessie naar het werk, zodat u haar op onderwerp vindt in de zijbalk, tabbladen en zoekresultaten. Een naam die u zelf hebt gegeven, blijft staan.
 - **Deelt resultaten uit, geen stappen.** Elk stuk werk gaat naar een aparte sessie, met het resultaat dat die moet bereiken, zoals "zoek en herstel de time-out bij het inloggen", en die sessie bedenkt de stappen zelf. Deze sessies staan in de zijbalk onder de lead. U kunt ze openen en lezen, en met **Overnemen** in het menu van een sessie wordt die van u als u er zelf mee wilt praten.
 - **Controleert wat terugkomt.** Een rapport dat alleen zegt "ik heb de oorzaak gevonden" is niet het gevraagde resultaat, dus stuurt de lead het werk terug in plaats van het aan u door te geven. Elke sessie moet laten zien wat ze heeft gedaan, zoals welke controles ze heeft uitgevoerd en wat daaruit kwam, en een rapport zonder bewijs gaat ook terug. De lead controleert alleen zelf iets waar het bewijs een gat heeft.
-- **Ruimt op.** Sessies waarvan hij de resultaten heeft gebruikt, archiveert hij.
+- **Ruimt op.** Heeft een sessie in een worktree gewerkt en is haar werk binnen, dan verwijdert hij die worktree. De sessie blijft staan, zodat u haar kunt lezen.
 - **Vraagt u alleen wat ertoe doet.** Hij beslist zelf, tenzij het antwoord verandert wat u in uw project zou zien, of twee redelijke opties echt van elkaar verschillen. Een grote wijziging alleen is geen reden om te vragen. Vragen van zijn sessies gaan naar de lead, niet naar u, en komen alleen bij u terecht als ze dezelfde toets doorstaan.
 
 ## Het overzicht
@@ -61,7 +61,7 @@ De lead wijzigt alleen de delen van de briefing die veranderd zijn, en OpenChamb
 
 ## Leads die slapen
 
-Een lead kan uren wachten terwijl zijn sessies werken. Als hij wakker wordt, moet het model normaal het hele gesprek opnieuw vanaf het begin lezen, omdat providers het gesprek maar een paar minuten in de cache houden. Bij een lang gesprek kost die ene keer lezen evenveel als een flinke hoeveelheid werk, en met een abonnement gaat het van uw gebruikslimiet af.
+Een lead kan uren wachten terwijl zijn sessies werken. Als hij wakker wordt, moet het model normaal het hele gesprek opnieuw vanaf het begin lezen, omdat providers het gesprek maar beperkte tijd in de cache houden, vaak een paar minuten tot een uur. Bij een lang gesprek kost die ene keer lezen evenveel als een flinke hoeveelheid werk, en met een abonnement gaat het van uw gebruikslimiet af.
 
 Daarom kort OpenChamber het gesprek in voordat de lead wakker wordt, als hij langer stil heeft gestaan dan zijn provider de cache bewaart en zijn gesprek lang is. Het oudere deel van het gesprek wordt vervangen door een korte notitie: het overzicht van de lead en de stand van zijn sessies. Voor die notitie wordt geen model aangeroepen, dus het kost niets. De briefing en de laatste berichten blijven zoals ze zijn, en de lead kan het volledige eerdere gesprek nog steeds lezen wanneer hij het nodig heeft.
 
@@ -73,7 +73,7 @@ Een lead kan een grote klus opsplitsen in een [workflow](/nl/workflows/). Kies b
 
 ## Waar leads werken
 
-Leads hebben de [Besturingstool voor agents](/nl/agent-control-tool/) nodig, die standaard aanstaat, en de eigen OpenCode-server van OpenChamber. Ze werken op de desktop, in de browser en op de telefoon. De VS Code-extensie toont bestaande leads met hun markering en overzicht, maar kan geen nieuwe starten.
+Leads hebben de [Besturingstool voor agents](/nl/agent-control-tool/) nodig, die standaard aanstaat. Op een OpenCode-server die u zelf draait, hebben ze ook de [geregistreerde OpenChamber-plugin](/nl/opencode-server/#openchamber-tools-inschakelen-op-een-externe-lokale-server) nodig. Ze werken op de desktop, in de browser en op de telefoon. De VS Code-extensie toont bestaande leads met hun markering en overzicht, maar kan geen nieuwe starten.
 
 ## Gerelateerd
 

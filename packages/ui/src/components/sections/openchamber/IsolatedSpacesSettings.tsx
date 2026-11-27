@@ -17,7 +17,7 @@ import {
   type SpacesSwitchChange,
 } from '@/lib/spaces/spaces-api';
 import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation-requests';
-import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
+import { resetSpaceModelAccess } from '@/lib/spaces/space-model-offer';
 import { refreshSpacesJourney, spacesWithoutProject, useSpacesJourneyRead, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { SpaceRow } from '@/components/session/spaces/SpaceRow';
 import { SpacePlacesSettings } from './SpacePlacesSettings';

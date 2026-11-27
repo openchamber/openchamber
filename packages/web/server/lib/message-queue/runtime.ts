@@ -15,7 +15,8 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { parseAttachment, toPublicAttachment, type PublicQueuedAttachment, type QueuedAttachment } from './attachments.js';
-import { catalogScope, createQueuedSkills, parseQueuedSkills, parseSkillInstructions, type SkillInstruction } from './skills.js';
+import { awaitCatalog, catalogScope, createQueuedSkills, parseQueuedSkills, parseSkillInstructions, type SkillInstruction } from './skills.js';
+import { parseSendConfig, switchesQueuedModel, type QueueSendConfig } from './send-config.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -34,13 +35,6 @@ const MESSAGE_TAIL_LIMIT = 2;
 const CONTEXT_PART_KINDS = new Set(['context', 'instruction', 'synthetic']);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{4,128}$/;
 const MESSAGE_ID_PATTERN = /^msg_[A-Za-z0-9]{8,64}$/;
-
-export interface QueueSendConfig {
-  providerID?: string;
-  modelID?: string;
-  agent?: string;
-  variant?: string;
-}
 
 export interface QueuedGoal {
   tokenBudget: number | null;
@@ -151,21 +145,6 @@ const hasSelectedModel = (model: QueueModel): model is QueueModel & RoutingModel
 const isValidSessionId = (value: string | undefined): value is string => SESSION_ID_PATTERN.test(asNonEmptyString(value));
 
 const httpError = (message: string, status: number) => Object.assign(new Error(message), { status });
-
-const sendConfigSchema = z.unknown().transform((value): QueueSendConfig | null => {
-  const raw = asRecord(value);
-  if (!raw) return null;
-  const providerID = asNonEmptyString(raw.providerID);
-  const modelID = asNonEmptyString(raw.modelID);
-  if (!providerID || !modelID) return null;
-  const sendConfig: QueueSendConfig = { providerID, modelID };
-  const agent = asNonEmptyString(raw.agent);
-  if (agent) sendConfig.agent = agent;
-  const variant = asNonEmptyString(raw.variant);
-  if (variant) sendConfig.variant = variant;
-  return sendConfig;
-});
-const parseSendConfig = sendConfigSchema.parse;
 
 const goalSchema = z.unknown().transform((value): QueuedGoal | null => {
   if (value === undefined) return null;
@@ -520,7 +499,7 @@ export function createMessageQueueRuntime({
     const [head = '', ...tail] = text.split(' ');
     const name = head.slice(1);
     if (!name) return null;
-    await openCodeFetch('/api/model', catalogScope(directory));
+    await awaitCatalog(openCodeFetch, directory);
     const commands = asList(await openCodeFetch('/api/command', catalogScope(directory))) ?? [];
     const match = commands.map((command) => asRecord(command)).find((command) => command?.name === name);
     if (!match) return null;
@@ -582,12 +561,12 @@ export function createMessageQueueRuntime({
       agent = routed.agent ?? agent;
     }
 
-    if (!item.scheduledTask || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+    if (switchesQueuedModel(item.sendConfig, Boolean(routed), Boolean(item.scheduledTask))) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
       directory,
       method: 'POST',
       body: { model },
     });
-    if (agent) {
+    if (agent && (!item.sendConfig.keepSessionAgent || (routed?.agent && routed.agent !== item.sendConfig.agent))) {
       await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/agent`, {
         directory,
         method: 'POST',
@@ -974,7 +953,7 @@ export function createMessageQueueRuntime({
     release,
     processPayload,
     start,
-    stop,
+    stop, hasLiveWork: () => sending.size > 0 || timers.size > 0 || Array.from(queues.values()).some((queue) => queue.items.length > 0),
     flush: () => writePromise,
   };
 }

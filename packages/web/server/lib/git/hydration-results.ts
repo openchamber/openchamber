@@ -3,6 +3,7 @@ import { parseSubmoduleManifest } from './submodule-discovery.js';
 import { normalizeDiscoveryEndpoint, resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { isRelativeCheckoutPath } from './network-operation-registry.js';
 import type { CheckoutHydrationFailure, HydrationFailure } from './network-execution-contracts.js';
+import type { HydrationInspection, HydrationTransfer } from './network-plan-contracts.js';
 
 type HydrationErrorFields = {
   code?: unknown;
@@ -52,6 +53,9 @@ export function hydrationError(cause: unknown): HydrationFailure {
   if (error?.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED') {
     return { status: 'authorization-required', error: { code: 'AUTHENTICATION_REQUIRED', message: 'This checkout endpoint requires an explicit credential grant' } };
   }
+  if (error?.code === 'SOURCE_CONTROL_BINDING_STALE') {
+    return { status: 'failed', error: { code: 'STALE_BINDING', message: 'Source control binding changed' } };
+  }
   if (error?.code === 'LFS_DISCOVERY_LIMIT_EXCEEDED') {
     return { status: 'invalid', error: { code: 'CHECKOUT_TOO_LARGE', message: 'Checkout has too many files to inspect' } };
   }
@@ -79,4 +83,16 @@ export async function inspectForHydrationPlan<Input, Inspection extends { headSh
     if (!preparedHydrationFailure.submodules.length) throw error;
     return { inspection: { headSha: expectedHeadSha, requirements: [], transfers: [], sourceRequired: false }, preparedHydrationFailure };
   }
+}
+
+export function withDerivedFromRemote<Target extends object>(target: Target, derivedFromRemote: string | undefined): Target & { derivedFromRemote?: string } {
+  if (!derivedFromRemote) return target;
+  return Object.assign(target, { derivedFromRemote });
+}
+
+export function checkoutAuxiliaryOf(inspection: HydrationInspection, kind: HydrationTransfer['kind'], path: string) {
+  const requirement = inspection.requirements.find((entry) => entry.kind === kind && entry.path === path);
+  const transfer = inspection.transfers.find((entry) => entry.kind === kind && entry.path === path);
+  if (!requirement || !transfer) return requirement ?? null;
+  return withDerivedFromRemote({ ...requirement, rawEndpoint: transfer.rawEndpoint }, transfer.derivedFromRemote);
 }

@@ -12,8 +12,7 @@ export interface SettingsNormalizationDependencies {
   os: Pick<typeof osModule, 'homedir'>;
   path: Pick<typeof pathModule, 'join' | 'resolve' | 'posix'>;
   processLike: { platform: string };
-  realpathSync?: (value: string) => string;
-  readdirSync?: (value: string) => string[];
+  canonicalPaths?: { of: (value: string) => string; refresh: (values: string[]) => Promise<void> };
   tunnelBootstrapTtlDefaultMs: number;
   tunnelBootstrapTtlMinMs: number;
   tunnelBootstrapTtlMaxMs: number;
@@ -52,7 +51,6 @@ export interface SettingsSkillCatalog {
   gitIdentityId?: string;
 }
 
-type DirectoryListings = Map<string, string[] | null>;
 type TypographyKey = 'markdown' | 'code' | 'uiHeader' | 'uiLabel' | 'meta' | 'micro';
 
 export const createSettingsNormalizationRuntime = (dependencies: SettingsNormalizationDependencies) => {
@@ -60,8 +58,7 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
     os,
     path,
     processLike,
-    realpathSync,
-    readdirSync,
+    canonicalPaths = { of: (value) => value, refresh: async () => {} },
     tunnelBootstrapTtlDefaultMs,
     tunnelBootstrapTtlMinMs,
     tunnelBootstrapTtlMaxMs,
@@ -97,66 +94,32 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
     return trimmed;
   }
 
-  const CASE_INSENSITIVE_PLATFORMS = new Set(['win32', 'darwin']);
+  const uppercaseDriveLetter = (value: string) => (
+    processLike.platform === 'win32'
+      ? value.replace(/^([a-z]):/, (_match: string, letter: string) => `${letter.toUpperCase()}:`)
+      : value
+  );
 
-  const rootLengthOf = (value: string) => {
-    const drive = /^[a-zA-Z]:[\\/]/.exec(value);
-    if (drive) return 3;
-    return value.startsWith('/') ? 1 : 0;
+  const persistedPathKey = (value: SettingsDocument[string]) => (
+    isString(value) ? uppercaseDriveLetter(normalizeDirectoryPath(value).trim()) : ''
+  );
+
+  const projectPathKey = (value: SettingsDocument[string]) => {
+    const rawPath = isString(value) ? value.trim() : '';
+    return rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
   };
 
-  const canonicalizePathCase = (value: string, listings?: DirectoryListings) => {
-    if (!readdirSync || !value) return value;
-    if (!CASE_INSENSITIVE_PLATFORMS.has(processLike?.platform)) return value;
-
-    let result = value;
-    try {
-      const rootLength = rootLengthOf(value);
-      if (rootLength === 0) return value;
-      const root = value.slice(0, rootLength);
-      const separator = processLike.platform === 'win32' ? /[\\/]+/ : /\/+/;
-      const segments = value.slice(rootLength).split(separator).filter(Boolean);
-      let current = root;
-      for (const segment of segments) {
-        let entries = listings?.get(current);
-        if (entries === undefined) {
-          try {
-            entries = readdirSync(current);
-          } catch {
-            entries = null;
-          }
-          listings?.set(current, entries);
-        }
-        if (!entries) return value;
-        let next: string | undefined = segment;
-        if (!entries.includes(segment)) {
-          next = entries.find((entry) => entry.toLowerCase() === segment.toLowerCase());
-          if (!next) return value;
-        }
-        current = path.join(current, next);
-      }
-      result = current;
-    } catch {
-      return value;
-    }
-    return result;
+  const listSettingsPaths = (input: SettingsDocument[string]) => {
+    const settings: SettingsDocument = hasFields(input) ? input : {};
+    const pinned: unknown[] = Array.isArray(settings.pinnedDirectories) ? settings.pinnedDirectories : [];
+    const projects: unknown[] = Array.isArray(settings.projects) ? settings.projects : [];
+    return [
+      ...[settings.lastDirectory, settings.homeDirectory, ...pinned].map(persistedPathKey),
+      ...projects.map((entry) => (hasFields(entry) ? projectPathKey(entry.path) : '')),
+    ].filter(Boolean);
   };
 
-  const safeRealpathSync = (value: string, listings?: DirectoryListings) => {
-    if (!value) {
-      return value;
-    }
-    if (!realpathSync) {
-      return canonicalizePathCase(value, listings);
-    }
-    let resolved;
-    try {
-      resolved = realpathSync(value);
-    } catch {
-      return value;
-    }
-    return canonicalizePathCase(resolved, listings);
-  };
+  const refreshCanonicalPaths = (...documents: SettingsDocument[]) => canonicalPaths.refresh(documents.flatMap(listSettingsPaths));
 
   function normalizePathForPersistence<Value>(value: Value, options?: { resolveRealpath?: boolean }): Value extends string ? string : Value;
   function normalizePathForPersistence(value: SettingsDocument[string], options: { resolveRealpath?: boolean } = {}) {
@@ -170,22 +133,10 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
       return trimmed;
     }
 
-    const uppercaseDriveLetter = (p: string) =>
-      p.replace(/^([a-z]):/, (_match: string, letter: string) => letter.toUpperCase() + ':');
-
-    const isWindows = processLike.platform === 'win32';
-    const caseNormalized = isWindows ? uppercaseDriveLetter(trimmed) : trimmed;
-    const resolved = options.resolveRealpath === false ? caseNormalized : safeRealpathSync(caseNormalized);
-
-    const finalResolved = isWindows
-      ? uppercaseDriveLetter(resolved)
-      : resolved;
-
-    if (!isWindows) {
-      return finalResolved;
-    }
-
-    return finalResolved.replace(/\//g, '\\');
+    const caseNormalized = uppercaseDriveLetter(trimmed);
+    const resolved = options.resolveRealpath === false ? caseNormalized : canonicalPaths.of(caseNormalized);
+    const finalResolved = uppercaseDriveLetter(resolved);
+    return processLike.platform === 'win32' ? finalResolved.replace(/\//g, '\\') : finalResolved;
   }
 
   const areStringArraysEqual = (a: SettingsDocument[string], b: SettingsDocument[string]) => {
@@ -234,15 +185,13 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
     const result: SettingsProject[] = [];
     const seenIds = new Set();
     const seenPaths = new Set();
-    const listings: DirectoryListings = new Map();
 
     for (const entry of input) {
       if (!hasFields(entry)) continue;
 
       const candidate = entry;
       const id = isString(candidate.id) ? candidate.id.trim() : '';
-      const rawPath = isString(candidate.path) ? candidate.path.trim() : '';
-      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath)), listings) : '';
+      const resolvedPath = canonicalPaths.of(projectPathKey(candidate.path));
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
       const label = isString(candidate.label) ? candidate.label.trim() : '';
       const labelSource = candidate.labelSource === 'manual' || candidate.labelSource === 'auto'
@@ -559,6 +508,7 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
     normalizeDirectoryPath,
     normalizePathForPersistence,
     normalizeSettingsPaths,
+    refreshCanonicalPaths,
     normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
     normalizeManagedRemoteTunnelHostname,

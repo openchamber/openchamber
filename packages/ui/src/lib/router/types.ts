@@ -6,6 +6,7 @@ export interface RouteState {
   tab: RouteTab | null;
   settingsPath: string | null;
   diffFile: string | null;
+  trackerItem: { url: string; directory: string | null; newTab: boolean } | null;
 }
 
 export type RouteTab = 'chat' | 'git' | 'diff' | 'terminal' | 'files';
@@ -27,4 +28,7 @@ export const ROUTE_PARAMS = {
   TAB: 'tab',
   SETTINGS: 'settings',
   FILE: 'file',
+  ITEM: 'item',
+  ITEM_DIRECTORY: 'itemDir',
+  ITEM_TAB: 'itemTab',
 } as const;

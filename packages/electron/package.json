@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -17,10 +17,10 @@
   "devDependencies": {
     "@effect/platform-node": "4.1.0",
     "@electron/rebuild": "^4.2.0",
-    "@opencode/plugin": "2.3.2",
-    "@opencode/schema": "2.3.2",
-    "@opencode/server": "2.3.2",
-    "@opencode/util": "2.3.2",
+    "@opencode/plugin": "2.4.2",
+    "@opencode/schema": "2.4.2",
+    "@opencode/server": "2.4.2",
+    "@opencode/util": "2.4.2",
     "effect": "4.1.0",
     "electron": "^45.0.0",
     "electron-builder": "^26.0.0",
@@ -141,7 +141,12 @@
       "extendInfo": {
         "CFBundleIconName": "AppIcon",
         "NSLocalNetworkUsageDescription": "OpenChamber needs access to devices and services on your local network.",
-        "NSAppleEventsUsageDescription": "Lets commands that you or an agent run in OpenChamber control other apps."
+        "NSAppleEventsUsageDescription": "Lets commands that you or an agent run in OpenChamber control other apps.",
+        "NSCalendarsUsageDescription": "Lets commands that you or an agent run in OpenChamber use your calendars.",
+        "NSCalendarsFullAccessUsageDescription": "Lets commands that you or an agent run in OpenChamber use your calendars.",
+        "NSCalendarsWriteOnlyAccessUsageDescription": "Lets commands that you or an agent run in OpenChamber add events to your calendars.",
+        "NSRemindersUsageDescription": "Lets commands that you or an agent run in OpenChamber use your reminders.",
+        "NSRemindersFullAccessUsageDescription": "Lets commands that you or an agent run in OpenChamber use your reminders."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

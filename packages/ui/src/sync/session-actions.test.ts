@@ -53,6 +53,7 @@ const sessionMoveErrorsById = new Map<string, Error>()
 let globalHasLoaded = true
 const deletedChatDirectories: string[] = []
 const globalUpsertedSessions: unknown[] = []
+let sessionMoveBeforeResponse: ((sessionId: string, directory: string) => void) | null = null
 const globalUpsertedSessionBatches: Session[][] = []
 const globalRemovedSessionIds: string[] = []
 // Sessions this client is holding. `archiveSessions` reads them to decide which
@@ -158,6 +159,7 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "session.move", params: { sessionID: sessionId, directory } })
       const error = sessionMoveErrorsById.get(sessionId)
       if (error) throw error
+      sessionMoveBeforeResponse?.(sessionId, directory)
     }),
     abortSession: mock(async (sessionId: string, directory?: string | null) => {
       replyCalls.push({ method: "session.abort", params: { sessionID: sessionId, directory } })
@@ -681,6 +683,7 @@ describe("moveSessionToDirectory", () => {
     globalActiveSessions = []
     availableWorktreesByProject = new Map()
     globalUpsertedSessions.length = 0
+    sessionMoveBeforeResponse = null
   })
 
   test("moves through the control plane and reconciles directory stores", async () => {
@@ -767,6 +770,37 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().sessionTotal).toBe(1)
     expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
     expect((globalUpsertedSessions.at(-1) as Session).title).toBe("Renamed")
+  })
+
+  test("keeps the server-confirmed destination when its move event arrives before the response", async () => {
+    const requested: Session = {
+      id: "session-a",
+      projectID: "project",
+      title: "Move me",
+      directory: "/source",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }
+    const source = createStore({}, { session: [requested], sessionTotal: 1 })
+    const alias = createStore({})
+    const real = createStore({})
+    const childStores = createChildStores([["/source", source], ["/alias", alias], ["/real", real]])
+    const { adoptSessionMove, moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/source")
+    sessionMoveBeforeResponse = (sessionId) => adoptSessionMove(sessionId, "/source", "/real")
+
+    const placed = await moveSessionToDirectory(requested, "/source", "/alias")
+
+    expect(placed).toBe("/real")
+    expect(replyCalls.filter((call) => call.method === "session.move").at(-1)?.params.directory).toBe("/alias")
+    expect(source.getState().session).toHaveLength(0)
+    expect(alias.getState().session).toHaveLength(0)
+    expect(real.getState().session[0]?.directory).toBe("/real")
+    expect(globalUpsertedSessions.at(-1)).toMatchObject({ id: "session-a", directory: "/real" })
+    expect(registeredSessionDirectories.at(-1)).toEqual({ sessionID: "session-a", directory: "/real" })
+    expect(queueMoves.at(-1)).toEqual({ sessionId: "session-a", directory: "/real" })
+    expect(tabMoves.at(-1)).toMatchObject({ sessionId: "session-a", directory: "/real" })
   })
 
   test("publishes nothing locally when the caller's server changed during the move", async () => {
@@ -1932,6 +1966,7 @@ describe("optimisticSend target directory", () => {
     expect(inFlightDuringSend).toBe(true)
     expect(hasPromptInFlight("session-cold")).toBe(false)
 
+    targetStore.setState({ session_status: { "session-cold": { type: "idle" } } })
     await expect(optimisticSend({
       sessionId: "session-cold",
       directory: "/target/project",
@@ -2132,6 +2167,37 @@ describe("optimisticSend target directory", () => {
     expect(sent).toEqual({ messageID: ids[2], contextIDs: [ids[0], ids[1]] })
     // A rejected send takes the context records down with the prompt.
     expect(removed).toEqual(ids)
+  })
+
+  test("a sent prompt of context alone is admitted and carries the parts OpenCode stores for it", async () => {
+    const { projectUserParts } = await import("@/lib/opencode/projection")
+    const childStores = createChildStores([["/target/project", createStore({})]])
+    const added: Array<{ message: Message; parts: Part[] }> = []
+    const admitted: string[] = []
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => { added.push({ message: input.message, parts: input.parts }) },
+      () => {},
+      undefined,
+      (input) => { admitted.push(input.messageID) },
+    )
+
+    await optimisticSend({
+      sessionId: "session-quotes",
+      directory: "/target/project",
+      content: "",
+      context: [{ text: "quoted" }],
+      send: async () => { expect(admitted).toEqual([]) },
+    })
+
+    // Once OpenCode answered, the quote and the prompt are its records.
+    expect(admitted).toEqual(added.map((item) => item.message.id))
+    const prompt = added.find((item) => item.message.role === "user")!
+    expect(prompt.parts.map((part) => part.id)).toEqual(
+      projectUserParts({ text: "" }, { sessionID: "session-quotes", messageID: prompt.message.id, created: 1 }).map((part) => part.id),
+    )
   })
 
   test("shows the prompt before the knowledge write finishes, and sends only after it", async () => {
@@ -2445,6 +2511,179 @@ describe("optimisticSend target directory", () => {
     expect(optimisticConfirm).toBe(null)
     expect(replyCalls.filter((call) => call.method === "session.messages").every((call) => call.params.limit === 30)).toBe(true)
     expect(targetStore.getState().session_status["session-missing"]?.type).toBe("idle")
+  })
+
+  test("marks steered optimistic sends pending and preserves active session status on rollback", async () => {
+    const targetStore = createStore({}, {
+      session_status: {
+        "session-busy": { type: "busy" },
+        "session-retry": { type: "retry", attempt: 2, message: "rate limited", next: 5000 },
+      },
+    })
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const added: OptimisticAddCall[] = []
+    const removed: OptimisticRemoveCall[] = []
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        added.push(input)
+      },
+      (input) => {
+        removed.push(input)
+      },
+    )
+
+    // Steered send marks optimistic user message as pending and keeps busy status when rejected.
+    await expect(optimisticSend({
+      sessionId: "session-busy",
+      directory: "/target/project",
+      content: "steer while busy",
+      steer: true,
+      send: async () => {
+        throw new Error("rejected")
+      },
+    })).rejects.toThrow("rejected")
+
+    expect(added[0]?.message).toMatchObject({ role: "user", pending: true, steer: true })
+    expect(removed[0]?.sessionID).toBe("session-busy")
+    expect(targetStore.getState().session_status["session-busy"]).toEqual({ type: "busy" })
+
+    // Retry session status is also preserved on rollback.
+    await expect(optimisticSend({
+      sessionId: "session-retry",
+      directory: "/target/project",
+      content: "steer while retrying",
+      steer: true,
+      send: async () => {
+        throw new Error("rejected")
+      },
+    })).rejects.toThrow("rejected")
+
+    expect(targetStore.getState().session_status["session-retry"]).toEqual({
+      type: "retry",
+      attempt: 2,
+      message: "rate limited",
+      next: 5000,
+    })
+
+    // Ordinary (non-steered) send does not set pending on the optimistic user message.
+    await optimisticSend({
+      sessionId: "session-idle",
+      directory: "/target/project",
+      content: "normal prompt",
+      send: async () => {},
+    })
+
+    const idleMessage = added[2]?.message
+    expect(idleMessage?.role).toBe("user")
+    expect(idleMessage && "pending" in idleMessage).toBe(false)
+  })
+
+  test("preserves busy while a concurrent send is in flight and preserves retry on rollback", async () => {
+    const targetStore = createStore({})
+    const childStores = createChildStores([["/target/project", targetStore]])
+
+    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/target/project")
+    setOptimisticRefs(() => {}, () => {})
+
+    // 1. Send A starts from idle, Send B steers while A is in flight.
+    // When A rejects first, B is still in flight so status stays busy; when B also rejects, idle restores.
+    let rejectA!: (error: Error) => void
+    let rejectB!: (error: Error) => void
+    let markAStarted!: () => void
+    let markBStarted!: () => void
+    const aStarted = new Promise<void>((resolve) => { markAStarted = resolve })
+    const bStarted = new Promise<void>((resolve) => { markBStarted = resolve })
+    const sendA = optimisticSend({
+      sessionId: "session-both-fail",
+      directory: "/target/project",
+      content: "first",
+      send: () => {
+        markAStarted()
+        return new Promise<void>((_, reject) => { rejectA = reject })
+      },
+    })
+    await aStarted
+    const sendB = optimisticSend({
+      sessionId: "session-both-fail",
+      directory: "/target/project",
+      content: "steered",
+      steer: true,
+      send: () => {
+        markBStarted()
+        return new Promise<void>((_, reject) => { rejectB = reject })
+      },
+    })
+    await bStarted
+
+    rejectA(new Error("first failed"))
+    await expect(sendA).rejects.toThrow("first failed")
+    expect(targetStore.getState().session_status["session-both-fail"]).toEqual({ type: "busy" })
+
+    rejectB(new Error("second failed"))
+    await expect(sendB).rejects.toThrow("second failed")
+    expect(targetStore.getState().session_status["session-both-fail"]).toEqual({ type: "idle" })
+
+    // 2. Send A starts from idle and succeeds while Send B is in flight; when B rejects, status stays busy.
+    let resolveA!: () => void
+    let rejectB2!: (error: Error) => void
+    let markA2Started!: () => void
+    let markB2Started!: () => void
+    const a2Started = new Promise<void>((resolve) => { markA2Started = resolve })
+    const b2Started = new Promise<void>((resolve) => { markB2Started = resolve })
+    const acceptedA = optimisticSend({
+      sessionId: "session-one-succeeds",
+      directory: "/target/project",
+      content: "first",
+      send: () => {
+        markA2Started()
+        return new Promise<void>((resolve) => { resolveA = resolve })
+      },
+    })
+    await a2Started
+    const rejectedB = optimisticSend({
+      sessionId: "session-one-succeeds",
+      directory: "/target/project",
+      content: "steered",
+      steer: true,
+      send: () => {
+        markB2Started()
+        return new Promise<void>((_, reject) => { rejectB2 = reject })
+      },
+    })
+    await b2Started
+
+    resolveA()
+    await acceptedA
+    rejectB2(new Error("steer rejected"))
+    await expect(rejectedB).rejects.toThrow("steer rejected")
+    expect(targetStore.getState().session_status["session-one-succeeds"]).toEqual({ type: "busy" })
+
+    // 3. Send starts from idle, live status moves to retry before rejection -> rollback preserves retry.
+    await expect(optimisticSend({
+      sessionId: "session-moved-retry",
+      directory: "/target/project",
+      content: "first",
+      send: async () => {
+        targetStore.setState({
+          session_status: {
+            ...targetStore.getState().session_status,
+            "session-moved-retry": { type: "retry", attempt: 1, message: "throttled", next: 3000 },
+          },
+        })
+        throw new Error("rejected after retry")
+      },
+    })).rejects.toThrow("rejected after retry")
+
+    expect(targetStore.getState().session_status["session-moved-retry"]).toEqual({
+      type: "retry",
+      attempt: 1,
+      message: "throttled",
+      next: 3000,
+    })
   })
 })
 
@@ -4215,10 +4454,22 @@ describe("replyToForm applies the composer selection", () => {
     expect(selectionPicks.settled).toEqual(["session-a:openai/gpt-6"])
   })
 
+  test("[issue-7456] a model the composer only shows is not applied to the answer", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a")
+    listedAgents = ["build"]
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentVariant: "high", currentAgentName: "build" }
+
+    await replyInMainChat()
+
+    expect(replyMethods()).toEqual(["form.reply"])
+  })
+
   test("an explicit Default takes the session off its effort", async () => {
     mainSessionId = "session-a"
     seedSession("session-a", { model: { ...SESSION_MODEL, variant: "high" } })
     configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentVariant: "high", variantOverride: null, currentAgentName: "build" }
+    selectionPicks.models.set("session-a", { providerId: "anthropic", modelId: "claude-3" })
     listedAgents = ["build"]
 
     await replyInMainChat()
@@ -4232,6 +4483,7 @@ describe("replyToForm applies the composer selection", () => {
     seedSession("session-a")
     configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
     selectionApplyError = new Error("model switch failed")
+    selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
 
     await expect(replyInMainChat()).rejects.toThrow("model switch failed")
 
@@ -4245,6 +4497,7 @@ describe("replyToForm applies the composer selection", () => {
     // The server read fails; the cache alone already matches the pick.
     sessionRecords.clear()
     configState = { currentProviderId: "anthropic", currentModelId: "claude-3" }
+    selectionPicks.models.set("session-a", { providerId: "anthropic", modelId: "claude-3" })
 
     await replyInMainChat()
 
@@ -4439,6 +4692,7 @@ describe("replyToForm applies the composer selection", () => {
   test("an unknown root reads its record from the server and answers with the composer (#6053)", async () => {
     mainSessionId = "session-a"
     configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "build" }
+    selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
     fetchedSessionRecords.set("session-a", {
       ...sessionFixture("session-a"),
       directory: "/owned/root",
@@ -4460,6 +4714,7 @@ describe("replyToForm applies the composer selection", () => {
   test("an unknown review session reads its record from the server and gets composer semantics (#6555)", async () => {
     mainSessionId = "session-a"
     configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    selectionPicks.models.set("session-a", { providerId: "google", modelId: "gemini" })
     fetchedSessionRecords.set("session-a", {
       ...sessionFixture("session-a"),
       directory: "/owned/review",
@@ -4524,6 +4779,7 @@ describe("replyToForm applies the composer selection", () => {
   test("an open review session answers with the composer's selection despite parentID (#6555)", async () => {
     mainSessionId = "session-a"
     configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
+    selectionPicks.models.set("session-a", { providerId: "google", modelId: "gemini" })
     seedSession("session-a", {
       parentID: "session-parent",
       model: SESSION_MODEL,
@@ -4574,6 +4830,7 @@ describe("replyToForm applies the composer selection", () => {
       seedSession("session-a")
       configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
       const form = buildForm("q-1", "session-a")
+      selectionPicks.models.set("session-a", { providerId: "openai", modelId: "gpt-6" })
       const store = createStore({}, { form: { "session-a": [form] } })
       let release = () => {}
       let started = () => {}

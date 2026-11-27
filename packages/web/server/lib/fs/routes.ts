@@ -1,11 +1,18 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import { GIT_LAUNCH_DIRECTORY, gitArgsIn } from '../git/git-launch.js';
+import { whileReachable } from '../directory-reachability/while-reachable.js';
 import { canonicalDirectoryPath } from './canonical-path.js';
-import { containedMkdirPath, containedPath, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
+import { containedMkdirPath, containedPathOrChatFolder, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
+import { createKeyedSerializer, createTextFileWriter, DanglingLinkError } from './text-write.js';
 import { injectPreviewBridge } from './preview-bridge.js';
+import { openWindowsFolder, selectInWindowsExplorer } from './windows-shell-open.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
+import { runCommandInDirectory, type CapturedCommandResult, type CommandOptions } from './exec-command.js';
 import { createFsSearchRuntime, createGitCheckIgnoreTimeoutMs } from './search.js';
+import { createExecJobStore, type CommandResult } from './exec-jobs.js';
+import { EXEC_JOB_MAX_OUTPUT_BYTES } from './exec-output.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -100,36 +107,6 @@ interface WorkspaceContextOptions extends Omit<WorkspacePathOptions, 'baseDirect
   scope?: string;
 }
 
-interface CommandOptions {
-  shell: string;
-  shellFlag: string;
-  command: string;
-  resolvedCwd: string;
-}
-
-interface CommandResult {
-  command: unknown;
-  success: boolean;
-  exitCode?: number | undefined;
-  stdout?: string;
-  stderr?: string;
-  error?: unknown;
-}
-
-interface ExecJob {
-  jobId: string;
-  status: 'queued' | 'running' | 'done';
-  success: boolean | null;
-  commands: unknown[];
-  resolvedCwd: string;
-  shell: string;
-  shellFlag: string;
-  results: CommandResult[];
-  startedAt: number;
-  finishedAt: number | null;
-  updatedAt: number;
-}
-
 interface PreviewRoot { base: string; readRoot: string }
 interface DirectoryStatResult { path: string; isDirectory: boolean; realPath?: string }
 interface OutsideFileGrant {
@@ -139,7 +116,6 @@ interface OutsideFileGrant {
   expiresAt: number;
 }
 
-const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
 
 const outsideFileGrants = new Map<string, OutsideFileGrant>();
@@ -339,14 +315,7 @@ const streamUploadBody = async (req: Request, handle: FileHandle, maxBytes: numb
   }
 };
 
-const normalizeCommand = (command: string) =>
-  command.trim().replace(/\s+/g, ' ');
-
-const isCacheableGitReadCommand = (command: string) => {
-  const normalized = normalizeCommand(command);
-  return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
-};
-
+const CACHEABLE_GIT_READ_COMMAND = /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/;
 const GIT_READ_CACHE_MAX_ENTRIES = 500;
 const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
 
@@ -603,75 +572,6 @@ const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirec
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs }: CommandOptions & {
-  spawn: typeof nodeSpawn; execEnv: NodeJS.ProcessEnv; commandTimeoutMs: number;
-}) => {
-  return new Promise<CommandResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-
-    const child = spawn(shell, [shellFlag, command], {
-      cwd: resolvedCwd,
-      env: execEnv,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        void 0;
-      }
-    }, commandTimeoutMs);
-
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      resolve({
-        command,
-        success: false,
-        exitCode: undefined,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        error: (error && error.message) || 'Command execution failed',
-      });
-    });
-
-    child.on('close', (code, signal) => {
-      clearTimeout(timeout);
-      const exitCode = code === null ? undefined : code;
-      const base = {
-        command,
-        success: exitCode === 0 && !timedOut,
-        exitCode,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-      };
-
-      if (timedOut) {
-        resolve({
-          ...base,
-          success: false,
-          error: `Command timed out after ${commandTimeoutMs}ms` + (signal ? ` (${signal})` : ''),
-        });
-        return;
-      }
-
-      resolve(base);
-    });
-  });
-};
-
 export const registerFsRoutes = (app: Application, dependencies: FsRouteDependencies) => {
   const {
     os,
@@ -697,9 +597,10 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
   const managedRoots = [path.resolve(openchamberUserConfigRoot), chatsRoot];
   const chatsRoots = [...new Set([chatsRoot, path.join(openchamberUserConfigRoot, 'chats')])];
   const previewGrants = createPreviewGrants({ crypto });
-  const realpathCache = createRealpathCache({
-    realpath: fsPromises.realpath.bind(fsPromises),
-  });
+  const realpathCache = createRealpathCache({ realpath: fsPromises.realpath.bind(fsPromises) });
+  const writeTextFile = createTextFileWriter(fsPromises);
+  const inArrivalOrder = createKeyedSerializer();
+  const resolveWorkspaceTarget = (req: Request, targetPath: string) => resolveWorkspacePathFromContext({ fsPromises, req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, managedRoots, chatsRoots });
 
   const spawnDetached = (command: string, args: string[]) => new Promise<void>((resolve, reject) => {
     let child: ChildProcess;
@@ -722,22 +623,13 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     child.once('spawn', onSpawn);
   });
 
-  const execJobs = new Map<string, ExecJob>();
+  const execJobs = createExecJobStore();
   const commandTimeoutMs = createCommandTimeoutMs();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
-  const gitReadCache = new Map<string, { result: CommandResult; at: number }>();
-  const inFlightGitReadCache = new Map<string, Promise<CommandResult>>();
-
-  const pruneExecJobs = () => {
-    const now = Date.now();
-    for (const [jobId, job] of execJobs.entries()) {
-      const updatedAt = job.updatedAt;
-      if (updatedAt && now - updatedAt > EXEC_JOB_TTL_MS) {
-        execJobs.delete(jobId);
-      }
-    }
-  };
+  const gitReadCache = new Map<string, { result: CapturedCommandResult; at: number; sequence: number }>();
+  const inFlightGitReadCache = new Map<string, Promise<CapturedCommandResult>>();
+  let gitReadSequence = 0;
 
   const pruneGitReadCache = () => {
     if (gitReadCacheTtlMs <= 0) {
@@ -751,9 +643,10 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
   };
 
-  const setGitReadCacheEntry = (key: string, result: CommandResult) => {
+  const setGitReadCacheEntry = (key: string, result: CapturedCommandResult, sequence: number) => {
+    if ((gitReadCache.get(key)?.sequence ?? -1) > sequence) return;
     gitReadCache.delete(key);
-    gitReadCache.set(key, { result, at: Date.now() });
+    gitReadCache.set(key, { result, at: Date.now(), sequence });
 
     let totalBytes = 0;
     for (const [k, entry] of gitReadCache) {
@@ -772,74 +665,64 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
   };
 
-  const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }: CommandOptions) => {
-    const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
-    const cacheKey = cacheable ? `${resolvedCwd}${normalizeCommand(command)}` : null;
+  const runCommandWithGitReadCache = async (options: CommandOptions) => {
+    const { command, resolvedCwd, maxOutputBytes } = options;
+    const normalizedCommand = command.trim().replace(/\s+/g, ' ');
+    const gitRead = CACHEABLE_GIT_READ_COMMAND.test(normalizedCommand);
+    const run = async () => runCommandInDirectory({
+      ...options,
+      spawn,
+      execEnv: environmentRuntime
+        ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !gitRead })
+        : { ...process.env, PATH: buildAugmentedPath() },
+      commandTimeoutMs,
+    });
+    if (!gitRead || gitReadCacheTtlMs <= 0) return run();
 
-    if (cacheKey) {
-      const cached = gitReadCache.get(cacheKey);
-      if (cached && Date.now() - cached.at < gitReadCacheTtlMs) {
+    const cacheKey = `${resolvedCwd}${normalizedCommand}`;
+    const cached = gitReadCache.get(cacheKey);
+    if (cached) {
+      if (Date.now() - cached.at >= gitReadCacheTtlMs) {
+        gitReadCache.delete(cacheKey);
+      } else if (cached.result.capturedBytes <= maxOutputBytes) {
         gitReadCache.delete(cacheKey);
         gitReadCache.set(cacheKey, cached);
         return { ...cached.result, command };
       }
-      if (cached) {
-        gitReadCache.delete(cacheKey);
-      }
-
-      const inFlight = inFlightGitReadCache.get(cacheKey);
-      if (inFlight) {
-        const result = await inFlight;
-        return { ...result, command };
-      }
     }
 
-    const runPromise = (async () => runCommandInDirectory({
-      shell,
-      shellFlag,
-      command,
-      resolvedCwd,
-      spawn,
-      execEnv: environmentRuntime
-        ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !isCacheableGitReadCommand(command) })
-        : { ...process.env, PATH: buildAugmentedPath() },
-      commandTimeoutMs,
-    }))().then((result) => {
-      if (cacheKey && result && result.success) {
-        setGitReadCacheEntry(cacheKey, result);
+    const inFlightKey = `${maxOutputBytes}:${cacheKey}`;
+    const inFlight = inFlightGitReadCache.get(inFlightKey);
+    if (inFlight) {
+      const result = await inFlight;
+      return { ...result, command };
+    }
+
+    const sequence = ++gitReadSequence;
+    const runPromise = run().then((result) => {
+      if (result.success && !result.outputTruncated) {
+        setGitReadCacheEntry(cacheKey, result, sequence);
       }
       return result;
     }).finally(() => {
-      if (cacheKey && inFlightGitReadCache.get(cacheKey) === runPromise) {
-        inFlightGitReadCache.delete(cacheKey);
-      }
+      inFlightGitReadCache.delete(inFlightKey);
     });
-
-    if (cacheKey) {
-      inFlightGitReadCache.set(cacheKey, runPromise);
-    }
-
+    inFlightGitReadCache.set(inFlightKey, runPromise);
     return runPromise;
   };
 
-  const runExecJob = async (job: ExecJob) => {
-    job.status = 'running';
-    job.updatedAt = Date.now();
-
+  const runExecJob = async (commands: unknown[], options: Omit<CommandOptions, 'command' | 'maxOutputBytes'>) => {
     const results: CommandResult[] = [];
-    for (const command of job.commands) {
+    let maxOutputBytes = EXEC_JOB_MAX_OUTPUT_BYTES;
+    for (const command of commands) {
       if (!isStringInput(command) || !command.trim()) {
         results.push({ command, success: false, error: 'Invalid command' });
         continue;
       }
 
       try {
-        const result = await runCommandWithGitReadCache({
-          shell: job.shell,
-          shellFlag: job.shellFlag,
-          command,
-          resolvedCwd: job.resolvedCwd,
-        });
+        const { capturedBytes, ...result } = await runCommandWithGitReadCache({ ...options, command, maxOutputBytes });
+        maxOutputBytes -= capturedBytes;
         results.push(result);
       } catch (error) {
         results.push({
@@ -848,16 +731,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
           error: (error && errorFields(error)?.message) || 'Command execution failed',
         });
       }
-
-      job.results = results;
-      job.updatedAt = Date.now();
     }
-
-    job.results = results;
-    job.success = results.every((r) => r.success);
-    job.status = 'done';
-    job.finishedAt = Date.now();
-    job.updatedAt = Date.now();
+    return results;
   };
 
   app.get('/api/fs/home', async (_req, res) => {
@@ -891,21 +766,11 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         console.warn('Rejected outside-workspace mkdir without trusted directory grant');
         return res.status(403).json({ error: 'Outside workspace directory creation requires a grant' });
       }
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: dirPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolved = await resolveWorkspaceTarget(req, dirPath);
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }
-      const mkdirPath = await containedMkdirPath(resolved, { fsPromises, path, os });
+      const mkdirPath = await containedMkdirPath(resolved, chatsRoots, { fsPromises, path, os });
       if (!mkdirPath) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -1037,7 +902,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
 
     try {
       const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
-      const stats = await fsPromises.stat(resolvedPath);
+      const stats = await whileReachable(resolvedPath, () => fsPromises.stat(resolvedPath));
       if (!stats.isDirectory()) {
         return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
@@ -1200,11 +1065,11 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     const results = await Promise.all(directoryPaths.map(async (directoryPath) => {
       try {
         const resolvedPath = path.resolve(normalizeDirectoryPath(directoryPath));
-        const stats = await fsPromises.stat(resolvedPath);
+        const stats = await whileReachable(resolvedPath, () => fsPromises.stat(resolvedPath));
         if (!stats.isDirectory()) {
           return { path: directoryPath, isDirectory: false, reason: 'not-directory' };
         }
-        const realPath = await projectRealpath(resolvedPath).catch(() => null);
+        const realPath = await whileReachable(resolvedPath, () => projectRealpath(resolvedPath)).catch(() => null);
         const result: DirectoryStatResult = { path: directoryPath, isDirectory: true };
         if (realPath) result.realPath = realPath;
         return result;
@@ -1508,6 +1373,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(413).json({ error: 'File too large to serve' });
       }
 
+      const withinReadRoot = isPathWithinRoot(canonicalPath, grant.readRoot, path, os);
+      if (req.query?.inline === '1' && !withinReadRoot) return res.status(403).json({ error: 'File is outside preview read root' });
       const ext = path.extname(canonicalPath).toLowerCase();
       const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
       const bytes = await fsPromises.readFile(canonicalPath);
@@ -1515,9 +1382,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Security-Policy', PREVIEW_SANDBOX_POLICY);
-      if (isPathWithinRoot(canonicalPath, grant.readRoot, path, os) && !res.getHeader('Access-Control-Allow-Origin')) {
-        res.setHeader('Access-Control-Allow-Origin', 'null');
-      }
+      if (withinReadRoot && !res.getHeader('Access-Control-Allow-Origin')) res.setHeader('Access-Control-Allow-Origin', 'null');
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
@@ -1541,51 +1406,34 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       return res.status(400).json({ error: 'Content is required' });
     }
 
-    try {
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: filePath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
-      if (!resolved.ok) {
-        return res.status(400).json({ error: resolved.error });
-      }
-
-      const writePath = await containedWritePath(resolved, { fsPromises, path, os });
-      if (!writePath) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
-      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
-      if (existing === content) {
-        return res.json({ success: true, path: resolved.resolved });
-      }
-
-      await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
-
-      const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return inArrivalOrder(filePath, async () => {
       try {
-        await fsPromises.writeFile(tmp, content, 'utf8');
-        await fsPromises.rename(tmp, writePath);
+        const resolved = await resolveWorkspaceTarget(req, filePath);
+        if (!resolved.ok) {
+          return res.status(400).json({ error: resolved.error });
+        }
+
+        const writePath = await containedWritePath(resolved, { fsPromises, path, os });
+        if (!writePath) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
+
+        await writeTextFile(writePath, content);
+        return res.json({ success: true, path: resolved.resolved });
       } catch (error) {
-        await fsPromises.unlink(tmp).catch(() => {});
-        throw error;
+        const err = error;
+        if (err instanceof DanglingLinkError) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+        if (isOsPermissionError(err)) {
+          return sendOsPermissionDenied(res, 'Access denied');
+        }
+        console.error('Failed to write file:', error);
+        return res.status(500).json({ error: (error && errorFields(error)?.message) || 'Failed to write file' });
       }
-      return res.json({ success: true, path: resolved.resolved });
-    } catch (error) {
-      const err = error;
-      if (isOsPermissionError(err)) {
-        return sendOsPermissionDenied(res, 'Access denied');
-      }
-      console.error('Failed to write file:', error);
-      return res.status(500).json({ error: (error && errorFields(error)?.message) || 'Failed to write file' });
-    }
+    });
   });
 
   app.post('/api/fs/upload', async (req, res) => {
@@ -1610,17 +1458,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
 
     try {
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: filePath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolved = await resolveWorkspaceTarget(req, filePath);
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }
@@ -1735,7 +1573,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: resolved.error });
       }
 
-      const deletePath = await containedPath(resolved, { fsPromises, path, os });
+      const deletePath = await containedPathOrChatFolder(resolved, chatsRoots, { fsPromises, path, os });
       if (!deletePath) {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -1765,32 +1603,12 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
 
     try {
-      const resolvedOld = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: oldPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolvedOld = await resolveWorkspaceTarget(req, oldPath);
       if (!resolvedOld.ok) {
         return res.status(400).json({ error: resolvedOld.error });
       }
 
-      const resolvedNew = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: newPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolvedNew = await resolveWorkspaceTarget(req, newPath);
       if (!resolvedNew.ok) {
         return res.status(400).json({ error: resolvedNew.error });
       }
@@ -1856,24 +1674,11 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         }
       } else if (platform === 'win32') {
         const stat = await fsPromises.stat(resolved);
-        const escapedPath = resolved.replace(/'/g, "''");
-        const command = stat.isDirectory()
-          ? `Start-Process -FilePath '${escapedPath}'`
-          : `Start-Process -FilePath explorer.exe -ArgumentList '/select,${escapedPath}'`;
-        await new Promise<void>((resolve, reject) => {
-          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-            windowsHide: true,
-            stdio: 'ignore',
-          });
-          child.once('error', reject);
-          child.once('exit', (code) => {
-            if (code === 0) {
-              resolve();
-              return;
-            }
-            reject(new Error(`Explorer launch failed with code ${code ?? 'unknown'}`));
-          });
-        });
+        if (stat.isDirectory()) {
+          await openWindowsFolder(spawn, resolved);
+        } else {
+          await selectInWindowsExplorer(spawn, resolved);
+        }
       } else {
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
@@ -1903,7 +1708,6 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       return res.status(400).json({ error: 'Working directory (cwd) is required' });
     }
 
-    pruneExecJobs();
     pruneGitReadCache();
 
     try {
@@ -1912,17 +1716,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: 'Background command execution is not allowed' });
       }
       const resolvedCwdCandidate = path.resolve(normalizeDirectoryPath(cwd));
-      const resolvedForWorkspace = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: resolvedCwdCandidate,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolvedForWorkspace = await resolveWorkspaceTarget(req, resolvedCwdCandidate);
       if (!resolvedForWorkspace.ok) {
         console.warn(`Rejected /api/fs/exec outside workspace: ${resolvedForWorkspace.error}`);
         return res.status(403).json({ error: resolvedForWorkspace.error });
@@ -1937,50 +1731,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       const shellFlag = process.platform === 'win32' ? '/c' : '-c';
 
       const jobId = crypto.randomUUID();
-      const job: ExecJob = {
-        jobId,
-        status: 'queued',
-        success: null,
-        commands,
-        resolvedCwd,
-        shell,
-        shellFlag,
-        results: [],
-        startedAt: Date.now(),
-        finishedAt: null,
-        updatedAt: Date.now(),
-      };
-
-      execJobs.set(jobId, job);
-
-      const isBackground = false;
-      if (isBackground) {
-        void runExecJob(job).catch((error) => {
-          job.status = 'done';
-          job.success = false;
-          job.results = Array.isArray(job.results) ? job.results : [];
-          job.results.push({
-            command: '',
-            success: false,
-            error: (error && errorFields(error)?.message) || 'Command execution failed',
-          });
-          job.finishedAt = Date.now();
-          job.updatedAt = Date.now();
-        });
-
-        return res.status(202).json({
-          jobId,
-          status: 'running',
-        });
-      }
-
-      await runExecJob(job);
-      return res.json({
-        jobId,
-        status: job.status,
-        success: job.success === true,
-        results: job.results,
-      });
+      const results = await runExecJob(commands, { shell, shellFlag, resolvedCwd });
+      return res.type('application/json').send(execJobs.complete(jobId, results));
     } catch (error) {
       console.error('Failed to execute commands:', error);
       return res.status(500).json({ error: (error && errorFields(error)?.message) || 'Failed to execute commands' });
@@ -1993,20 +1745,12 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       return res.status(400).json({ error: 'Job id is required' });
     }
 
-    pruneExecJobs();
-
-    const job = execJobs.get(jobId);
-    if (!job) {
+    const body = execJobs.get(jobId);
+    if (!body) {
       return res.status(404).json({ error: 'Job not found' });
     }
 
-    job.updatedAt = Date.now();
-    return res.json({
-      jobId: job.jobId,
-      status: job.status,
-      success: job.success === true,
-      results: Array.isArray(job.results) ? job.results : [],
-    });
+    return res.type('application/json').send(body);
   });
 
   app.get('/api/fs/list', async (req, res) => {
@@ -2040,8 +1784,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
           if (pathsToCheck.length > 0) {
             try {
               const result = await new Promise<string>((resolve) => {
-                const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
-                  cwd: resolvedPath,
+                const child = spawn(resolveGitBinaryForSpawn(), gitArgsIn(resolvedPath, ['check-ignore', '--', ...pathsToCheck]), {
+                  cwd: GIT_LAUNCH_DIRECTORY,
                   windowsHide: true,
                   stdio: ['ignore', 'pipe', 'ignore'],
                 });
@@ -2151,17 +1895,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
 
     try {
-      const resolved = await resolveWorkspacePathFromContext({
-        fsPromises,
-        req,
-        targetPath: rawPath,
-        resolveProjectDirectory,
-        path,
-        os,
-        normalizeDirectoryPath,
-        managedRoots,
-        chatsRoots,
-      });
+      const resolved = await resolveWorkspaceTarget(req, rawPath);
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }

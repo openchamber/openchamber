@@ -11,7 +11,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useSpaceCatalogDirectory } from '@/lib/spaces/useSpaceCatalogDirectory';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { EXECUTION_FORK_DEFAULT_INSTRUCTIONS, EXECUTION_FORK_GOAL_INSTRUCTIONS } from '@/lib/messages/executionMeta';
@@ -20,6 +21,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { modelForSpaceOffer, spaceOfferAllows, useSpaceModelOffer } from '@/lib/spaces/space-model-offer';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
@@ -57,7 +59,8 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadConfigAgents = useConfigStore((state) => state.loadAgents);
   const loadAgentsStoreAgents = useAgentsStore((state) => state.loadAgents);
-  const providers = useConfigStore((state) => state.providers);
+  const spaceCatalog = useSpaceCatalogDirectory(projectDirectory);
+  const providers = useConfigStore((state) => selectProvidersForDirectory(state, spaceCatalog));
   const currentProviderID = useConfigStore((state) => state.currentProviderId);
   const currentModelID = useConfigStore((state) => state.currentModelId);
   const currentVariant = useConfigStore((state) => state.currentVariant || '');
@@ -81,6 +84,9 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
       return current;
     });
   }, []);
+
+  const spaceTarget = React.useMemo(() => ({ requestId: null, directory: projectDirectory }), [projectDirectory]);
+  const offer = useSpaceModelOffer(spaceTarget);
 
   React.useEffect(() => {
     if (!open) return;
@@ -108,6 +114,14 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
 
   React.useEffect(() => {
     if (!open || providers.length === 0) return;
+    if (offer?.held && !spaceOfferAllows(offer, providerID)) {
+      const usable = modelForSpaceOffer(offer, providers);
+      setProviderID(usable?.providerId ?? '');
+      setModelID(usable?.modelId ?? '');
+      setVariant('');
+      return;
+    }
+    if (providerID && modelID) return;
 
     const provider = providers.find((item) => item.id === providerID) ?? providers[0];
     const models = Array.isArray(provider?.models) ? provider.models : [];
@@ -119,7 +133,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     setProviderID(provider?.id ?? '');
     setModelID(hasModel ? modelID : fallbackModelID);
     setVariant('');
-  }, [open, providers, providerID, modelID]);
+  }, [offer, open, providers, providerID, modelID]);
 
   const agentFilter = React.useCallback((candidate: { mode?: string }) => isPrimaryMode(candidate.mode), []);
 
@@ -179,6 +193,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
               modelId={modelID}
               className="max-w-[320px] justify-between"
               dropdownPortalToBody
+              spaceDirectory={projectDirectory}
               onChange={(nextProviderID, nextModelID) => {
                 setProviderID(nextProviderID);
                 setModelID(nextModelID);

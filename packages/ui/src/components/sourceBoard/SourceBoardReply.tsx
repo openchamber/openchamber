@@ -35,6 +35,7 @@ export const SourceBoardReply: React.FC<{
 
     const descriptor = useSourceControlProvider(reference.provider);
     const review = reviewLabelsOf(descriptor, { voteLabels });
+    const canReview = descriptor.features.reviews;
     const label = referenceNumberLabel(reference, descriptor);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     const openPull = reference.kind === 'pull' && reference.state === 'open' ? reference : null;
@@ -78,7 +79,7 @@ export const SourceBoardReply: React.FC<{
 
     const sendVerdict = async (verdict: ReviewVerdict) => {
         const option = review.model === 'verdict' ? review.labels[0].options.find((entry) => entry.verdict === verdict) : null;
-        if (!openPull || busy || !option || (option.requiresBody && !body)) return;
+        if (!openPull || !canReview || busy || !option || (option.requiresBody && !body)) return;
         setBusy(verdict);
         try {
             const input: ReviewChangeRequestInput = {
@@ -107,7 +108,7 @@ export const SourceBoardReply: React.FC<{
     };
 
     const sendVotes = async () => {
-        if (!openPull || busy || review.model !== 'votes' || Object.keys(votes).length === 0) return;
+        if (!openPull || !canReview || busy || review.model !== 'votes' || Object.keys(votes).length === 0) return;
         setBusy('vote');
         try {
             const input: ReviewChangeRequestInput = {
@@ -155,7 +156,7 @@ export const SourceBoardReply: React.FC<{
                 disabled={busy !== null}
                 rows={3}
             />
-            {openPull && review.model === 'votes' ? (
+            {openPull && canReview && review.model === 'votes' ? (
                 onLatestRevision ? (
                     <SourceBoardVotes labels={review.labels} votes={votes} onChange={setVotes} disabled={busy !== null} />
                 ) : (
@@ -163,7 +164,7 @@ export const SourceBoardReply: React.FC<{
                 )
             ) : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
-                {openPull && review.model === 'votes' && onLatestRevision && review.labels.some((entry) => entry.permitted.length > 0) ? (
+                {openPull && canReview && review.model === 'votes' && onLatestRevision && review.labels.some((entry) => entry.permitted.length > 0) ? (
                     <ButtonTooltip label={t('contextTooltips.tracker.sendVotes')}>
                         <Button size="sm" variant="outline" onClick={() => void sendVotes()} disabled={busy !== null || Object.keys(votes).length === 0}>
                             {busyIcon('vote') ?? <Icon name="check" className="size-3.5" />}
@@ -171,7 +172,7 @@ export const SourceBoardReply: React.FC<{
                         </Button>
                     </ButtonTooltip>
                 ) : null}
-                {openPull && review.model === 'verdict' ? (
+                {openPull && canReview && review.model === 'verdict' ? (
                     <>
                         <ButtonTooltip label={t('sourceBoard.reply.requestChangesHint')}>
                             <Button

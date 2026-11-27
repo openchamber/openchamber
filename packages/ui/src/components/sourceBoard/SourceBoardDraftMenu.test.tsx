@@ -7,10 +7,14 @@ import type {
   DraftChangeRequestInput,
   ReadyChangeRequestInput,
   RepositoryChangeRequestReference,
+  RepositoryIssueReference,
+  RepositoryReferenceDetail,
   RuntimeAPIs,
+  SetIssueStateInput,
   SourceControlCapabilities,
   SourceControlReadContext,
 } from '@/lib/api/types';
+import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -49,6 +53,11 @@ const pull = (draft: boolean): RepositoryChangeRequestReference => ({
   state: 'open', draft, head: 'feature', base: 'main', headSha: 'f'.repeat(40), headRepo: null,
 });
 
+const issue = (state: 'open' | 'completed' | 'not_planned' = 'open'): RepositoryIssueReference => ({
+  ...pull(false),
+  kind: 'issue', number: 5, title: 'Tidy the header', url: 'https://example.com/5', state,
+});
+
 const capabilities = (overrides: Partial<SourceControlCapabilities> = {}): SourceControlCapabilities => ({
   identity: { provider: 'github', instance: 'github.com' },
   authentication: true,
@@ -61,13 +70,14 @@ const capabilities = (overrides: Partial<SourceControlCapabilities> = {}): Sourc
 });
 
 /** A GitHub host that records the draft transitions sent, and answers the capability probe. */
-const setUp = async (overrides: Partial<SourceControlCapabilities> = {}) => {
+const setUp = async (overrides: Partial<SourceControlCapabilities> = {}, descriptor?: SourceControlProviderDescriptor) => {
   const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
   const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
   const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const ordered = [githubLikeDescriptor()];
+  const ordered = [descriptor ?? githubLikeDescriptor()];
   useSourceControlProviderRegistry.setState({ ordered, byId: new Map(ordered.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
   const sent: Array<{ kind: 'ready' | 'draft'; input: ReadyChangeRequestInput | DraftChangeRequestInput }> = [];
+  const states: SetIssueStateInput[] = [];
   const base = createWebAPIs();
   const apis = (): RuntimeAPIs => ({
     ...base,
@@ -78,13 +88,17 @@ const setUp = async (overrides: Partial<SourceControlCapabilities> = {}) => {
         sent.push({ kind: 'ready', input });
         return { status: 'succeeded', replayed: false, result: { ready: true }, actor: { provider: input.provider, instance: input.instance, providerAccountId: 'github.com#7' }, target: { repositoryId: input.repositoryId, bindingRevision: input.bindingRevision, primaryRemote: input.primaryRemote, project: { id: '1', owner: 'acme', name: 'app' } } };
       },
+      issueSetState: async (input) => {
+        states.push(input);
+        return { status: 'succeeded', replayed: false, result: { state: input.state }, actor: { provider: input.provider, instance: input.instance, providerAccountId: 'github.com#7' }, target: { repositoryId: input.repositoryId, bindingRevision: input.bindingRevision, primaryRemote: input.primaryRemote, project: { id: '1', owner: 'acme', name: 'app' } } };
+      },
       changeRequestDraft: async (input) => {
         sent.push({ kind: 'draft', input });
         return { status: 'succeeded', replayed: false, result: { draft: true }, actor: { provider: input.provider, instance: input.instance, providerAccountId: 'github.com#7' }, target: { repositoryId: input.repositoryId, bindingRevision: input.bindingRevision, primaryRemote: input.primaryRemote, project: { id: '1', owner: 'acme', name: 'app' } } };
       },
     },
   });
-  return { apis, sent };
+  return { apis, sent, states };
 };
 
 const render = async (apis: RuntimeAPIs, node: React.ReactNode) => {
@@ -97,15 +111,15 @@ const render = async (apis: RuntimeAPIs, node: React.ReactNode) => {
 
 const menuItems = () => [...document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim() ?? '');
 
-const openMenu = async (reference: RepositoryChangeRequestReference, overrides: Partial<SourceControlCapabilities> = {}) => {
+const openMenu = async (reference: RepositoryChangeRequestReference | RepositoryIssueReference, overrides: Partial<SourceControlCapabilities> = {}, descriptor?: SourceControlProviderDescriptor, writeAccess?: boolean) => {
   const { SourceBoardStateMenuItems } = await import('./SourceBoardActions');
   const { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } = await import('@/components/ui/dropdown-menu');
   const item = { source: 'repository' as const, reference };
-  const settle = await setUp(overrides);
+  const settle = await setUp(overrides, descriptor);
   await render(settle.apis(), (
     <DropdownMenu defaultOpen>
       <DropdownMenuTrigger asChild><button type="button">State</button></DropdownMenuTrigger>
-      <DropdownMenuContent><SourceBoardStateMenuItems item={item} context={context} onChanged={() => undefined} /></DropdownMenuContent>
+      <DropdownMenuContent><SourceBoardStateMenuItems item={item} context={context} writeAccess={writeAccess} onChanged={() => undefined} /></DropdownMenuContent>
     </DropdownMenu>
   ));
   return settle;
@@ -140,5 +154,76 @@ describe('the state menu of a change request', () => {
     const { sent } = await openMenu(pull(false), { draftConversion: false, draftChangeRequests: false });
     expect(menuItems()).not.toContain('Convert to draft');
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe('who gets a state menu', () => {
+  const answers = (writeAccess?: boolean, viewerCanUpdate?: boolean): RepositoryReferenceDetail => {
+    const detail: RepositoryReferenceDetail = { number: 5, comments: [], commentTotal: 0, pull: null };
+    if (writeAccess !== undefined) detail.writeAccess = writeAccess;
+    if (viewerCanUpdate !== undefined) detail.viewerCanUpdate = viewerCanUpdate;
+    return detail;
+  };
+
+  test('an author without write access and a viewer the host does not grade do, a read-only viewer does not', async () => {
+    const { canChangeReferenceState } = await import('@/components/references/referencePickerItems');
+    for (const reference of [issue(), issue('completed'), pull(false)]) {
+      expect(canChangeReferenceState(reference, null)).toBe(true);
+      expect(canChangeReferenceState(reference, answers())).toBe(true);
+      expect(canChangeReferenceState(reference, answers(false, true))).toBe(true);
+      expect(canChangeReferenceState(reference, answers(false))).toBe(true);
+      expect(canChangeReferenceState(reference, answers(undefined, false))).toBe(true);
+      expect(canChangeReferenceState(reference, answers(false, false))).toBe(false);
+    }
+  });
+});
+
+describe('the state menu of an issue', () => {
+  test('offers both close reasons on a host that keeps one, and sends the chosen one', async () => {
+    const { states } = await openMenu(issue());
+    const items = menuItems();
+    expect(items).toContain('Close as completed');
+    expect(items).toContain('Close as not planned');
+    expect(menuItems()).not.toContain('Close issue');
+    await clickItem('Close as not planned');
+    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', 'not_planned']]);
+    expect(states[0]?.target).toMatchObject({ number: 5 });
+  });
+
+  test('offers a plain close on a host that keeps no reason', async () => {
+    const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+    const github = githubLikeDescriptor();
+    const descriptor: SourceControlProviderDescriptor = { ...github, features: { ...github.features, issueCloseReason: false } };
+    const { states } = await openMenu(issue(), {}, descriptor);
+    expect(menuItems()).toContain('Close issue');
+    expect(menuItems()).not.toContain('Close as completed');
+    await clickItem('Close issue');
+    expect(states.map((input) => input.reason)).toEqual([undefined]);
+  });
+
+  test('offers the plain close on a host that publishes a reason it does not write', async () => {
+    const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+    const github = githubLikeDescriptor();
+    const descriptor: SourceControlProviderDescriptor = { ...github, features: { ...github.features, issueCloseReason: true, issueCloseReasonWrite: false } };
+    await openMenu(issue(), {}, descriptor, true);
+    expect(menuItems()).toEqual(['Close issue']);
+  });
+
+  test('keeps the plain close and reopen for an author without write access', async () => {
+    const { states } = await openMenu(issue(), {}, undefined, false);
+    expect(menuItems()).toEqual(['Close issue']);
+    await clickItem('Close issue');
+    expect(states.map((input) => [input.state, input.reason])).toEqual([['closed', undefined]]);
+  });
+
+  test('keeps the draft change and close for a pull request author without write access', async () => {
+    await openMenu(pull(true), {}, undefined, false);
+    expect(menuItems()).toEqual(['Ready for review', 'Close pull request']);
+  });
+
+  test('offers both close reasons to a viewer the host says can write', async () => {
+    await openMenu(issue(), {}, undefined, true);
+    expect(menuItems()).toContain('Close as completed');
+    expect(menuItems()).toContain('Close as not planned');
   });
 });

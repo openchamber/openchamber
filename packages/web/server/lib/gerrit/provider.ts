@@ -53,6 +53,7 @@ type ReviewInputs = {
   '/pr/review/comment/delete': StandardMutationInput & { commentId: string };
   '/pr/review/discard': StandardMutationInput;
   '/pr/comment': StandardMutationInput & { body: string };
+  '/pr/thread/reply': StandardMutationInput & { threadId: string; body: string };
   '/pr/state': StandardMutationInput & { state: 'open' | 'closed' };
   '/pr/reviewers': StandardMutationInput & { names: string[] };
 };
@@ -111,6 +112,10 @@ function mutationOperations(): Operations {
       perform: (service, normalized, resolved) => service.comment({ ...call(resolved), body: normalized.body }),
       reconcile: unknownOutcome,
     },
+    '/pr/thread/reply': {
+      perform: (service, normalized, resolved) => service.replyToThread({ ...call(resolved), threadId: normalized.threadId, body: normalized.body }),
+      reconcile: unknownOutcome,
+    },
     '/pr/state': {
       perform: (service, normalized, resolved) => service.setState({ ...call(resolved), state: normalized.state }),
       reconcile: (service, resolved, normalized) => service.reconcileStateMutation(resolved.providerTarget, normalized.state),
@@ -153,7 +158,7 @@ export function createProvider(options: GerritProviderOptions) {
     const client = createClient({
       origin: session.instance, login: accounts.loginFor(session), password: accounts.tokenFor(session), fetch: fetchImpl, timeoutMs,
     });
-    const options: ResourceOptions = { origin: session.instance, client };
+    const options: ResourceOptions = { origin: session.instance, client, reviewThreads: descriptor.capabilities.reviewThreads };
     if (resolveProjects) options.resolveProjects = resolveProjects;
     if (readLocalRevision) options.readLocalRevision = readLocalRevision;
     if (readUpstreamBranch) options.readUpstreamBranch = readUpstreamBranch;

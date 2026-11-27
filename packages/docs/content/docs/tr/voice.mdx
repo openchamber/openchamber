@@ -13,7 +13,7 @@ Yanıtların nasıl seslendirileceğini seçin:
 
 - **browser**, tarayıcınızda kullanılabilen sesleri kullanır. Linux masaüstünde `speech-dispatcher`, istemci kitaplığı `libspeechd` ve `espeak-ng` gibi bir ses motoru yükleyin. Dağıtımınız speech-dispatcher hizmetini otomatik başlatmıyorsa hizmeti etkinleştirin, ardından OpenChamber'ı yeniden başlatın.
 - **OpenAI** — OpenAI'nın sesleri; API anahtarınızı yapıştırın ve bir ses seçin
-- **OpenAI-compatible** — OpenAI biçimini konuşan herhangi bir servis; URL'sini ve gerekiyorsa API anahtarını girin
+- **OpenAI-compatible** — OpenAI biçimini konuşan herhangi bir servis; URL'sini ve gerekiyorsa API anahtarını girin. Servis seslerini listeliyorsa **Ses**, başka bir ses adı için **Özel…** ile biten bir açılır listedir; listelemiyorsa adı yazın
 - **macOS say** — yerleşik `say` komutu, bunu destekleyen Mac'lerde
 
 Açtıktan sonra, mesajların üzerinde onları sesli dinlemek için bir oynat düğmesi görünür.
@@ -38,6 +38,8 @@ Whisper ve Qwen3-ASR modelleri dili kendileri algılar ve kısa bir ifadede yanl
 **Yanlış duyulan kelimeleri düzelt** seçeneğini açarsanız, dikteyi durdurduktan sonra Small Model'iniz (Ayarlar → Oturumlar → Small Model) metni gözden geçirir. Konuşma modelinin yanlış duyduğu kelimeleri değiştirir ve "ee" gibi dolgu seslerini çıkarır. Metin bu sırada Small Model'in sağlayıcısına gider ve bir iki saniye sonra görünür. Small Model yoksa metin duyulduğu gibi eklenir.
 
 Bu servisler için girdiğiniz API anahtarlarını tarayıcınız değil OpenChamber sunucusu saklar. Bir anahtar yazıp Enter'a basarak kaydedin; ardından alan bir anahtarın kayıtlı olduğunu gösterir, çarpı işareti onu kaldırır.
+
+**OpenCode provider anahtarı**, API anahtarı alanının altında yer alır. Servisin, OpenCode'da zaten ayarladığınız bir provider'ın anahtarını kullanmasını sağlar; anahtarı yeniden yazmanız gerekmez. OpenChamber, sizin için yalnızca anahtarı olan tam olarak bir provider'ın adresi (şema, ana makine ve bağlantı noktası) servisin adresiyle aynıysa provider seçer; ikisinin ya da hiçbirinin adresi aynıysa hiçbir şey seçilmez. Bu seçim henüz hiçbir anahtar göndermez. Kendiniz karar vermek için bir provider ya da **Yok** seçin. API anahtarı alanına yazdığınız anahtar önce kullanılır. OpenChamber sunucusu provider'ın anahtarını gerektiğinde okur ve tarayıcıya asla göndermez. Anahtarı bir sunucuya, o provider ve o adres için **Anahtarı gönder**'e dokunmanızdan sonra gönderir; adres OpenCode'un o provider için kullandığı adres olsa bile. Bir onay, provider'ın o anda sahip olduğu anahtarı kapsar: hesap değiştirirseniz veya anahtar aynı adla bile olsa değişirse, yeniden **Anahtarı gönder**'e dokunursunuz.
 
 ## Telefonlar için not
 

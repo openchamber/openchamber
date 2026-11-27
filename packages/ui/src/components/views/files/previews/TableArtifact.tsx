@@ -1,5 +1,6 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { shownRowsOf } from '@/lib/measure-shown-row';
 
 import { UiBlock } from '@/components/chat/uiBlocks/UiBlock';
 import { QuoteCommentMenu } from '@/components/comments/QuoteCommentMenu';
@@ -247,8 +248,7 @@ export const TableGrid: React.FC<{
   const virtualizer = useVirtualizer({
     count: bodyRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT_ESTIMATE,
-    overscan: 12,
+    ...shownRowsOf(ROW_HEIGHT_ESTIMATE), overscan: 12,
   });
   const summary = totalRows === 1
     ? t('filesView.artifact.table.rowsSingle', { rows: totalRows, columns: dataColumnCount })

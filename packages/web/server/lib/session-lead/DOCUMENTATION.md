@@ -31,14 +31,33 @@ entries (`../session-knowledge/`), the control service routes the actions
   UI never counts a session with a parent as a lead. A fork drops the
   mark through `sourceOwnedLinksPatch`.
 - The brief is one markdown file per lead in `<data-dir>/leads/<id>.md`,
-  outside the repository and outside Project knowledge. `lead.brief` replaces it
-  whole or applies `edits` (`{ find, replace }`, each `find` exactly once, in
-  order), at most 12,000 characters; a failed edit or a longer brief is refused
+  outside the repository and outside Project knowledge. It has a free part
+  (goal, outcomes, rules) and, below a marker comment, one `### id` section per
+  strand of work (`brief-document.ts`). `brief` replaces the free part whole and
+  `edits` (`{ find, replace }`, each `find` exactly once, in order) changes it;
+  `strands` sets a strand whole or closes it by id. A file without the marker is
+  all free part, so a brief written before strands reads and edits as it did.
+  A strand is at most 600 characters without headings, the file at most 12,000.
+  One call is one write: a failed edit, strand or limit is refused
   with nothing written. A missing file reads as "no brief yet"; a failed read
   is never an empty brief: the knowledge sync then leaves the entry the session
   holds. `session.deleted` removes the file; archiving keeps it, so a restored
   lead has its brief. Every `lead.brief` answer carries the file's path as
   `file`, so the transcript card can open it in the Files viewer for the user.
+- A heading the user writes by hand into the strands part, with what is under
+  it, joins the free part, so replacing a strand cannot drop it.
+- Every `lead.brief` answer says how full the brief is and which strands are
+  largest, and from 9,000 characters a write asks the lead to condense.
+- `lead.brief` and `lead.digest` refuse a field they do not have and name it.
+  Empty values and the call's own scope (`sessionId`, `directory`, `projectId`)
+  pass, since weaker models fill those in. OpenCode deletes undeclared fields of
+  a closed schema before the tool runs, so the `openchamber` tool's `parameters`
+  is open, and the plugin drops undeclared fields of every other action itself
+  (`undeclaredOnlyForLead`), as OpenCode did.
+- A refused `lead.brief` or `lead.digest` throws inside a Code Mode script
+  (`agent-tool-plugin.ts`); a direct call gets the `ok: false` envelope. OpenCode
+  also marks as a script call the one it recovers when a model calls a Code
+  Mode tool directly; a refusal there is a failed call with the same message.
 - The `openchamber.lead-brief` entry holds the brief as it stood when the
   lead's current stretch of conversation began, kept in `<id>.entry.md` (empty
   when there was no brief yet). A `lead.brief` call does not touch it, and
@@ -73,11 +92,24 @@ entries (`../session-knowledge/`), the control service routes the actions
   (`workTitle.by === 'user'`). Every other session keeps the rule that
   `work.name` never renames a session.
 - Sleep compaction runs only for an idle lead whose context is at least
-  100,000 tokens, once its provider cache has run out (the model's cache
-  lifetime, 5 minutes when unknown, plus 30 seconds). A turn that starts
+  200,000 tokens, or three quarters of a smaller window, once its provider cache
+  has run out (the model's cache lifetime plus 30 seconds; when the lifetime is
+  unknown, 5 minutes for a Claude model and an hour for any other). The wait
+  follows the model of the last turn, the threshold the one selected when it ends. A turn that starts
   cancels the timer; a session the user keeps warm, one that is running again
   and one that is no lead any more are left alone. Overflow compaction during
-  a turn stays with the model.
+  a turn stays with the model. A sleep compaction is a quiet turn
+  (`../event-stream/quiet-compaction.ts`): the lead shows no activity, no
+  notification goes out, and a lead that was read stays read.
+- The timer lives in memory, so on every connect of the global event hub
+  (`resumeSleep`) every unarchived lead gets its timer set again, counted from
+  the later of the idle this runtime saw and the end of its last answer in the
+  context (with or without tokens), or from now when neither is known or the
+  context cannot be read. A timer is replaced only once its replacement is
+  ready, so a failed read keeps the one a lead has. A turn
+  that ran while the stream was down therefore moves the deadline, and a lead
+  asleep past its cache gets a timer of zero. It goes through the same timer
+  and the same checks as a lead that just went idle.
 - The compaction hook in our OpenCode plugin asks
   `POST /api/openchamber/agent-tool/lead-compaction` on every compaction. Only a
   compaction this runtime started within the last 2 minutes, for a lead that
@@ -108,6 +140,65 @@ tail verbatim beside it. A lead with no brief still sleeps, with the model's
 summary: the digest is a few lines for the user and cannot stand in for the
 conversation, and one summary read now saves the same cold read at waking.
 
+### Why an unknown cache counts as an hour and not as 5 minutes
+
+Most providers keep a prompt cache past 5 minutes and do not say how long:
+OpenAI still answered most requests from it after 30 to 60 idle minutes. A wait that is too
+long costs one cold read; one that is too short throws away a conversation that
+was still cheap to continue. Claude is the exception with a documented 5-minute
+default. Session warming keeps its own 4-minute guess, because there a ping
+that comes too late is the costly mistake.
+
+### Why the small-window threshold is three quarters and not a lower share
+
+A lead wakes from a compaction with 70,000 to 90,000 tokens when its rules,
+tools and kept messages are large. A lower share would compact a 128k model
+again after every turn; OpenCode's own automatic compaction starts at 85%.
+
+### Why the lead rules draw the line by kind of work and not by size
+
+A lead decides; finding out how the project works and changing it is work at
+any size. Rules that let a lead do "small" work itself failed both ways: a
+model judged a whole task small and rewrote seven files, and a lead asked
+mid-direction to reread the code kept half of the investigation for itself
+next to a subagent doing the other half. A size is judged before the work
+starts, always toward "this looks small". The user can still say "do it
+yourself". Refusals are a rule in the text and never a ceiling on what a
+child's agent may do: users give their subagents permissions on purpose.
+
+### Why the user agrees the models and the lead does not pick them alone
+
+A lead left to pick "a strong one" and "a cheaper one" chose differently from
+one child to the next, a cheap model where the user wanted their strong one,
+and the user saw the mix only in the sidebar. Which model spends whose money
+is the user's call, so the lead settles it once per direction. It brings a
+proposal built from the user's favorites, recent models and limits, so the
+user answers "yes" or changes one line, and it keeps the agreement in the
+brief, so it survives compaction.
+
+### Why the rules are ordered by what woke the lead
+
+A lead's turns start from four things: a new goal, the user's question or
+request, a child's answer, and a compaction. Rules written as one list of
+equal paragraphs left models to work out which applied; sections per wake
+say what to do in each, and limits and schemas stay in the tool
+descriptions, which enforce them.
+
+### Why a lead gets no general dispatch, wake and workflow guidance
+
+Those texts tell an ordinary session to do small work itself, to repeat what
+waits on the user in every reply after a wake, and never to start a workflow
+unasked. A lead's rules say the opposite on all three: work goes out, the
+digest holds what waits, and a lead starts a workflow its direction needs.
+Both in one context, models followed whichever they read last, so a lead
+gets its own rules only (`buildGuidance` in `../session-knowledge/`).
+
+### Why changes go to child sessions and not to subagents
+
+OpenCode's default depth limit lets a subagent start none of its own, so its
+work needs the lead to carry it to a reviewer and back. A child session has no
+OpenCode parent, so the limit counts from zero and it returns finished work.
+
 ### Why a compaction during a turn gets no state from us
 
 The model that writes that summary reads the whole conversation, where the
@@ -128,6 +219,19 @@ turn until the next compaction. The lead's own `lead.brief` calls (the whole
 text or the edits) are already in its conversation, so the entry only has to
 be right where that history ends: at a compaction. The entry says it is the
 brief as the stretch began and that later calls changed it.
+
+### Why strands are units and not part of the free text
+
+Find/replace makes adding cheap and removing expensive: to drop a paragraph a
+lead has to quote it back, so briefs grew into logs up to the limit. A strand
+is replaced or closed by id, and its size bound leaves no room for a history.
+
+### Why only the lead actions throw inside a script
+
+A script that did not parse the returned string went on after a refused
+write. Throwing for every action would break scripts that read `ok: false`
+answers today, among them saved script waits, and partial failures whose
+`data` says which session was created. A lead write has no such reader.
 
 ### Why handing over goes through the control route and not its own route
 

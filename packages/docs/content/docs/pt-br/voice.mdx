@@ -13,7 +13,7 @@ Escolha como as respostas são faladas:
 
 - **browser** usa as vozes disponíveis no navegador. No Linux desktop, instale `speech-dispatcher`, a biblioteca cliente `libspeechd` e um mecanismo de voz como `espeak-ng`. Ative o serviço speech-dispatcher se sua distribuição não o iniciar automaticamente e reinicie o OpenChamber.
 - **OpenAI** — as vozes da OpenAI; cole sua chave de API e escolha uma voz
-- **OpenAI-compatible** — qualquer serviço que fale no formato da OpenAI; insira sua URL e, se precisar, uma chave de API
+- **OpenAI-compatible** — qualquer serviço que fale no formato da OpenAI; insira sua URL e, se precisar, uma chave de API. Se o serviço listar suas vozes, **Voz** é uma lista suspensa que termina em **Personalizada…** para qualquer outro nome de voz; caso contrário, digite o nome
 - **macOS say** — o comando integrado `say`, em Macs que o têm
 
 Uma vez ativado, você ganha um botão de play nas mensagens para ouvi-las lidas em voz alta.
@@ -38,6 +38,8 @@ Os modelos Whisper e Qwen3-ASR detectam o idioma sozinhos e, em uma frase curta,
 Ative **Corrigir palavras mal entendidas** para que seu Small Model (Configurações → Sessões → Small Model) revise o texto depois que você parar de ditar. Ele substitui palavras que o modelo de fala entendeu errado e remove sons de hesitação como "hã". O texto então vai para o provedor do Small Model e aparece um ou dois segundos depois. Sem um Small Model, o texto é inserido como foi ouvido.
 
 As API keys que você digita para esses serviços ficam guardadas no servidor do OpenChamber, não no navegador. Digite uma chave e pressione Enter para salvá-la; o campo passa a mostrar que há uma chave salva, e o X a remove.
+
+**Chave de um provedor do OpenCode** fica abaixo do campo da chave de API. Ela permite que o serviço use a chave de um provedor que você já configurou no OpenCode, para que você não precise digitá-la de novo. O OpenChamber só escolhe um provedor por você quando exatamente um provedor com chave tem o mesmo endereço (esquema, host e porta) do serviço; se dois tiverem, ou nenhum, nada é escolhido. Essa escolha ainda não envia nenhuma chave. Escolha um provedor, ou **Nenhuma**, para decidir você mesmo. Uma chave que você digitou no campo da chave de API é usada primeiro. O servidor do OpenChamber lê a chave do provedor quando precisa dela e nunca a envia ao navegador. Ele só envia a chave a um servidor depois que você tocar em **Enviar chave** para esse provedor e esse endereço, mesmo quando é o endereço que o OpenCode usa para esse provedor. Uma aprovação vale para a chave que o provedor tem naquele momento: se você trocar de conta ou a chave mudar, mesmo com o mesmo nome, você toca em **Enviar chave** de novo.
 
 ## Uma nota para celulares
 

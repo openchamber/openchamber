@@ -2,6 +2,8 @@
 <resources>
     <string name="tile_new_session">새 세션</string>
     <string name="tile_new_session_description">새 OpenChamber 세션 시작</string>
+    <string name="shortcut_new_session">새 세션</string>
+    <string name="shortcut_dictate">받아쓰기</string>
     <string name="sealed_push_channel_name">에이전트 업데이트</string>
     <string name="widget_usage_label">사용량</string>
     <string name="widget_sessions_label">세션</string>

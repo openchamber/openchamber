@@ -24,9 +24,9 @@ describe('filesystem Git process ownership', () => {
       const launch = (binary, args, options) => {
         expect(binary).toBe('git');
         if (operation === 'workspace-search') {
-          expect(args).toEqual(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']);
+          expect(args.slice(0, 1).concat(args.slice(2))).toEqual(['-C', 'ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']);
         } else if (operation === 'search') {
-          expect(args).toEqual(['check-ignore', '--stdin', '-z']);
+          expect(args.slice(0, 1).concat(args.slice(2))).toEqual(['-C', 'check-ignore', '--stdin', '-z']);
         } else {
           expect(args).toContain('check-ignore');
           expect(args).toContain('ignored.txt');

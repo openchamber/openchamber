@@ -1,7 +1,7 @@
 
 import { z } from 'zod';
 import { readLead } from '../session-lead/metadata.js';
-import type { setWorktreeTaskTitle as setWorktreeTaskTitleDefault } from '../git/service.js';
+import type { setLinkedTaskTitle } from '../git/task-title-session.js';
 import type { SessionInfo } from '@opencode/client';
 
 const TITLE_MAX_LENGTH = 120;
@@ -50,7 +50,7 @@ interface WorkNamingDependencies {
   getSession: (sessionID: string) => Promise<NamingSession | null>;
   renameSession?: ((sessionID: string, title: string) => Promise<void>) | null;
   listWorktrees: (directory: string) => Promise<{ path: string }[]>;
-  setWorktreeTaskTitle: typeof setWorktreeTaskTitleDefault;
+  setWorktreeTaskTitle: typeof setLinkedTaskTitle;
   readPlaceholderBranch?: (directory: string) => Promise<string | null>;
   renamePlaceholderBranch?: (directory: string, name: string) => Promise<{ from: string; to: string } | null>;
   nameSpaceTask?: (directory: string, title: string) => object | null | Promise<object | null>;
@@ -139,7 +139,7 @@ export const createWorkNamer = ({
     const current = asText(session?.title);
     if (!current) return null;
     const by = readWorkTitle(session)?.by === 'user' ? 'user' : 'agent';
-    return setWorktreeTaskTitle(worktree, { title: current, by });
+    return setWorktreeTaskTitle(worktree, { title: current, by, session: sessionId });
   };
 
   return { name, carryToWorktree };

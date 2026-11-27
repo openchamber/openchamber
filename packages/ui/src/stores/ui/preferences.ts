@@ -26,3 +26,8 @@ export const DEFAULT_SELECTION_APPROVAL_TEXT = 'Sounds good';
 export const DEFAULT_EDITOR_FONT_SIZE = 12;
 
 export const DEFAULT_CONTEXT_EDITOR_TREE_WIDTH = 208;
+
+export const clampGitSidebarWidth = (width: number): number =>
+  Math.min(560, Math.max(200, Math.round(width)));
+
+export const DEFAULT_GIT_SIDEBAR_WIDTH = 290;

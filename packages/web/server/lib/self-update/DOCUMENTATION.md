@@ -72,9 +72,22 @@ within a ten-minute overall deadline.
       'service-manager'`, so clients show manual steps in place of an Update
       button.
     - Desktop-managed hosts delegate authenticated Web update requests to the Electron main process, which checks, downloads, and applies the update through `electron-updater` before restarting the host. A host installed from a Linux `.deb` or `.rpm` asks for the administrator password on its own screen, so its check reports `installBlocked: 'desktop-host'` and the install route answers 409 `DESKTOP_UPDATE_LOCAL_ONLY` before anything stops; clients say to update on that computer.
-    - Foreground servers running under a systemd user unit queue installation in
+    - Foreground servers running under a systemd unit queue installation in
       a separate transient unit and restart the configured service afterwards.
       `OPENCHAMBER_SYSTEMD_UNIT` overrides the default `openchamber.service`.
+      The job goes to the manager that started the server: the user manager when
+      systemd set `MANAGERPID` (it does so only for user units), else the system
+      manager, which has no user bus to reach (#7429). Only a system unit whose
+      server runs as root updates in-app: a system-manager job runs as root with
+      the server's `PATH`, so for a non-root system unit the route answers 409
+      `SYSTEM_UNIT_UPDATE_MANUAL`, before any job is queued and with the service
+      left running. It names no command: the server's package manager may sit in
+      the service account's home, which root must not run. The job starts with the
+      manager's environment, so the route forwards `HOME` and the global-prefix
+      variables (`NPM_CONFIG_PREFIX`, `BUN_INSTALL`, `PNPM_HOME`) that pick where
+      the server's copy is installed. A system manager that refuses
+      the job for a root unit answers 409 with its error. `openchamber update`
+      from a shell still restarts only the user unit (#7429 stays open for it).
     - Foreground servers running under a macOS launchd User LaunchAgent update the
       package and trigger a `launchctl kickstart` (with a `launchctl bootstrap`
       fallback, as `openchamber startup enable` uses) against

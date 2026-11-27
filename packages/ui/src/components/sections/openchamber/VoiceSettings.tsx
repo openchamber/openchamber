@@ -22,7 +22,6 @@ import {
     SettingsChipGroup,
     SETTINGS_NUMBER_INPUT_CLASS,
     SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-    SETTINGS_CONTROL_CLUSTER_CLASS,
     SETTINGS_HELPER_CLASS,
     SETTINGS_ICON_BUTTON_CLASS,
     SETTINGS_OPTION_STACK_CLASS,
@@ -32,15 +31,15 @@ import { startFocusedReading } from '@/lib/voice/readingAudioFocus';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
+import { useCustomServerAddress } from '@/hooks/useCustomServerAddress';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
 import { TranscriptionPromptField } from './TranscriptionPromptField';
 import { TranscriptCorrectionRow } from './TranscriptCorrectionRow';
-import { toast } from '@/components/ui';
-import type { VoiceApiKeyKind } from '@/lib/voiceKeysApi';
 import { Spinner } from '@/components/ui/spinner';
-
-const VOICE_TEXT_INPUT_CLASS = 'oc-surface-elevated oc-raised oc-field w-full min-w-0 h-8 rounded-md bg-surface-elevated px-3 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none';
+import { CompatibleVoiceField, VOICE_TEXT_INPUT_CLASS } from './CompatibleVoiceField';
+import { CompatibleKeyProviderField, SttKeyProviderField } from './KeyProviderField';
+import { VoiceApiKeyField } from './VoiceApiKeyField';
 
 const LOCAL_STT_MODELS = [
     {
@@ -564,59 +563,6 @@ const OPENAI_VOICE_OPTIONS = [
     { value: 'cedar', label: 'Cedar' },
 ];
 
-const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind }> = ({ kind }) => {
-    const { t } = useI18n();
-    const saved = useConfigStore((state) => state.voiceApiKeys[kind]);
-    const setVoiceApiKey = useConfigStore((state) => state.setVoiceApiKey);
-    const [draft, setDraft] = useState('');
-    const [isSaving, setIsSaving] = useState(false);
-
-    const save = useCallback(async (value: string | null) => {
-        setIsSaving(true);
-        const ok = await setVoiceApiKey(kind, value);
-        setIsSaving(false);
-        if (ok) {
-            setDraft('');
-        } else {
-            toast.error(t('settings.voice.page.toast.apiKeySaveFailed'));
-        }
-    }, [kind, setVoiceApiKey, t]);
-
-    const commitDraft = useCallback(() => {
-        const value = draft.trim();
-        if (value) void save(value);
-    }, [draft, save]);
-
-    return (
-        <div className={cn('relative', SETTINGS_CONTROL_CLUSTER_CLASS)}>
-            <input
-                type="password"
-                value={draft}
-                disabled={isSaving}
-                onChange={(e) => setDraft(e.target.value)}
-                onBlur={commitDraft}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitDraft();
-                }}
-                placeholder={saved ? t('settings.voice.page.field.apiKeySavedPlaceholder') : 'sk-...'}
-                className={VOICE_TEXT_INPUT_CLASS}
-                aria-label={t('settings.voice.page.field.apiKey')}
-            />
-            {saved && !draft && (
-                <button
-                    type="button"
-                    onClick={() => void save(null)}
-                    disabled={isSaving}
-                    aria-label={t('settings.voice.page.field.apiKeyRemove')}
-                    className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                    <Icon name="close" className="w-3.5 h-3.5" />
-                </button>
-            )}
-        </div>
-    );
-};
-
 export const VoiceSettings: React.FC = () => {
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
@@ -676,10 +622,10 @@ export const VoiceSettings: React.FC = () => {
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const setOpenaiCompatibleUrl = useConfigStore((state) => state.setOpenaiCompatibleUrl);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
-    const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
     const openaiCompatibleTtsEndpointPath = useConfigStore((state) => state.openaiCompatibleTtsEndpointPath);
+    const openaiCompatibleKeyProvider = useConfigStore((state) => state.openaiCompatibleKeyProvider);
     const setOpenaiCompatibleTtsEndpointPath = useConfigStore((state) => state.setOpenaiCompatibleTtsEndpointPath);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
@@ -716,6 +662,9 @@ export const VoiceSettings: React.FC = () => {
     const [isOpenAIPreviewPlaying, setIsOpenAIPreviewPlaying] = useState(false);
 
     const [isCompatiblePreviewPlaying, setIsCompatiblePreviewPlaying] = useState(false);
+    const { committedUrl: committedCompatibleUrl, commitUrl: setCommittedCompatibleUrl, keyRevision: compatibleKeyRevision, keyServer, reloadVoices, approveAddress } = useCustomServerAddress(openaiCompatibleUrl);
+    const sttUrlInputRef = useRef<HTMLInputElement>(null);
+    const { committedUrl: committedSttUrl, commitUrl: setCommittedSttUrl } = useCustomServerAddress(sttServerUrl, sttUrlInputRef);
 
     const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [isBrowserPreviewPlaying, setIsBrowserPreviewPlaying] = useState(false);
@@ -920,6 +869,7 @@ export const VoiceSettings: React.FC = () => {
             return;
         }
         if (!openaiCompatibleUrl.trim()) return;
+        approveAddress();
         void playAudioPreview('/api/tts/speak', {
             text: t('settings.voice.page.preview.customServerLine'),
             voice: openaiCompatibleVoice,
@@ -927,8 +877,9 @@ export const VoiceSettings: React.FC = () => {
             speed: speechRate,
             baseURL: openaiCompatibleUrl,
             endpointPath: openaiCompatibleTtsEndpointPath || undefined,
+            keyProvider: openaiCompatibleKeyProvider,
         }, setIsCompatiblePreviewPlaying);
-    }, [isCompatiblePreviewPlaying, playAudioPreview, openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleTtsEndpointPath, speechRate, t]);
+    }, [isCompatiblePreviewPlaying, playAudioPreview, openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleTtsEndpointPath, openaiCompatibleKeyProvider, approveAddress, speechRate, t]);
 
     const sliderClass = "w-40 flex-none h-1.5 bg-[var(--interactive-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:border-0 disabled:opacity-50";
     const sliderValueClass = 'typography-ui-label w-12 shrink-0 text-end tabular-nums text-muted-foreground';
@@ -1012,16 +963,20 @@ export const VoiceSettings: React.FC = () => {
                                 >
                                     <div className="relative w-full">
                                         <input
+                                            ref={sttUrlInputRef}
                                             type="text"
                                             value={sttServerUrl}
                                             onChange={(e) => setSttServerUrl(e.target.value)}
+                                            onBlur={(e) => { if (document.activeElement !== e.currentTarget) setCommittedSttUrl(sttServerUrl); }}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') setCommittedSttUrl(sttServerUrl); }}
                                             placeholder="http://localhost:8001/v1"
                                             className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {sttServerUrl && (
                                             <button
                                                 type="button"
-                                                onClick={() => setSttServerUrl('')}
+                                                onMouseDown={(e) => e.preventDefault()}
+                                                onClick={() => { setSttServerUrl(''); setCommittedSttUrl(''); }}
                                                 className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                             >
                                                 <Icon name="close" className="w-3.5 h-3.5" />
@@ -1035,6 +990,7 @@ export const VoiceSettings: React.FC = () => {
                                 >
                                     <VoiceApiKeyField kind="stt" />
                                 </SettingsStackedField>
+                                <SttKeyProviderField serverUrl={sttServerUrl} committedUrl={committedSttUrl} />
                                 <SettingsStackedField label={t('settings.voice.page.field.model')}>
                                     <input
                                         type="text"
@@ -1176,13 +1132,16 @@ export const VoiceSettings: React.FC = () => {
                                             type="text"
                                             value={openaiCompatibleUrl}
                                             onChange={(e) => setOpenaiCompatibleUrl(e.target.value)}
+                                            onBlur={(e) => { if (document.activeElement !== e.currentTarget) setCommittedCompatibleUrl(openaiCompatibleUrl); }}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') setCommittedCompatibleUrl(openaiCompatibleUrl); }}
                                             placeholder="http://localhost:8880/v1"
                                             className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {openaiCompatibleUrl && (
                                             <button
                                                 type="button"
-                                                onClick={() => setOpenaiCompatibleUrl('')}
+                                                onMouseDown={(e) => e.preventDefault()}
+                                                onClick={() => { setOpenaiCompatibleUrl(''); setCommittedCompatibleUrl(''); }}
                                                 className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                             >
                                                 <Icon name="close" className="w-3.5 h-3.5" />
@@ -1194,8 +1153,9 @@ export const VoiceSettings: React.FC = () => {
                                     label={t('settings.voice.page.field.apiKey')}
                                     description={t('settings.voice.page.field.apiKeyOptional')}
                                 >
-                                    <VoiceApiKeyField kind="openaiCompatible" />
+                                    <VoiceApiKeyField kind="openaiCompatible" speechServer={keyServer} onSaved={reloadVoices} />
                                 </SettingsStackedField>
+                                <CompatibleKeyProviderField serverUrl={openaiCompatibleUrl} committedUrl={committedCompatibleUrl} />
                                 <SettingsStackedField label={t('settings.voice.page.field.model')}>
                                     <input
                                         type="text"
@@ -1220,21 +1180,11 @@ export const VoiceSettings: React.FC = () => {
                                         className={VOICE_TEXT_INPUT_CLASS}
                                     />
                                 </SettingsStackedField>
-                                <SettingsStackedField
-                                    label={t('settings.voice.page.field.voice')}
-                                    info={t('settings.voice.page.field.voiceIdentifierHint')}
-                                >
-                                    <input
-                                        type="text"
-                                        value={openaiCompatibleVoice}
-                                        onChange={(e) => setOpenaiCompatibleVoice(e.target.value)}
-                                        placeholder="af_sky"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
+                                <CompatibleVoiceField committedUrl={committedCompatibleUrl} keyRevision={compatibleKeyRevision}>
                                     <Button size="sm" variant="ghost" className={SETTINGS_ICON_BUTTON_CLASS} onClick={previewCompatibleVoice} title={t('settings.voice.page.actions.preview')} aria-label={t('settings.voice.page.actions.preview')} disabled={!openaiCompatibleUrl.trim()}>
                                         {previewIcon(isCompatiblePreviewPlaying)}
                                     </Button>
-                                </SettingsStackedField>
+                                </CompatibleVoiceField>
                             </div>
                         )}
 

@@ -85,10 +85,25 @@ describe("readSessionNotice: shown", () => {
       expect(notice).toMatchObject({ kind: "pull-request", number: 7, failedChecks: [], authors: [] })
     })
 
-    test("survives as an Activity row", () => {
-      const message = synthetic("Pull request #7: merged", { source: "openchamber-pr-watch", url, events: ["merged"] }, text)
-      const notice = readSessionNotice(message)!
-      expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+    test("keeps a merge queue removal structured in Activity with or without a reason", () => {
+      const removalText = `<openchamber-pull-request url="${url}" number="7">\nPull request #7: removed from the merge queue.\n</openchamber-pull-request>`
+      const variants: Metadata[] = [{}, { queueRemovalReason: "Required check failed" }]
+      for (const details of variants) {
+        const metadata = { source: "openchamber-pr-watch", url, events: ["queue-removed"], ...details }
+        const message = synthetic("Pull request #7: removed from the merge queue", metadata, removalText)
+        const notice = readSessionNotice(message)!
+        expect(Object.hasOwn(notice, "queueRemovalReason")).toBe(Object.hasOwn(details, "queueRemovalReason"))
+        expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual({
+          kind: "pull-request",
+          url,
+          number: 7,
+          events: ["queue-removed"],
+          failedChecks: [],
+          authors: [],
+          ...details,
+          text: removalText,
+        })
+      }
     })
 
     test("an event this build does not know stays a plain notice", () => {
@@ -117,6 +132,13 @@ describe("readSessionNotice: shown", () => {
       expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
       // An extension's own timer keeps its own words.
       expect(readSessionNotice(synthetic("Timer (8 s): 8 seconds passed", { ...metadata, minutes: 6 }, text))).not.toHaveProperty("timerMinutes")
+    })
+
+    test("marks the built-in script by its minutes, and keeps what the script returned", () => {
+      const script = { ...metadata, extension: null, type: "script", title: "Script", label: "every 5 minutes", minutes: 5, subject: "Script (every 5 minutes)", summary: "<ready>" }
+      const notice = readSessionNotice(synthetic("Script (every 5 minutes): <ready>", script, text))!
+      expect(notice).toMatchObject({ kind: "extension-wait", scriptMinutes: 5, summary: "<ready>" })
+      expect(notice).not.toHaveProperty("timerMinutes")
     })
 
     test("an outcome this build does not know stays a plain notice", () => {

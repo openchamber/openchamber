@@ -43,7 +43,7 @@
 
 1. Add one entry to `SETTINGS_REGISTRY` with `scope`, a parser from `parsers.ts`, and a `ui` binding when a store holds the live value. Use an existing setter so its side effects run.
 2. Run `bun run settings-registry:generate` and commit both JSON snapshots.
-3. If the server must validate the value beyond the registry gate, add its branch to `sanitizeSettingsUpdate` in `packages/web/server/lib/settings/settings-helpers.js`; the drift test in `settings-helpers.test.js` needs a valid sample value for the new key.
+3. If the server must validate the value beyond the registry gate, add its branch to `sanitizeSettingsUpdate` in `packages/web/server/lib/settings/settings-helpers.ts`; the drift test in `settings-helpers.test.js` needs a valid sample value for the new key.
 4. Add the Settings control and search entry per `.agents/skills/settings-ui-patterns`.
 5. The "new" badges follow from the anchor. The shared rows (`SettingsSection`, `SettingsControlGroup`, `SettingsStackedField`, `SettingsFieldRow`, `SettingsCheckboxRow`) render `SettingsNewBadge` for their own `settingsItem`; a control built without them puts `<SettingsNewBadge items={['<anchorId>']} />` next to its label, or the page badge points at a row that says nothing. A new control the page hides until something is opened carries its badge on that opener: the Chat and project tabs badge the anchors their tab maps hold, the notification switch badges the event rows, a tool's switch badges the options it reveals (`reveals`). Page badges count only available controls. Opening a visible page acknowledges its available anchors; hidden anchors remain pending. Row badges stay for the rest of the load. On mobile the title badge appears only on the navigation stage and counts visible pages. A fresh install seeds every build anchor and starts without badges.
 
@@ -51,9 +51,38 @@
 
 `sttPrompt` is the profile preference for the transcription prompt. Its live copy is `useTranscriptionPromptStore`, a store of its own so `useConfigStore` does not grow; the Settings field writes it through `updateDesktopSettings`. It is kept as typed: a save echo is applied back to the field, and a trimmed one would remove the line break being typed. Dictation trims it before sending, and an older document without the key leaves it empty. The store remembers which host the prompt belongs to and reads empty on any other host: sync skips keys a snapshot omits, so without that a host that never saved a prompt would send the previous host's vocabulary.
 
+`sessionCostAlertsEnabled`, `sessionCostWarnThreshold` and `sessionCostCriticalThreshold` are profile preferences: off by default with $5 and $20, amounts in US dollars as OpenCode reports them. Yellow stays below red everywhere a pair is read: the Settings field shows an error and keeps saving nothing until the pair is ordered, the parser takes an amount only while the document's pair (defaults filling a missing side) is ordered, and the server drops an out-of-order pair in an update and keeps the stored pair when a write of one amount would put it out of order. Amounts that are not positive and finite are dropped too, so a bad value keeps the previous one. Their live copy is `useSessionCostSettingsStore`, which, like the transcription prompt, remembers the host it was read from and reads the defaults on any other host, so a host that never saved them stays off instead of alerting with the previous host's amounts; the Settings section writes them through `updateDesktopSettings`, so they are never auto-saved to whatever host is current.
+
+`referencePreviewNewestFirst` and `referencePreviewCollapseDescription` are the item preview's display switches, profile preferences off by default. Their registry entries live in `referencePreviewDisplayFields.ts`. Their live copy is `useReferencePreviewDisplayStore`, which remembers the host the same way and drops its values when another host becomes current, so a host whose read carries neither key, a fresh one or one returned to after its profile was reset, shows both off; the preview's display menu writes them through `updateDesktopSettings`.
+
 `selectionApprovalText` is a shared profile preference for the selection approval shortcut. An empty string means no custom text; older documents can omit the field. The setting stores only the override and does not define fallback message text or dispatch behavior.
 
+`activityRenderMode` defaults to Grouped. `keepEarlierReplies` is off by default and on for a document that still says `text`, the removed Show notes mode: its users chose to see every text. Choosing a mode writes both keys, so that choice survives the old value's replacement; `updateDesktopSettings` never drops these keys as unchanged, because the server may only derive the value it returned.
+
 ## Decisions
+
+### Why the local store drops Expanded on upgrade and not only a missing value
+
+The persisted slice holds the old default for people who never chose it. Only a choice is written to the server, so a chosen Expanded comes back with the settings document.
+
+### Why file notifications refresh through persistence
+
+Server-backed web, Electron including Mini Chat, hosted mobile and Capacitor
+clients invalidate the settings read cache and perform a non-bootstrap refresh
+when the control stream announces a file change or reconnects. The read
+revision advances as each event arrives, so a read already in flight, or one
+waiting for store hydration, cannot apply the older document; events that
+arrive during a refresh coalesce into one reread. Settings GETs stay out of
+`runtimeFetch` read coalescing, so the reread never joins the older request. Workspace pointers remain
+bootstrap-only and pending local writes retain precedence. VS Code owns an
+extension-host store and does not subscribe to this server watcher.
+An invalidated bootstrap read retries against the latest document while its
+runtime remains active, preserving startup workspace restoration. Live
+refreshes themselves remain non-bootstrap.
+
+The control stream owns notification parsing and delivery; the server's
+settings watcher emits `settings-changed`. File authority and legacy profile
+reconciliation belong to `packages/web/server/lib/settings/DOCUMENTATION.md`.
 
 ### Why the Settings view passes its voice availability snapshot
 

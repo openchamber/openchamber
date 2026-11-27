@@ -58,6 +58,18 @@ describe('rate-limit', () => {
     expect(isGitHubRateLimited('github.com')).toBe(false);
   });
 
+  test('an Enterprise Cloud API host cools down its own tenant only', () => {
+    setNow(NOW_BASE);
+
+    const cloudError = rateLimit403();
+    cloudError.request = { url: 'https://api.acme.ghe.com/repos/acme/app' };
+    noteIfGitHubRateLimit(cloudError);
+
+    expect(isGitHubRateLimited('acme.ghe.com')).toBe(true);
+    expect(isGitHubRateLimited('other.ghe.com')).toBe(false);
+    expect(isGitHubRateLimited('github.com')).toBe(false);
+  });
+
   test('api.github.com and github.com share the same cooldown key', () => {
     setNow(NOW_BASE);
 

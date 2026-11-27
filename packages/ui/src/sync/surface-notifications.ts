@@ -74,6 +74,7 @@ export const handleUiNotificationEvent = (notification: OpenchamberNotification,
     kind,
     sessionId,
     directory: directory || undefined,
+    itemUrl: trimmedOrUndefined(notification.itemUrl),
     runtimeKey: getRuntimeKey(),
     requireHidden: notification.kind === "plugin" ? true : notification.requireHidden === true,
   }).catch((error) => {

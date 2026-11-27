@@ -4,6 +4,7 @@ import type { NetworkRepository } from './repo/fork-detection.js';
 import type { ChecksSummary } from './checks-summary.js';
 import { hasProperty } from './contracts.js';
 import type { GitHubEnvelope } from './contracts.js';
+import { isGitHubSshUser } from './api-host.js';
 
 type Rest = RestEndpointMethodTypes;
 type Pull = Rest['pulls']['get']['response']['data'];
@@ -12,6 +13,7 @@ type Comment = Rest['issues']['getComment']['response']['data'];
 type ReviewComment = Rest['pulls']['getReviewComment']['response']['data'];
 type PullFile = Rest['pulls']['listFiles']['response']['data'][number];
 type Run = Rest['checks']['listForRef']['response']['data']['check_runs'][number];
+type Status = Rest['repos']['getCombinedStatusForRef']['response']['data']['statuses'][number];
 type Job = Rest['actions']['listJobsForWorkflowRun']['response']['data']['jobs'][number];
 type Annotation = Rest['checks']['listAnnotations']['response']['data'][number];
 interface Identity { provider: string; instance: string }
@@ -163,15 +165,17 @@ export function matchesGitHubRepositoryUrl(value: GitHubEnvelope['data'], owner:
   if (!isProviderString(value) || !value.trim()) return false;
   const expectedPath = `${owner}/${repo}`.toLowerCase();
   const raw = value.trim();
-  const scpMatch = raw.match(/^git@([^/\s:]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
-  if (scpMatch) return `${scpMatch[2]}/${scpMatch[3]}`.toLowerCase() === expectedPath;
+  const scpMatch = raw.match(/^([^@/\s:]+)@([^/\s:]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpMatch) {
+    return isGitHubSshUser(scpMatch[1], scpMatch[2]) && `${scpMatch[3]}/${scpMatch[4]}`.toLowerCase() === expectedPath;
+  }
 
   try {
     const url = new URL(raw);
     if (!['https:', 'ssh:'].includes(url.protocol)
       || url.password || url.search || url.hash
       || (url.protocol === 'https:' && url.username)
-      || (url.protocol === 'ssh:' && url.username !== 'git')) {
+      || (url.protocol === 'ssh:' && !isGitHubSshUser(url.username, url.hostname))) {
       return false;
     }
     if (host && url.protocol === 'https:' && url.hostname.toLowerCase() !== host) return false;
@@ -240,10 +244,12 @@ export function requireGitHubCheckRuns<Value extends RunInput>(value: Value[]) {
   return runs;
 }
 
+const COMMIT_STATUS_STATES = new Set(['error', 'failure', 'pending', 'success']);
+
 export function requireGitHubStatuses<Value extends StatusInput>(value: Value[]) {
   const statuses = requireProviderArray(value, 'GitHub returned invalid combined status');
   for (const status of statuses) {
-    if (!isPlainObject(status) || !isProviderString(status.state) || !status.state.trim()) {
+    if (!isPlainObject(status) || !isProviderString(status.state) || !COMMIT_STATUS_STATES.has(status.state)) {
       throw invalidProviderPayload('GitHub returned an invalid combined status item');
     }
   }
@@ -413,6 +419,23 @@ export function mapCheckRun(run: Run, { job, annotations }: { job?: WorkflowJob;
   }
   if (job) result.job = job;
   if (annotations) result.annotations = annotations;
+  return result;
+}
+
+export function mapCommitStatus(status: Status, identity: Identity) {
+  const name = text(status.context) ?? 'default';
+  const state = status.state;
+  const pending = state === 'pending';
+  const result: CheckRunDTO = { ...identity, id: `status:${name}`, name, status: pending ? 'in_progress' : 'completed' };
+  if (text(status.created_at)) result.startedAt = status.created_at;
+  if (!pending) {
+    result.conclusion = state === 'error' ? 'failure' : state;
+    if (text(status.updated_at)) result.completedAt = status.updated_at;
+  }
+  const detailsUrl = httpUrl(status.target_url);
+  if (detailsUrl) result.detailsUrl = detailsUrl;
+  const description = text(status.description);
+  if (description) result.output = { title: undefined, summary: description, text: undefined };
   return result;
 }
 

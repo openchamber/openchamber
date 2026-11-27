@@ -15,7 +15,9 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
 import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
+import { listedAsRoot } from '../list/sessionCollection';
 
 type Args = {
   homeDirectory: string | null;
@@ -47,6 +49,7 @@ const haveSameSessionScopes = (left: SessionScopeOwners, right: SessionScopeOwne
 
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
+  const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
   const gitBranchesRef = React.useRef(args.gitBranches);
   gitBranchesRef.current = args.gitBranches;
   const sessionOrderRanksRef = React.useRef(args.sessionOrderRanks);
@@ -118,10 +121,11 @@ export const useSessionGrouping = (args: Args) => {
         return Boolean(parentSession && isArchivedSession(parentSession));
       };
 
-      const rootCandidates = sortedProjectSessions.filter((session) => {
-        if (isArchivedSession(session)) return !session.parentID;
-        return !nestedSessionIdsRef.current.has(session.id);
-      });
+      const rootCandidates = sortedProjectSessions.filter((session) => (
+        isArchivedSession(session)
+          ? !session.parentID
+          : listedAsRoot(session, nestedSessionIdsRef.current, showSubagentSessions)
+      ));
 
       const isInNestingCycle = (session: Session): boolean => {
         const seen = new Set<string>();
@@ -289,7 +293,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, t],
+    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, showSubagentSessions, t],
   );
 
   const getGroupingSessions = React.useCallback((projectSessions: readonly Session[]): Session[] => {

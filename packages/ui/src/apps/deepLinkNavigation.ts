@@ -17,19 +17,21 @@ import type { QuotaProviderId } from '@/types';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSession } from '@/lib/router/openSessionFromRoute';
+import { requestTrackerItemOpen } from '@/lib/trackerItemRequests';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 import type { SavedInstanceSwitchOutcome } from './mobileConnections';
 
 
 interface DeepLinkHandlers {
+  showChat?: () => void;
   openSessions?: (filter?: SessionsFilter) => void;
   openView?: (target: ViewTarget) => void;
   openChanges?: (options?: { path?: string; staged?: boolean }) => void;
   openSettings?: (section?: string) => void;
 }
 
-type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
+type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string; dictate?: boolean };
 
 type SharedFilesIntent = {
   type: 'shared-files';
@@ -46,12 +48,15 @@ type InstanceSwitcher = (serverId: string) => Promise<SavedInstanceSwitchOutcome
 let handlers: DeepLinkHandlers = {};
 let launchUrlConsumed = false;
 
-const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
+export const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
   const store = useSessionUIStore.getState();
   const project = intent.projectId
     ? useProjectsStore.getState().projects.find((entry) => entry.id === intent.projectId) ?? null
     : null;
   store.openNewSessionDraft(project ? { selectedProjectId: project.id } : undefined);
+  if (intent.dictate) {
+    useInputStore.getState().requestDraftDictation(useSessionUIStore.getState().newSessionDraft.draftId);
+  }
   const text = intent.text?.trim();
   if (!text) return;
   if (intent.projectId && !project) {
@@ -83,11 +88,17 @@ export const openSharedFilesSession = (intent: SharedFilesIntent): boolean => {
 const execute = (intent: NavigationIntent): boolean => {
   switch (intent.type) {
     case 'shortcut-new-session':
+      if (!handlers.showChat) return false;
+      handlers.showChat();
       openShortcutSession(intent);
       return true;
 
     case 'session':
       void openSession(intent.sessionId, { directory: intent.directory ?? null, messageId: intent.messageId ?? null });
+      return true;
+
+    case 'tracker-item':
+      requestTrackerItemOpen({ url: intent.url, directory: intent.directory ?? null });
       return true;
 
     case 'new-session': {
@@ -166,7 +177,7 @@ export const createDeepLinkQueue = <Intent extends { type: string; serverId?: st
     if (switching) return switching;
     if (!pending || waitingForSwitchedRuntime) return Promise.resolve();
     const intent = pending;
-    if (intent.type === 'session' && intent.serverId && switchToServer) {
+    if (intent.serverId && switchToServer) {
       switching = switchThenFlush(switchToServer, intent.serverId);
       return switching;
     }
@@ -217,7 +228,6 @@ const notificationTapDataSchema = z.object({
   serverId: z.string().min(1).optional().catch(undefined),
   sessionId: z.string().min(1).optional().catch(undefined),
   url: z.string().optional().catch(undefined),
-  deeplink: z.string().optional().catch(undefined),
 });
 
 export type NotificationTapData = z.input<typeof notificationTapDataSchema>;
@@ -225,10 +235,10 @@ export type NotificationTapData = z.input<typeof notificationTapDataSchema>;
 export const notificationTapIntent = (data: NotificationTapData | null | undefined): DeepLinkIntent | null => {
   const parsed = notificationTapDataSchema.safeParse(data ?? {});
   if (!parsed.success) return null;
-  const { serverId, sessionId, url, deeplink } = parsed.data;
-  const fromUrl = parseDeepLink(url ?? deeplink);
+  const { serverId, sessionId, url } = parsed.data;
+  const fromUrl = parseDeepLink(url);
   const intent: DeepLinkIntent | null = fromUrl ?? (sessionId ? { type: 'session', sessionId } : null);
-  if (intent?.type === 'session' && serverId) intent.serverId = serverId;
+  if ((intent?.type === 'session' || intent?.type === 'tracker-item') && serverId) intent.serverId = serverId;
   return intent;
 };
 
@@ -282,7 +292,7 @@ export const useDeepLinkSource = (options: {
       .catch(() => undefined);
 
     cleanup.push(subscribeToNativeShortcutRequests((request) => {
-      applyDeepLinkIntent({ type: 'shortcut-new-session', projectId: request.projectId, text: request.text });
+      applyDeepLinkIntent({ type: 'shortcut-new-session', projectId: request.projectId, text: request.text, dictate: request.dictate });
     }));
 
     cleanup.push(subscribeToNativeSharedFiles((payload, accept) => {

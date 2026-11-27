@@ -1,4 +1,5 @@
 import React from 'react';
+import { usePendingDraftDictation } from '@/hooks/usePendingDraftDictation';
 import { usePendingSharedDraftContent } from '@/hooks/usePendingSharedDraftContent';
 import { useI18n } from '@/lib/i18n';
 import type { ChatInputProps } from './composer/input/chatInputProps';
@@ -103,7 +104,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const queueState = useComposerQueueState({ sessionScope });
     const inlineContext = useComposerInlineContext({ sessionScope, column, preferences });
     const draftHistory = useComposerDraftHistory({
-        sessionScope, inlineContext, historySearchState, draftText, editorState, column,
+        dictationState, sessionScope, inlineContext, historySearchState, draftText, editorState, column,
         autocompleteState,
     });
     const sessionLifecycle = useComposerSessionLifecycle({
@@ -130,7 +131,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         queueState, queueActions: sending, editorState, draftText,
     });
     const dictation = useComposerDictation({
-        draftText, i18n, dictationState, editorState, draftHistory, sendHandlers: sending,
+        draftText, i18n, dictationState, editorState, draftHistory, sendHandlers: sending, sessionScope,
     });
     useComposerExternalSubmits({ draftText, column, sendHandlers: sending, sendAvailability, sessionScope, submission: sending, sendActions, selection });
     const editorActions = useComposerEditorActions({
@@ -173,7 +174,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         sessionScope, runtime, mobilePanels, preferences, expansion, props,
     });
     const mobileActions = useComposerMobileActions({
-        dictationState, autocompleteState, largePasteState, historySearchState, editorState, draftText,
+        dictation, dictationState, autocompleteState, largePasteState, historySearchState, editorState, draftText,
         mobileShell, preferences, sessionScope, inlineContext, draftHistory,
     });
     const rows = useComposerRows({
@@ -184,6 +185,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const controls = useComposerControls({
         editorState, mobilePanels, draftText, i18n, preferences, expansion, permissionSettings,
         sessionScope, mobileShell, runtime, draftHistory,
+    });
+    usePendingDraftDictation({
+        draftId: sessionScope.newSessionDraftOpen ? sessionScope.newSessionDraft.draftId : null,
+        enabled: !column.columnPinned,
+        start: controls.startDictation,
     });
     const keyHandler = createComposerKeyHandler({
         largePasteState, editorState, draftText, autocompleteState, preferences, expansion,

@@ -16,7 +16,7 @@ import { isSourceControlString as isString, isSourceControlInteger } from './inp
 import { isSourceControlProviderGuest } from './extension-providers.js';
 import { createPatAccountAuth } from './pat-account-auth.js';
 import { isProviderUsername } from './provider-id.js';
-import { createStandardMutations } from './standard-mutations.js';
+import { createStandardMutations, isThreadId } from './standard-mutations.js';
 import type { z } from 'zod';
 import type { SourceControlJson, SourceControlProviderInputs, SourceControlProviderMethod, SourceControlResourceMethod, ServiceContribution } from '@openchamber/sdk';
 import type { ProviderDescriptor, ProviderReadContext, ProviderSession } from './provider-contract.js';
@@ -364,6 +364,15 @@ export function createExtensionProvider({
     });
   };
 
+  const reviewState = async (input: ReadInput<'reviewState'>) => {
+    const state = await read('reviewState')(input);
+    const { reply, resolve } = descriptor.capabilities.reviewThreads;
+    return { ...state, threads: state.threads.map((thread) => {
+      const writable = isThreadId(thread.id);
+      return { ...thread, canReply: writable && reply && thread.canReply, canResolve: writable && resolve && thread.canResolve };
+    }) };
+  };
+
   const changeRequestStatus = async ({ session, ...input }: { session: ProviderSession } & Omit<SourceControlProviderInputs['changeRequestStatus'], 'context'> & { context: ProviderReadContext }) => {
     const { data: status, outbound } = await forwardAs('changeRequestStatus', session, json(input));
     if (status.identity.provider !== id || status.identity.instance !== session.instance) {
@@ -398,6 +407,9 @@ export function createExtensionProvider({
     if (replayOf) request.replayOf = json({ target: replayOf.target });
     const { data: resolved, outbound } = await forwardAs('mutation.resolveTarget', session, request);
     requireTargetOf(context, resolved.target, outbound);
+    if (!replayOf && input.expectedHeadSha !== undefined && resolved.target.headSha !== input.expectedHeadSha) {
+      throw Object.assign(new Error(`${label} change request head changed`), { code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
+    }
     if (replayOf && kind !== 'change-request-create' && !isDeepStrictEqual(json(resolved.target), json(replayOf.target))) {
       throw Object.assign(new Error('Source control mutation idempotency key was already used with different input'), {
         code: 'SOURCE_CONTROL_MUTATION_CONFLICT', status: 409,
@@ -431,6 +443,7 @@ export function createExtensionProvider({
       changeRequestStatus,
       listChangeRequests: read('listChangeRequests'),
       changeRequestContext: read('changeRequestContext'),
+      reviewState,
       listIssues: read('listIssues'),
       getIssue: read('getIssue'),
       issueComments: read('issueComments'),

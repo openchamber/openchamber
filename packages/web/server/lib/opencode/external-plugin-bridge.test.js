@@ -9,8 +9,11 @@ import {
   EXTERNAL_BRIDGE_FILE_NAME,
   collectSkillEntriesFromRoots,
   createExternalPluginBridgeRuntime,
+  isBridgePluginLoaded,
   registerExternalPluginBridgeRoutes,
 } from './external-plugin-bridge.js';
+import { CONFIG_READ_ONLY } from './config-files.js';
+import { canonicalPluginPath } from './plugin-paths.js';
 
 const tempDirs = [];
 let savedAgentToolUrl;
@@ -40,7 +43,8 @@ const createMockPluginContext = (initialTools = []) => {
   let agentTransform = null;
   let retryHook = null;
   let promptHook = null;
-  let contextHook = null;
+  const requestHooks = {};
+  let titleHook = null;
   let toolReloads = 0;
   let agentReloads = 0;
   let sessionPermissions = [];
@@ -84,7 +88,8 @@ const createMockPluginContext = (initialTools = []) => {
       hook: async (name, fn) => {
         if (name === 'retry') retryHook = fn;
         if (name === 'prompt') promptHook = fn;
-        if (name === 'context') contextHook = fn;
+        (requestHooks[name] ??= []).push(fn);
+        if (name === 'title') titleHook = fn;
       },
       get: async () => ({ permissions: sessionPermissions }),
       context: async () => [],
@@ -93,6 +98,12 @@ const createMockPluginContext = (initialTools = []) => {
       subscribe: () => (async function* () {})(),
     },
     provider: { get: async () => ({ data: {} }) },
+    // big-pickle is free on Zen without a -free suffix.
+    model: {
+      list: async () => ({
+        data: [{ providerID: 'opencode', id: 'big-pickle', cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }] }],
+      }),
+    },
     integration: {
       get: async () => ({ data: { connections: [] } }),
       connection: { active: async () => undefined },
@@ -105,7 +116,18 @@ const createMockPluginContext = (initialTools = []) => {
     runAgentTransform,
     getRetryHook: () => retryHook,
     getPromptHook: () => promptHook,
-    getContextHook: () => contextHook,
+    getRequestHook: (name) => async (draft) => { for (const hook of requestHooks[name] ?? []) await hook(draft); },
+    runTitleHook: async (system, model = { providerID: 'opencode', id: 'big-pickle' }) => {
+      const draft = {
+        sessionID: 'ses_1',
+        model,
+        system: [{ type: 'text', text: system }],
+        messages: [{ role: 'user', content: [{ type: 'text', text: '<message>\nExplain what an API endpoint is.\n</message>' }] }],
+        options: {},
+      };
+      await titleHook(draft);
+      return draft;
+    },
     setSessionPermissions: (rules) => { sessionPermissions = rules; },
     getReloadCounts: () => ({ toolReloads, agentReloads }),
   };
@@ -147,6 +169,7 @@ describe('external-plugin-bridge', () => {
       { id: 'opencode_worktree_create', options: { namespace: 'opencode' } },
       { id: 'opencode_models', options: { namespace: 'opencode' } },
       { id: 'experimental_image_generate', options: {} },
+      { id: 'generate_image', options: {} },
       { id: 'automation_create', options: {} },
     ];
     const mock = createMockPluginContext(builtinTools);
@@ -182,8 +205,14 @@ describe('external-plugin-bridge', () => {
       expect(active.removed).toContain('opencode_worktree_create');
       expect(active.removed).toContain('opencode_models');
       expect(active.removed).toContain('experimental_image_generate');
+      expect(active.removed).toContain('generate_image');
       expect(active.removed).toContain('automation_create');
-      expect(mock.runAgentTransform('Native title')).not.toBe('Native title');
+      const styledTitleSystem = mock.runAgentTransform('Native title');
+      expect(styledTitleSystem).not.toBe('Native title');
+      // A free Zen model without the -free suffix keeps the native prompt and gets the style in its input.
+      const bigPickleDraft = await mock.runTitleHook(styledTitleSystem);
+      expect(bigPickleDraft.system[0].text).toBe('Native title');
+      expect(bigPickleDraft.messages.at(-1).content.at(-1).text).toBe(styledTitleSystem);
 
       // 3. Settings change disables image tool -> reload fires and image builtin is no longer removed.
       const reloadsBeforeToggle = mock.getReloadCounts().toolReloads;
@@ -219,6 +248,9 @@ describe('external-plugin-bridge', () => {
       expect(Object.keys(afterClose.added)).toEqual([]);
       expect(afterClose.removed).toEqual([]);
       expect(mock.runAgentTransform('Native title')).toBe('Native title');
+      const closedDraft = await mock.runTitleHook(styledTitleSystem);
+      expect(closedDraft.system[0].text).toBe(styledTitleSystem);
+      expect(closedDraft.messages.at(-1).content).toHaveLength(1);
     } finally {
       await cleanup?.();
     }
@@ -252,6 +284,56 @@ describe('external-plugin-bridge', () => {
     }
   });
 
+  it('proves to the OpenChamber holding its token, and only to it, that it is loaded in a location', async () => {
+    const dataDir = await createTempDir('oc-ext-proof-');
+    const runtime = createExternalPluginBridgeRuntime({
+      fsPromises: fs,
+      path,
+      dataDir,
+      readSettings: () => ({ agentControlToolEnabled: true }),
+      ensureCredentials: () => ({ url: 'http://127.0.0.1:41234/api/openchamber/agent-tool', token: 'bridge-secret-token' }),
+      isExternalLocal: () => true,
+    });
+    const pluginDir = await runtime.materializePlugin();
+    const mod = await import(`${path.join(pluginDir, 'index.js')}?t=${Date.now()}`);
+    const mock = createMockPluginContext();
+    const registered = new Map();
+    mock.ctx.rpc = { register: async (definition, handlers) => { registered.set(definition.id, handlers); } };
+    const cleanup = await mod.default.setup(mock.ctx);
+
+    // OpenCode's answers as the client throws them: an RpcError carries its type.
+    const location = (handlersById) => ({
+      plugin: { list: async () => ({ data: [{ id: 'opencode.agent' }] }) },
+      rpc: {
+        call: async ({ rpcID, method, input }) => {
+          const handler = handlersById.get(rpcID)?.[method];
+          if (!handler) throw Object.assign(new Error('RPC is unavailable'), { type: 'rpc.unavailable' });
+          return { output: await handler(input) };
+        },
+      },
+    });
+
+    try {
+      expect(await isBridgePluginLoaded(location(registered), 'bridge-secret-token')).toBe(false);
+
+      await runtime.syncBridge();
+      expect(runtime.readActiveToken()).toBe('bridge-secret-token');
+      expect(await isBridgePluginLoaded(location(registered), 'bridge-secret-token')).toBe(true);
+      expect(await isBridgePluginLoaded(location(registered), 'another-openchamber-token')).toBe(false);
+      expect(await isBridgePluginLoaded(location(new Map()), 'bridge-secret-token')).toBe(false);
+
+      // Mid-reload: OpenCode lists the plugin before its setup registered the RPC again.
+      const reloading = { ...location(new Map()), plugin: { list: async () => ({ data: [{ id: 'opencode.agent' }, { id: 'openchamber' }] }) } };
+      expect(await isBridgePluginLoaded(reloading, 'bridge-secret-token')).toBe(null);
+
+      const unreachable = { ...location(registered), rpc: { call: async () => { throw new TypeError('fetch failed'); } } };
+      expect(await isBridgePluginLoaded(unreachable, 'bridge-secret-token')).toBe(null);
+    } finally {
+      await cleanup?.();
+      await runtime.cleanupBridge();
+    }
+  });
+
   it('serves GET, POST, and DELETE routes for registering and removing the plugin in global config', async () => {
     const dataDir = await createTempDir('oc-ext-routes-');
     const runtime = createExternalPluginBridgeRuntime({
@@ -264,11 +346,13 @@ describe('external-plugin-bridge', () => {
     });
 
     const globalTargets = new Set();
+    const askedDirectories = [];
     const app = express();
     registerExternalPluginBridgeRoutes(app, {
       getBridge: () => runtime,
       getDelivery: () => 'none',
-      readGlobalEntries: () => ({ path: '/tmp/opencode.json', targets: [...globalTargets] }),
+      isLoadedIn: async (directory) => { askedDirectories.push(directory); return false; },
+      readGlobalEntries: () => ({ path: '/tmp/opencode.json', targets: [...globalTargets].map(canonicalPluginPath) }),
       addGlobalEntry: (dir) => {
         const added = !globalTargets.has(dir);
         globalTargets.add(dir);
@@ -287,6 +371,7 @@ describe('external-plugin-bridge', () => {
       globalConfigPath: '/tmp/opencode.json',
       inGlobalConfig: false,
       bridgeActive: false,
+      loadedInDirectory: null,
     });
 
     const added = await request(app).post('/api/config/external-opencode-plugin/global-config').expect(200);
@@ -298,12 +383,52 @@ describe('external-plugin-bridge', () => {
 
     const afterAdd = await request(app).get('/api/config/external-opencode-plugin').expect(200);
     expect(afterAdd.body.bridgeActive).toBe(true);
+    expect(afterAdd.body.loadedInDirectory).toBe(null);
+    const inProject = await request(app).get('/api/config/external-opencode-plugin').query({ directory: '/work/app' }).expect(200);
+    expect(inProject.body.loadedInDirectory).toBe(false);
+    expect(askedDirectories).toEqual(['/work/app']);
 
     const removed = await request(app).delete('/api/config/external-opencode-plugin/global-config').expect(200);
     expect(removed.body).toEqual({
       path: '/tmp/opencode.json',
       removed: true,
     });
+  });
+
+  it('asks the plugin in the project when the global config does not list it, and names a read-only global config', async () => {
+    const dataDir = await createTempDir('oc-ext-plugins-dir-');
+    const runtime = createExternalPluginBridgeRuntime({
+      fsPromises: fs,
+      path,
+      dataDir,
+      readSettings: () => ({ agentControlToolEnabled: true }),
+      ensureCredentials: () => ({ url: 'http://127.0.0.1:41234/api/openchamber/agent-tool', token: 'tok' }),
+      isExternalLocal: () => true,
+    });
+    await runtime.syncBridge();
+    const app = express();
+    registerExternalPluginBridgeRoutes(app, {
+      getBridge: () => runtime,
+      getDelivery: () => 'none',
+      isLoadedIn: async () => true,
+      waitForRemoval: async () => {},
+      readGlobalEntries: () => ({ path: '/home/me/.config/opencode/opencode.json', targets: [] }),
+      addGlobalEntry: () => {
+        throw Object.assign(new Error('read-only'), { code: CONFIG_READ_ONLY, path: '/home/me/.config/opencode/opencode.json' });
+      },
+      removeGlobalEntry: () => {
+        throw Object.assign(new Error('read-only'), { code: CONFIG_READ_ONLY, path: '/home/me/.config/opencode/opencode.json' });
+      },
+    });
+
+    // Loaded from OpenCode's plugins/ folder: no global entry, and the plugin still answers for the project.
+    const inProject = await request(app).get('/api/config/external-opencode-plugin').query({ directory: '/work/app' }).expect(200);
+    expect(inProject.body).toMatchObject({ inGlobalConfig: false, bridgeActive: true, loadedInDirectory: true });
+
+    const refused = { error: 'config-read-only', path: '/home/me/.config/opencode/opencode.json' };
+    expect((await request(app).post('/api/config/external-opencode-plugin/global-config').expect(409)).body).toEqual(refused);
+    expect((await request(app).delete('/api/config/external-opencode-plugin/global-config').expect(409)).body).toEqual(refused);
+    await runtime.cleanupBridge();
   });
 
   it('prevents an in-flight sync from recreating the bridge file after cleanup', async () => {
@@ -357,6 +482,39 @@ describe('external-plugin-bridge', () => {
     expect(stored.pid).toBe(process.pid);
   });
 
+  it.each([
+    ['system-update', true, 2],
+    ['system-reminder', true, 2],
+    ['system-update', false, 1],
+  ])('follows the Plan mode %s with where plans are saved, knowledge tool on: %s', async (tag, enabled, count) => {
+    const dataDir = await createTempDir('oc-ext-plan-note-');
+    const runtime = createExternalPluginBridgeRuntime({
+      fsPromises: fs,
+      path,
+      dataDir,
+      readSettings: () => ({ agentKnowledgeToolEnabled: enabled }),
+      ensureCredentials: () => ({ url: 'http://127.0.0.1:41234/api/openchamber/agent-tool', token: 'tok' }),
+      isExternalLocal: () => true,
+    });
+    const pluginDir = await runtime.materializePlugin();
+    await runtime.syncBridge();
+
+    const mod = await import(`${path.join(pluginDir, 'index.js')}?t=${Date.now()}`);
+    const mock = createMockPluginContext();
+    const cleanup = await mod.default.setup(mock.ctx);
+    try {
+      const reminder = { role: 'user', content: [{ type: 'text', text: `<${tag}>\nYou are in Plan mode. Discuss.\n</${tag}>` }] };
+      for (const hook of ['context', 'compaction', 'generate']) {
+        const draft = { sessionID: 'ses_plan', messages: [reminder], tools: {} };
+        await mock.getRequestHook(hook)(draft);
+        expect(draft.messages).toHaveLength(count);
+        expect(draft.messages[0]).toBe(reminder);
+      }
+    } finally {
+      await cleanup?.();
+    }
+  });
+
   it('hides openchamber_workflow_answer from ordinary sessions while allowing workflow schema sessions', async () => {
     const dataDir = await createTempDir('oc-ext-workflow-answer-');
     const runtime = createExternalPluginBridgeRuntime({
@@ -374,14 +532,14 @@ describe('external-plugin-bridge', () => {
     const mock = createMockPluginContext();
     const cleanup = await mod.default.setup(mock.ctx);
     try {
-      const contextHook = mock.getContextHook();
-      const ordinaryDraft = { sessionID: 'ses_ordinary', tools: { openchamber_workflow_answer: { description: 'x' }, openchamber_workflow: { description: 'y' } } };
+      const contextHook = mock.getRequestHook('context');
+      const ordinaryDraft = { sessionID: 'ses_ordinary', messages: [], tools: { openchamber_workflow_answer: { description: 'x' }, openchamber_workflow: { description: 'y' } } };
       await contextHook(ordinaryDraft);
       expect(ordinaryDraft.tools).not.toHaveProperty('openchamber_workflow_answer');
       expect(ordinaryDraft.tools).toHaveProperty('openchamber_workflow');
 
       mock.setSessionPermissions([{ action: 'openchamber_workflow_answer', resource: '*', effect: 'allow' }]);
-      const workflowDraft = { sessionID: 'ses_workflow', tools: { openchamber_workflow_answer: { description: 'x' } } };
+      const workflowDraft = { sessionID: 'ses_workflow', messages: [], tools: { openchamber_workflow_answer: { description: 'x' } } };
       await contextHook(workflowDraft);
       expect(workflowDraft.tools).toHaveProperty('openchamber_workflow_answer');
     } finally {

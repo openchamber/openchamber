@@ -49,12 +49,7 @@ const normalizeFollowUpBehavior = (
 
 export const isServerOwnedMessageQueue = (): boolean => !isVSCodeRuntime();
 
-export interface QueuedMessageSendConfig {
-    providerID: string;
-    modelID: string;
-    agent?: string;
-    variant?: string;
-}
+export type QueuedMessageSendConfig = z.infer<typeof serverSendConfigSchema>;
 
 export interface QueuedMessageGoal {
     objective?: string;
@@ -131,6 +126,8 @@ const serverSendConfigSchema = z.object({
     modelID: z.string().min(1),
     agent: z.string().optional(),
     variant: z.string().optional(),
+    keepSessionModel: z.boolean().optional(),
+    keepSessionAgent: z.boolean().optional(),
 });
 
 const serverGoalSchema = z.object({

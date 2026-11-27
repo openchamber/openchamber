@@ -1,3 +1,4 @@
+import type { SpaceSendModel } from '@/lib/spaces/space-send';
 export interface ChatInputProps {
     onOpenSettings?: () => void;
     scrollToBottom?: () => void;
@@ -8,6 +9,7 @@ export interface ChatInputProps {
 
 export type SubmitOptions = {
     queuedOnly?: boolean;
+    spaceSendModel?: SpaceSendModel;
     queuedMessageId?: string;
     delivery?: 'steer';
     presetText?: string;

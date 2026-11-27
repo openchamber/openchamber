@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+import fs from 'node:fs';
 import * as os from 'os';
+import { z } from 'zod';
 import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
@@ -42,6 +44,22 @@ const uniqueTokens = (values: Array<string | null | undefined>): string => {
   return Array.from(new Set(values.map(asCspToken).filter((value): value is string => Boolean(value)))).join(' ');
 };
 
+const viteManifestSchema = z.record(z.string(), z.object({
+  file: z.string(),
+  isEntry: z.boolean().optional(),
+}));
+
+const resolveHashedWebviewEntry = (extensionUri: vscode.Uri): vscode.Uri => {
+  const webviewRoot = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
+  const manifestPath = vscode.Uri.joinPath(webviewRoot, 'manifest.json').fsPath;
+  const manifest = viteManifestSchema.parse(JSON.parse(fs.readFileSync(manifestPath, 'utf8')));
+  const entry = Object.values(manifest).find((chunk) => chunk.isEntry);
+  if (!entry) {
+    throw new Error(`No entry in the webview build manifest: ${manifestPath}`);
+  }
+  return vscode.Uri.joinPath(webviewRoot, entry.file);
+};
+
 export const getCspBootstrapHtml = (): string => `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -69,9 +87,10 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const workspaceFolderJson = JSON.stringify(workspaceFolder).replace(/</g, '\\u003c');
   const workspaceFoldersJson = JSON.stringify(workspaceFolders).replace(/</g, '\\u003c');
 
-  const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
-  const scriptUri = webview.asWebviewUri(scriptPath);
   const normalizedDevServerUrl = asCspToken(devServerUrl)?.replace(/\/$/, '') ?? null;
+  const prodEntryUrl = normalizedDevServerUrl
+    ? null
+    : webview.asWebviewUri(resolveHashedWebviewEntry(extensionUri)).toString();
   const devServerOrigin = toOrigin(normalizedDevServerUrl);
   const styleSrc = uniqueTokens([webview.cspSource, "'unsafe-inline'", devServerOrigin]);
   const scriptSrc = uniqueTokens([webview.cspSource, "'unsafe-inline'", "'unsafe-eval'", devServerOrigin]);
@@ -180,6 +199,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       arch: "${os.arch()}",
       viewMode: "${viewMode}",
       panelType: "${panelType}",
+      uriScheme: ${JSON.stringify(vscode.env.uriScheme)},
       initialSessionId: ${initialSessionId ? `"${initialSessionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'},
       initialComposer: ${initialComposer ? `"${initialComposer}"` : 'null'},
     };
@@ -277,7 +297,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     });
   </script>
   <script type="module">
-    const prodEntryUrl = ${JSON.stringify(scriptUri.toString())};
+    const prodEntryUrl = ${JSON.stringify(prodEntryUrl)};
     const devServerUrl = ${normalizedDevServerUrl ? JSON.stringify(normalizedDevServerUrl) : 'null'};
 
     const loadProductionBundle = () => {

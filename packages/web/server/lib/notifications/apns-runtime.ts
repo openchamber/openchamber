@@ -744,7 +744,7 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
     body: '',
     data: {
       ...payload?.data,
-      enc: sealPushContent(pushKey, { title: content.title, body: content.body }),
+      enc: sealPushContent(pushKey, content),
     },
   });
 

@@ -1,8 +1,9 @@
-import { OpenCode } from '@opencode/client';
+import { createSkillClientFactory, withSkillBody } from './skill-body.js';
 import { buildAppliedResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './config-files.js';
 import { skillSwitchRequestSchema } from './config-v2.js';
 import { setSkillEnabled } from './skill-switch.js';
+import { buildSkillListResponse } from './external-skill-switches.js';
 import { asNonEmptyString, isRecord, isString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
 import type { Application, Request } from '../shared/http-contracts.js';
@@ -87,6 +88,7 @@ type SkillRouteOptions =
     buildOpenCodeUrl: (path: string, prefix: string) => string;
     getOpenCodeAuthHeaders: () => Record<string, string>;
     getOpenCodePort: () => number | null | undefined;
+    getManagedOpenCodeProcessEnv: ReturnType<typeof createOpenCodeLifecycleRuntime>['getManagedOpenCodeProcessEnv'];
     readSettingsFromDisk: () => Promise<SkillSettings>;
     sanitizeSkillCatalogs: (value: SkillSettings['skillCatalogs']) => CustomCatalogSetting[] | undefined;
     isUnsafeSkillRelativePath: (value: string) => boolean;
@@ -137,12 +139,6 @@ const isAccessError = (value: unknown): value is ErrorFields & { code: 'EACCES' 
 const isNumber = (value: unknown): value is number => typeof value === 'number';
 const isScope = (value: string | null): value is ListedSkill['scope'] => value === 'user' || value === 'project';
 const isSource = (value: string | null): value is SkillSource => value === 'opencode' || value === 'claude' || value === 'agents';
-const isEnvFlagEnabled = (value: NodeJS.ProcessEnv[string]) => {
-  if (!isString(value)) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
-};
-
 const errorMessage = (cause: unknown) => {
   if (!hasErrorFields(cause)) throw new TypeError('Cannot read skill error message');
   return cause.message;
@@ -162,6 +158,7 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
 
     getOpenCodeAuthHeaders,
     getOpenCodePort,
+    getManagedOpenCodeProcessEnv,
     getSkillSources,
     discoverSkills,
     mergeDiscoveredSkills,
@@ -326,22 +323,14 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
     return { scope: SKILL_SCOPE.USER, source };
   };
 
+  const openCodeClient = createSkillClientFactory(getOpenCodeAuthHeaders, buildOpenCodeUrl);
   const fetchOpenCodeDiscoveredSkills = async (workingDirectory: Directory) => {
     if (!getOpenCodePort()) {
       return null;
     }
 
     try {
-      const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
-      const headers = { ...getOpenCodeAuthHeaders() };
-      if (workingDirectory) headers['x-opencode-directory'] = encodeURIComponent(workingDirectory);
-      const client = OpenCode.make({
-        baseUrl,
-        headers,
-        fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(8_000) }),
-      });
-
-      const response = await client.skill.list();
+      const response = await openCodeClient(workingDirectory).skill.list();
       const payload = response?.data;
       if (!Array.isArray(payload)) {
         return null;
@@ -445,15 +434,7 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
         });
       }
 
-      const body = {
-        skills: enrichedSkills,
-        externalSkills: {
-          claudeDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE)
-            || isEnvFlagEnabled(process.env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS),
-          allDisabled: isEnvFlagEnabled(process.env.OPENCODE_DISABLE_EXTERNAL_SKILLS),
-        },
-      };
-      res.json(openCodeSkills === null ? { ...body, openCodeSkillsUnavailable: true } : body);
+      res.json(buildSkillListResponse(enrichedSkills, getManagedOpenCodeProcessEnv(), openCodeSkills === null));
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });
@@ -789,8 +770,8 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
       if (error) {
         return res.status(400).json({ error });
       }
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
-        .find((skill) => skill.name === skillName) || null;
+      const discoveredSkill = await withSkillBody(((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
+        .find((skill) => skill.name === skillName) || null, openCodeClient(directory));
       const sources = await getSkillSources(skillName, directory, discoveredSkill);
 
       res.json({

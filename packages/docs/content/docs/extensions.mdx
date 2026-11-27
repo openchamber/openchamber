@@ -33,7 +33,9 @@ A folder install runs straight from that folder, so someone developing an extens
 
 SSH installs accept `git@github.com:owner/extension.git` and `ssh://git@github.com/owner/extension.git`, with an optional `#branch-or-tag`. Choose Global Identity or a saved Git identity from the fingerprint menu beside the install field. The selection is kept for update checks and updates; changing that identity's key applies to the next operation.
 
-Global Identity uses the Git/SSH configuration and SSH agent of the user running the selected OpenChamber server. On a remote instance, the key must be available there. Unlock passphrase-protected keys in that server process's SSH agent first. HTTPS URLs use Git's HTTPS credentials rather than automatically switching to SSH. Git hosts must resolve to public addresses; local SSH host aliases and private-network targets are not supported.
+Global Identity uses the Git/SSH configuration and SSH agent of the user running the selected OpenChamber server. On a remote instance, the key must be available there. Unlock passphrase-protected keys in that server process's SSH agent first. HTTPS URLs use Git's HTTPS credentials rather than automatically switching to SSH. Private-network Git hosts and local SSH host aliases from `~/.ssh/config` are supported.
+
+A Git identity whose sign-in is set to Account uses that connected account for HTTPS installs, update checks and updates, so a private repository on that host needs no SSH key or Git credential helper on the server. If the account is disconnected, the install fails; it never falls back to the server's own Git credentials.
 
 ## What an extension may do
 

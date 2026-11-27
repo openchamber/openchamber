@@ -2,12 +2,15 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import express from 'express';
+import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { injectedEnvKeys } from '../injected-env.js';
 
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
+const execFileMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
@@ -15,15 +18,16 @@ vi.mock('node:child_process', () => ({
   spawnSync: spawnSyncMock,
   // `managed-process-registry.js` (imported transitively via lifecycle.js)
   // calls `promisify(execFile)` at module load, so the mock must expose a
-  // function here. Lifecycle tests don't exercise the reaper path, so a plain
-  // stub is enough; the registry's best-effort writes are no-ops on errors.
-  execFile: vi.fn(),
+  // function here. Lifecycle tests don't exercise the reaper path; the
+  // registry's best-effort writes are no-ops on errors.
+  execFile: execFileMock,
 }));
 vi.mock('../diagnostics/startup-performance.js', () => ({
   recordStartupPerformance: recordStartupPerformanceMock,
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { registerSettingsUtilityRoutes } = await import('../server-frame/core-routes.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
@@ -33,6 +37,7 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   spawnMock.mockReset();
   spawnSyncMock.mockReset();
+  execFileMock.mockReset();
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
@@ -453,11 +458,9 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const warmups = fetchMock.mock.calls
-      .filter(([url]) => String(url).endsWith('/api/location'))
-      .map(([url, init]) => [String(url), init.headers['x-opencode-directory']]);
+    const warmupCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/location'));
+    await expect.poll(() => warmupCalls().length).toBe(1);
+    const warmups = warmupCalls().map(([url, init]) => [String(url), init.headers['x-opencode-directory']]);
     // Each warmed directory boots its whole MCP fleet on OpenCode 2 (#4018).
     // v2 reads the directory from the header, and only location routes start
     // one: `/api/session` is a global list.
@@ -465,7 +468,7 @@ describe('OpenCode lifecycle', () => {
       ['http://127.0.0.1:45678/api/location', encodeURIComponent(lastUsed)],
     ]);
     // Server-side reads without a directory of their own go to the warmed one.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(lastUsed);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(lastUsed);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -490,20 +493,20 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 100));
     // While the directory is usable, it scopes default reads.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(stale);
 
     // The project directory is removed while the server keeps running. The
     // cached default must not keep being handed to OpenCode: a stale path
     // makes every directory-scoped read answer 500 (the bug behind the quota
     // endpoints' "UnexpectedStatus: 500").
     await fs.rm(stale, { recursive: true, force: true });
-    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
 
     // A path that now points at a regular file is not a directory either.
     await fs.writeFile(stale, 'x');
-    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -535,14 +538,13 @@ describe('OpenCode lifecycle', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     // No project: a read without a directory would start OpenCode over the
     // whole home, its working directory.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(chats);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(chats);
     expect(globalThis.fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/location'))).toEqual([]);
 
     // A project opened later takes over once the warmup source names it.
     warmup = [project];
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(project);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(project);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -571,15 +573,14 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(leftChat);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(leftChat);
 
-    runtime.noteCurrentDirectory(current);
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(current);
+    await runtime.noteCurrentDirectory(current);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(current);
 
     // A directory that is not there is never sent.
-    runtime.noteCurrentDirectory(path.join(root, 'missing'));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(current);
+    await runtime.noteCurrentDirectory(path.join(root, 'missing'));
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(current);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -607,13 +608,13 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(stale);
 
     // Removing the first still leaves a valid directory: default reads keep
     // their location scope rather than dropping it entirely.
     await fs.rm(stale, { recursive: true, force: true });
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(surviving);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(surviving);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -643,17 +644,17 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+    // Polling the getter before the warm pass ends would start the refresh cooldown.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBe(stale);
 
     // The user navigated to another project while the old one vanished.
     await fs.rm(stale, { recursive: true, force: true });
     current = navigated;
     // First read drops the stale default and kicks the refresh; the next read
     // sees the re-resolved, currently-valid directory and scopes to it.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(navigated);
+    expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(navigated);
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -680,14 +681,13 @@ describe('OpenCode lifecycle', () => {
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe(locked);
+    await expect.poll(() => runtime.getDefaultOpenCodeDirectory()).toBe(locked);
 
     // OpenCode answers 500 FileSystem.realPath for a directory it cannot read
     // or traverse, same as for a missing one, so it must not be sent.
     await fs.chmod(locked, 0o000);
     try {
-      expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+      expect(await runtime.getDefaultOpenCodeDirectory()).toBeNull();
     } finally {
       await fs.chmod(locked, 0o755);
       await fs.rm(root, { recursive: true, force: true });
@@ -1646,59 +1646,56 @@ describe('killProcessOnPort on Windows', () => {
     Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   };
 
-  it('force-kills the process listening on the target port via taskkill', () => {
+  const answerNetstat = (stdout) => execFileMock.mockImplementation((command, _args, _options, done) => {
+    done(null, command.endsWith('NETSTAT.EXE') ? stdout : '');
+  });
+  const killedPids = () => execFileMock.mock.calls
+    .filter(([command]) => command.endsWith('taskkill.exe'))
+    .map(([, args]) => args);
+
+  it('stops only the processes listening on the port, on any Windows language', async () => {
     setPlatform('win32');
-    const orphanPid = 54321;
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${orphanPid}\r\n` };
-      }
-      return { stdout: '' };
-    });
+    answerNetstat([
+      '  Proto  Lokale Adresse         Remoteadresse          Status           PID',
+      '  TCP    127.0.0.1:45678        0.0.0.0:0              ABHÖREN         54321',
+      '  TCP    [::1]:45678            [::]:0                 ABHÖREN         54322',
+      '  TCP    0.0.0.0:45678          0.0.0.0:0              ABHÖREN         54321',
+      '  TCP    0.0.0.0:456780         0.0.0.0:0              ABHÖREN         1',
+      '  TCP    0.0.0.0:5678           0.0.0.0:0              ABHÖREN         2',
+      '  TCP    127.0.0.1:45678        127.0.0.1:60001        HERGESTELLT     3',
+      '  TCP    127.0.0.1:60001        127.0.0.1:45678        HERGESTELLT     4',
+      '  TCP    127.0.0.1:45678        127.0.0.1:60002        WARTEND         0',
+      '  UDP    0.0.0.0:45678          *:*                                    5',
+      `  TCP    0.0.0.0:45678          0.0.0.0:0              ABHÖREN         ${process.pid}`,
+    ].join('\r\n'));
 
-    const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    await createRuntime().killProcessOnPort(45678);
 
-    expect(spawnSyncMock).toHaveBeenCalledWith(
-      'powershell',
-      expect.arrayContaining([expect.stringContaining('-LocalPort 45678')]),
-      expect.objectContaining({ windowsHide: true })
-    );
-    expect(spawnSyncMock).toHaveBeenCalledWith(
-      'taskkill',
-      ['/PID', String(orphanPid), '/F'],
-      expect.objectContaining({ windowsHide: true })
-    );
+    expect(killedPids()).toEqual([['/PID', '54321', '/F'], ['/PID', '54322', '/F']]);
   });
 
-  it('never force-kills its own process id', () => {
+  it('stops a listener once when a quit joins a restart', async () => {
     setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: `${process.pid}\r\n` };
-      }
-      return { stdout: '' };
+    const replies = [];
+    execFileMock.mockImplementation((command, _args, _options, done) => {
+      if (command.endsWith('NETSTAT.EXE')) replies.push(done);
+      else done(null, '');
     });
-
     const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    const cleanups = [runtime.killProcessOnPort(45678), runtime.killProcessOnPort(45678)];
+    for (const reply of replies) reply(null, '  TCP    127.0.0.1:45678   0.0.0.0:0   LISTENING   54321\r\n');
+    await Promise.all(cleanups);
 
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(killedPids()).toEqual([['/PID', '54321', '/F']]);
   });
 
-  it('does nothing when no process is listening on the target port', () => {
+  it('stops nothing when the listeners cannot be read', async () => {
     setPlatform('win32');
-    spawnSyncMock.mockImplementation((cmd) => {
-      if (cmd === 'powershell') {
-        return { stdout: '' };
-      }
-      return { stdout: '' };
-    });
+    execFileMock.mockImplementation((_command, _args, _options, done) => done(new Error('timed out'), ''));
 
-    const runtime = createRuntime();
-    runtime.killProcessOnPort(45678);
+    await createRuntime().killProcessOnPort(45678);
 
-    expect(spawnSyncMock).not.toHaveBeenCalledWith('taskkill', expect.anything(), expect.anything());
+    expect(killedPids()).toEqual([]);
   });
 });
 
@@ -1747,4 +1744,182 @@ it('a rejected CLI preflight never permits desktop bootstrap', async () => {
   await expect(runtime.startOpenCode()).rejects.toThrow('Unsupported CLI');
   expect(await runtime.getManagedOpenCodePreflight()).toBe(false);
   expect(spawnMock).not.toHaveBeenCalled();
+});
+
+describe('OpenCode lifecycle shared-service restart outcome', () => {
+  const sharedServiceEnv = { ENV_EFFECTIVE_PORT: null };
+
+  const createSharedService = (connect) => ({
+    isEnabled: vi.fn(async () => true),
+    connect: vi.fn(connect),
+  });
+
+  const sharedEndpoint = (replaced) => ({ origin: 'http://127.0.0.1:49374', port: 49374, password: null, replaced });
+
+  const createRetryingRuntime = async (overrides = {}, envOverrides = {}) => {
+    vi.useFakeTimers();
+    try {
+      const runtime = createRuntime({
+        syncFromHmrState: vi.fn(() => { throw new Error('listener unavailable'); }),
+        reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+        ...overrides,
+      }, {}, envOverrides);
+      const retryRun = Promise.withResolvers();
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(() => retryRun.promise, vi.fn());
+      await vi.advanceTimersByTimeAsync(5_000);
+      return { runtime, retryRun };
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  it('resolves a shared-service restart with the replacement that call performed', async () => {
+    const runtime = createRuntime(
+      { sharedService: createSharedService(async () => sharedEndpoint(true)) },
+      {},
+      sharedServiceEnv,
+    );
+
+    await expect(runtime.restartOpenCode('shared-attach')).resolves.toBe(true);
+  });
+
+  it('resolves a shared-service restart that reused the running service with replaced false', async () => {
+    const runtime = createRuntime(
+      { sharedService: createSharedService(async () => sharedEndpoint(false)) },
+      {},
+      sharedServiceEnv,
+    );
+
+    await expect(runtime.restartOpenCode('shared-attach')).resolves.toBe(false);
+  });
+
+  it('does not carry an earlier shared-service replacement into a later managed restart', async () => {
+    let sharedEnabled = true;
+    const runtime = createRuntime(
+      {
+        sharedService: {
+          isEnabled: vi.fn(async () => sharedEnabled),
+          connect: vi.fn(async () => sharedEndpoint(true)),
+        },
+      },
+      {},
+      sharedServiceEnv,
+    );
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.4.1', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+
+    await runtime.refreshOpenCodeAfterConfigChange('enable-shared');
+    expect(runtime.testState.isExternalOpenCode).toBe(true);
+
+    sharedEnabled = false;
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+
+    await expect(runtime.restartOpenCode('disable-shared')).resolves.toBe(false);
+  });
+
+  it.each([
+    ['replaced', true, { success: true, requiresReload: true }],
+    ['reused', false, { success: true, requiresReload: false, requiresManualRestart: true }],
+  ])('answers two reloads waiting on one bootstrap retry from the single restart that %s the service', async (_name, replaced, answer) => {
+    const gate = Promise.withResolvers();
+    const connect = vi.fn()
+      .mockImplementationOnce(async () => { await gate.promise; return sharedEndpoint(replaced); })
+      .mockImplementation(async () => { await gate.promise; return sharedEndpoint(!replaced); });
+    const applyOpencodeBinaryFromSettings = vi.fn(async () => null);
+    const { runtime, retryRun } = await createRetryingRuntime(
+      { sharedService: createSharedService(connect), applyOpencodeBinaryFromSettings },
+      sharedServiceEnv,
+    );
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.4.1', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    // The retry attaches the shared service before it waits for readiness.
+    runtime.testState.isExternalOpenCode = true;
+    runtime.testState.openCodePort = 49374;
+
+    const app = express();
+    registerSettingsUtilityRoutes(app, {
+      refreshOpenCodeAfterConfigChange: runtime.refreshOpenCodeAfterConfigChange,
+      clientReloadDelayMs: 800,
+    });
+    const reloads = Promise.all([
+      request(app).post('/api/config/reload'),
+      request(app).post('/api/config/reload'),
+    ]);
+    await vi.waitFor(() => expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(2));
+    expect(connect).not.toHaveBeenCalled();
+
+    retryRun.resolve();
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled());
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runtime.testState.currentRestartPromise).not.toBeNull();
+    gate.resolve();
+
+    const [first, second] = await reloads;
+    expect(first.body).toMatchObject(answer);
+    expect(second.body).toMatchObject(answer);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(runtime.testState.currentRestartPromise).toBeNull();
+  });
+
+  it('runs a whileStopped task in its own restart after a reload claimed the slot first', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false, json: async () => null }));
+    const { runtime, retryRun } = await createRetryingRuntime();
+    const reload = runtime.restartOpenCode();
+    const spawnsAtTask = [];
+    const upgrade = runtime.restartOpenCode('opencode-upgrade', {
+      whileStopped: async () => { spawnsAtTask.push(spawnMock.mock.calls.length); },
+    });
+
+    retryRun.resolve();
+    await Promise.all([reload, upgrade]);
+
+    expect(spawnsAtTask).toEqual([1]);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    await runtime.testState.openCodeProcess.close();
+  });
+
+  it('runs an upgrade that waited while the shared service was turned on, once the managed server is stopped', async () => {
+    const connect = vi.fn(async () => sharedEndpoint(false));
+    const { runtime, retryRun } = await createRetryingRuntime({ sharedService: createSharedService(connect) }, sharedServiceEnv);
+    const close = vi.fn(async () => {});
+    runtime.testState.openCodeProcess = { close };
+    runtime.testState.openCodePort = 45678;
+    const whileStopped = vi.fn(async () => {
+      expect(close).toHaveBeenCalledTimes(1);
+      throw new Error('upgrade failed');
+    });
+    const upgrade = runtime.restartOpenCode('opencode-upgrade', { whileStopped });
+
+    retryRun.resolve();
+
+    await expect(upgrade).rejects.toThrow('upgrade failed');
+    expect(whileStopped).toHaveBeenCalledTimes(1);
+    expect(runtime.testState).toMatchObject({ isExternalOpenCode: true, openCodePort: 49374, openCodeProcess: null });
+  });
+
+  it('does not report an upgrade done when OpenCode became external while it waited', async () => {
+    const { runtime, retryRun } = await createRetryingRuntime();
+    const whileStopped = vi.fn(async () => {});
+    const upgrade = runtime.restartOpenCode('opencode-upgrade', { whileStopped });
+
+    runtime.testState.isExternalOpenCode = true;
+    retryRun.resolve();
+
+    await expect(upgrade).rejects.toThrow('An external OpenCode server cannot be stopped');
+    expect(whileStopped).not.toHaveBeenCalled();
+  });
 });

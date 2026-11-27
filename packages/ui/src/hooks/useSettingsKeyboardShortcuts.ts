@@ -5,7 +5,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { getEffectiveShortcutCombo, ShortcutDispatcher, shortcutRegistry } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 import { useKeybind } from './useKeybind';
-import { hasOpenDropdown, isEditableEventTarget } from './keyboard-shortcut-dom';
+import { hasOpenDropdown, isEditableEventTarget, typesOutsidePrefixField } from './keyboard-shortcut-dom';
 
 export const handleSettingsShortcut = (): boolean | void => {
   const state = useUIStore.getState();
@@ -27,10 +27,12 @@ export const useSettingsKeyboardShortcuts = (): void => {
   const dispatcher = dispatcherRef.current;
 
   React.useEffect(() => {
+    const handlePrefixPress = (event: PointerEvent) => {
+      if (isEditableEventTarget(event.target)) dispatcher.clear();
+    };
     const handlePrefix = (event: KeyboardEvent) => {
       if (!dispatcher.hasActivePrefix()) return;
-      if (!event.ctrlKey && !event.metaKey && !event.altKey
-        && isEditableEventTarget(event.target) && dispatcher.getActivePrefixTarget() !== event.target) {
+      if (typesOutsidePrefixField(event, dispatcher.getActivePrefixTarget())) {
         dispatcher.clear();
         return;
       }
@@ -53,10 +55,12 @@ export const useSettingsKeyboardShortcuts = (): void => {
     };
     const handleBlur = () => dispatcher.handleBlur();
     window.addEventListener('keydown', handlePrefix, true);
+    window.addEventListener('pointerdown', handlePrefixPress, true);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handlePrefix, true);
+      window.removeEventListener('pointerdown', handlePrefixPress, true);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('blur', handleBlur);
     };

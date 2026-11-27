@@ -40,6 +40,7 @@ import { createDockerDisk } from './docker-disk.js';
 import type { ImagePullState } from './docker-disk.js';
 import { createDockerTools } from './docker-tools.js';
 import { parseDockerJson } from './docker-wire.js';
+import type { SshConnections } from './ssh-connections.js';
 import type { DockerContainer, DockerContainerSettings, DockerListedEntry, DockerResourceKind, DockerServerVersion } from './docker-wire.js';
 
 const DOCKER_PLACE_ID = 'docker';
@@ -51,6 +52,8 @@ export const RETIRED_SPACE_BASE_IMAGES = ['node@sha256:dd5847a04b0deee391fa145f1
 const CHECK_TIMEOUT_MS = 10_000;
 const PULL_TIMEOUT_MS = 20 * 60_000;
 const EXEC_TIMEOUT_MS = 60_000;
+const STREAM_EXIT_GRACE_MS = 2_000;
+const NO_LEASE = { path: null, release: () => {} };
 const HOST_ISOLATION_MIN_ENGINE = 28;
 const REMOTE_DAEMON_DOWN = /Cannot connect to the Docker daemon|Is the docker daemon running/i;
 const REMOTE_DOCKER_MISSING = /docker: (?:command )?not found|No such file or directory/i;
@@ -86,6 +89,7 @@ export interface DockerPlaceOptions {
   openCommandStream?: typeof openCommandStreamProcess;
   dockerPath: string;
   dockerHost?: string | null;
+  connections?: SshConnections | null;
   id?: string;
   colimaPath?: string | null;
   owner: string;
@@ -115,10 +119,10 @@ function execRole(target: string | undefined) {
   throw new SpaceError('invalid_exec_target', `A command runs in the space or in its gatekeeper, not in '${target}'`);
 }
 
-export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, dockerHost = null, id = DOCKER_PLACE_ID, colimaPath = null, owner, toolsSource, wait = pause, now = () => new Date() }: DockerPlaceOptions) {
+export function createDockerPlace({ runCommand, openCommandStream = openCommandStreamProcess, dockerPath, dockerHost = null, connections = null, id = DOCKER_PLACE_ID, colimaPath = null, owner, toolsSource, wait = pause, now = () => new Date() }: DockerPlaceOptions) {
   requireOwner(owner);
 
-  const engine = createDockerEngine({ runCommand, dockerPath, dockerHost });
+  const engine = createDockerEngine({ runCommand, dockerPath, dockerHost, connections });
   const machine = dockerHost === null ? null : machineOf(dockerHost);
   const { run, docker, inspect, removeOne, removeStoppedContainer } = engine;
   const tools = createDockerTools({ engine, owner, toolsSource, image: SPACE_BASE_IMAGE, now, wait });
@@ -127,18 +131,29 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   const imagePullState = (): ImagePullState => ({ pulling: imagePull !== null, failure: imagePullFailure });
   const disk = createDockerDisk({ engine, runCommand, colimaPath, owner, image: SPACE_BASE_IMAGE, retiredImages: RETIRED_SPACE_BASE_IMAGES, tools, imagePullState });
 
+  const leaseConnection = async (spaceId: string | null) => (connections === null ? NO_LEASE : connections.lease(spaceId));
+
   const findResources = async (spaceId: string | null) => {
     const filters = labelFilterArgs({ owner, spaceId });
-    const resources: SpaceResource[] = [];
-    for (const kind of KINDS) {
+    const find = async (kind: typeof KINDS[number]) => {
+      const resources: SpaceResource[] = [];
       for (const entry of await engine.findByLabel(kind, filters)) {
         const labels = parseSpaceLabels(entryLabels(kind, entry));
         if (labels && labels.owner === owner && (spaceId === null || labels.id === spaceId)) {
           resources.push({ kind, name: entryName(entry), labels, entry });
         }
       }
+      return resources;
+    };
+    const lease = await leaseConnection(null);
+    try {
+      if (lease.path !== null) return (await Promise.all(KINDS.map(find))).flat();
+      const found: SpaceResource[] = [];
+      for (const kind of KINDS) found.push(...(await find(kind)));
+      return found;
+    } finally {
+      lease.release();
     }
-    return resources;
   };
 
   const ownLabelsOf = (spaceId: string, name: string, entry: DockerContainer) => {
@@ -319,7 +334,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     if (options.maxOutputBytes !== undefined) commandOptions.maxOutputBytes = options.maxOutputBytes;
     if (options.keepTail === true) commandOptions.keepTail = true;
     if (options.killTree === true) commandOptions.killTree = true;
-    return run(args, timeoutMs, commandOptions);
+    return run(args, timeoutMs, commandOptions, spaceId);
   };
 
   const server = createSpaceServerChannel({ exec: execInContainer, wait, now: () => now().getTime() });
@@ -489,17 +504,35 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return execInContainer(spaceId, argv, options);
   };
 
-  const execArgv = async (spaceId: string): Promise<[string, ...string[]]> => {
+  const requireRunning = async (spaceId: string) => {
     const entry = await requireSpaceContainer(spaceId);
     if (entry.State?.Running !== true) {
       throw new SpaceError('space_not_running', `Space ${spaceId} is stopped. Start it, then try again.`);
     }
-    return [dockerPath, ...engine.argsFor(['exec', '--interactive', '--user', SPACE_USER, spaceResourceName(spaceId, ROLE_SPACE)])];
+  };
+
+  const execArgs = (spaceId: string) => engine.argsFor(['exec', '--interactive', '--user', SPACE_USER, spaceResourceName(spaceId, ROLE_SPACE)]);
+
+  const execArgv = async (spaceId: string): Promise<[string, ...string[]]> => {
+    await requireRunning(spaceId);
+    return [dockerPath, ...execArgs(spaceId)];
   };
 
   const connect = async (spaceId: string) => {
-    const [file, ...args] = await execArgv(spaceId);
-    return openCommandStream(file, [...args, ...SPACE_CONNECT_COMMAND]);
+    await requireRunning(spaceId);
+    const args = [...execArgs(spaceId), ...SPACE_CONNECT_COMMAND];
+    const lease = await leaseConnection(spaceId);
+    if (lease.path === null) return openCommandStream(dockerPath, args);
+    try {
+      return openCommandStream(dockerPath, args, {
+        env: { ...process.env, PATH: lease.path },
+        exitGraceMs: STREAM_EXIT_GRACE_MS,
+        onExit: ({ clean }) => lease.release({ killed: !clean }),
+      });
+    } catch (error) {
+      lease.release();
+      throw error;
+    }
   };
 
   const stop = async (spaceId: string) => {
@@ -619,5 +652,5 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return started;
   };
 
-  return { id, machine, check, create, list, exec, execArgv, connect, stop, start, remove, verify, readDisk: disk.read, cleanUpDisk: disk.cleanUp, pullImage, imagePulling: () => imagePull !== null };
+  return { id, machine, check, create, list, exec, execArgv, connect, stop, start, remove, verify, readDisk: disk.read, cleanUpDisk: disk.cleanUp, pullImage, imagePulling: () => imagePull !== null, close: () => connections?.close() };
 }

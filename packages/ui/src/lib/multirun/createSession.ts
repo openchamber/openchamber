@@ -25,6 +25,7 @@ export async function createMultiRunSession(
     const result = await requestSessionMetadataUpdate(
       session.id,
       multiRunMembershipPatch({ ...membership, sessionID: session.id }),
+      input.directory,
     );
     assertCurrent();
     if (result.outcome !== 'updated') throw new Error(`Multi-run membership was not saved: ${result.reason}`);

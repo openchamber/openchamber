@@ -154,7 +154,7 @@ describe('session assist runtime', () => {
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       isSessionArchived: async () => false,
       getSmallModelService: async () => ({
-        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        describeSmallModel: async () => ({ inputCharBudget: 20_000, inputTokenCap: null }),
         generateSmallModelText: async () => ({ text: '{"recap":"Did the thing.","suggestion":"Verify it."}' }),
       }),
     });
@@ -203,7 +203,7 @@ describe('session assist runtime', () => {
         buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
         onPendingChange: (change) => changes.push(change),
         getSmallModelService: async () => ({
-          describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+          describeSmallModel: async () => ({ inputCharBudget: 20_000, inputTokenCap: null }),
           generateSmallModelText: async () => ({ text: '{"recap":"Did the thing.","suggestion":"Verify it."}' }),
         }),
         ...overrides,
@@ -250,7 +250,7 @@ describe('session assist runtime', () => {
       serveSession();
       const { runtime, changes, persistSessionAssist, finished } = run({
         getSmallModelService: async () => ({
-          describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+          describeSmallModel: async () => ({ inputCharBudget: 20_000, inputTokenCap: null }),
           generateSmallModelText: async () => { throw new Error('provider down'); },
         }),
       });
@@ -307,7 +307,7 @@ describe('session assist runtime', () => {
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       isSessionArchived,
       getSmallModelService: async () => ({
-        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        describeSmallModel: async () => ({ inputCharBudget: 20_000, inputTokenCap: null }),
         generateSmallModelText: async () => ({ text: '{"recap":"Did the thing.","suggestion":"Verify it."}' }),
       }),
     });
@@ -345,7 +345,7 @@ describe('session assist runtime', () => {
       else throw new Error(`unexpected ${url.pathname}`);
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
     }));
-    const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, ...described }));
+    const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, inputTokenCap: null, ...described }));
     const generateSmallModelText = vi.fn(async () => ({ text: '{"recap":"Did the thing.","suggestion":""}' }));
     const { runtime, finished } = makeRuntime({
       persistSessionAssist,
@@ -381,7 +381,7 @@ describe('session assist runtime', () => {
     }));
     // The reporter's setup: a loopback OpenAI-compatible proxy forwarding to a
     // hosted vendor, so the endpoint looks local to `isLocalModelEndpoint`.
-    const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, providerID: 'cpa', modelID: 'm', source: 'session-model', localEndpoint: true }));
+    const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, inputTokenCap: null, providerID: 'cpa', modelID: 'm', source: 'session-model', localEndpoint: true }));
     const generateSmallModelText = vi.fn(async () => ({ text: '{"recap":"Did the thing.","suggestion":""}' }));
     const { runtime, finished } = makeRuntime({
       persistSessionAssist,
@@ -494,7 +494,7 @@ describe('session assist runtime', () => {
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       getSmallModelService: async () => ({
-        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        describeSmallModel: async () => ({ inputCharBudget: 20_000, inputTokenCap: null }),
         generateSmallModelText: async () => { throw failure; },
       }),
     });
@@ -535,7 +535,7 @@ describe('session assist runtime', () => {
       persistSessionAssist,
       buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
       getSmallModelService: async () => ({
-        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        describeSmallModel: async () => ({ inputCharBudget: 20_000, inputTokenCap: null }),
         generateSmallModelText: async () => {
           throw { _tag: 'ProviderAuthError', message: 'provider rejected the key\nretry later' };
         },

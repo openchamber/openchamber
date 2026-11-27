@@ -6,9 +6,12 @@ import type { LeadBriefStore } from './brief-store.js';
 import type { SessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 import type { LeadDigest } from './metadata.js';
+import type { QuietCompaction } from '../event-stream/quiet-compaction.js';
 
-export const SLEEP_COMPACTION_MIN_TOKENS = 100_000;
-const DEFAULT_CACHE_LIFETIME_MS = 5 * 60 * 1000;
+export const SLEEP_COMPACTION_MIN_TOKENS = 200_000;
+const SLEEP_COMPACTION_WINDOW_SHARE = 0.75;
+const DEFAULT_CACHE_LIFETIME_MS = 60 * 60 * 1000;
+const CLAUDE_CACHE_LIFETIME_MS = 5 * 60 * 1000;
 const AFTER_CACHE_MS = 30 * 1000;
 const READ_TIMEOUT_MS = 10 * 1000;
 const PENDING_TTL_MS = 2 * 60 * 1000;
@@ -19,15 +22,26 @@ export interface LeadChild {
   status?: { type: string } | undefined;
 }
 
+export interface LeadModel {
+  id: string;
+  providerID: string;
+  family: string | null;
+  modelID: string | null;
+  cacheLifetimeMs: number | null;
+  window: number | null;
+}
+
 export interface SessionLeadRuntimeOptions {
   briefs: Pick<LeadBriefStore, 'read' | 'remove'>;
   readSessionMetadata: (sessionId: string, options: { directory: string }) => Promise<SessionMetadata | null | undefined>;
   buildOpenCodeUrl: (route: string, directory: string) => string | URL;
   getOpenCodeAuthHeaders: () => Record<string, string>;
-  readCacheLifetime: (sessionId: string, directory: string) => Promise<number | null>;
+  readModel: (sessionId: string, directory: string) => Promise<LeadModel | null>;
   isSessionWarm?: ((sessionId: string, cacheLifetimeMs: number) => boolean) | undefined;
   listChildren: (sessionId: string) => Promise<LeadChild[]>;
+  listLeads: () => Promise<{ id: string; directory: string }[]>;
   clearInherited: (sessionId: string, parentId: string, directory: string) => Promise<{ changed: boolean }>;
+  quiet?: Pick<QuietCompaction, 'mark' | 'unmark'> | undefined;
   fetchImpl?: typeof fetch;
   now?: () => number;
   setTimer?: typeof setTimeout;
@@ -52,9 +66,20 @@ const tokensSchema = z.object({
   reasoning: z.number().catch(0),
   cache: z.object({ read: z.number().catch(0), write: z.number().catch(0) }).catch({ read: 0, write: 0 }),
 });
-const contextSchema = z.array(z.object({ type: z.string(), tokens: tokensSchema.optional() }).passthrough());
+const timeSchema = z.object({ created: z.number().optional().catch(undefined), completed: z.number().optional().catch(undefined) });
+const contextSchema = z.array(z.object({ type: z.string(), tokens: tokensSchema.optional(), time: timeSchema.optional().catch(undefined) }).passthrough());
 const activeSchema = z.record(z.string(), z.unknown());
 const revertSchema = z.object({ revert: z.unknown().optional() });
+
+const sleepLifetime = (model: LeadModel | null) => {
+  if (model?.cacheLifetimeMs) return model.cacheLifetimeMs;
+  const isClaude = model !== null && (model.providerID === 'claude-agent' || [model.id, model.family, model.modelID].some((name) => name?.includes('claude')));
+  return isClaude ? CLAUDE_CACHE_LIFETIME_MS : DEFAULT_CACHE_LIFETIME_MS;
+};
+
+const sleepThreshold = (window: number | null) => (
+  window === null ? SLEEP_COMPACTION_MIN_TOKENS : Math.min(SLEEP_COMPACTION_MIN_TOKENS, window * SLEEP_COMPACTION_WINDOW_SHARE)
+);
 
 const formatList = (items: readonly string[]) => items.map((item) => `- ${item}`).join('\n');
 
@@ -87,10 +112,12 @@ export const createSessionLeadRuntime = ({
   readSessionMetadata,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  readCacheLifetime,
+  readModel,
   isSessionWarm,
   listChildren,
+  listLeads,
   clearInherited,
+  quiet,
   fetchImpl = fetch,
   now = Date.now,
   setTimer = setTimeout,
@@ -100,13 +127,14 @@ export const createSessionLeadRuntime = ({
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const generations = new Map<string, number>();
   const pending = new Map<string, { at: number; digest: LeadDigest | undefined }>();
+  const idles = new Map<string, number>();
 
   const nextGeneration = (sessionId: string) => {
     const generation = (generations.get(sessionId) ?? 0) + 1;
     generations.set(sessionId, generation);
     return generation;
   };
-  const isCurrent = (sessionId: string, generation: number) => generations.get(sessionId) === generation;
+  const isCurrent = (sessionId: string, generation: number) => (generations.get(sessionId) ?? 0) === generation;
 
   const cancel = (sessionId: string) => {
     const timer = timers.get(sessionId);
@@ -133,15 +161,15 @@ export const createSessionLeadRuntime = ({
     return unwrapOpenCodeResponse(await response.json());
   };
 
-  const contextTokens = async (sessionId: string, directory: string) => {
+  const lastTurn = async (sessionId: string, directory: string) => {
     const messages = contextSchema.parse(await request(`/api/session/${encodeURIComponent(sessionId)}/context`, directory));
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message?.type !== 'assistant' || !message.tokens) continue;
-      const { input, output, reasoning, cache } = message.tokens;
-      return input + output + reasoning + cache.read + cache.write;
-    }
-    return 0;
+    const answers = messages.filter((message) => message.type === 'assistant');
+    const latest = answers.at(-1);
+    const measured = answers.findLast((message) => message.tokens)?.tokens;
+    return {
+      tokens: measured ? measured.input + measured.output + measured.reasoning + measured.cache.read + measured.cache.write : 0,
+      endedAt: latest?.time?.completed ?? latest?.time?.created ?? null,
+    };
   };
 
   const isBusy = async (sessionId: string) => Boolean(activeSchema.parse(await request('/api/session/active', ''))[sessionId]);
@@ -150,7 +178,8 @@ export const createSessionLeadRuntime = ({
   );
 
   const sleep = async (sessionId: string, directory: string, cacheLifetimeMs: number, generation: number) => {
-    if (await contextTokens(sessionId, directory) < SLEEP_COMPACTION_MIN_TOKENS) return;
+    const model = await readModel(sessionId, directory).catch(() => null);
+    if ((await lastTurn(sessionId, directory)).tokens < sleepThreshold(model?.window ?? null)) return;
     if (!isCurrent(sessionId, generation) || isSessionWarm?.(sessionId, cacheLifetimeMs)) return;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }));
     if (!lead) return;
@@ -159,29 +188,52 @@ export const createSessionLeadRuntime = ({
       return false;
     });
     if (await hasStagedRevert(sessionId, directory) || await isBusy(sessionId)) return;
-    if (!isCurrent(sessionId, generation)) return;
+    await quiet?.mark(sessionId);
+    if (!isCurrent(sessionId, generation)) {
+      quiet?.unmark(sessionId);
+      return;
+    }
     if (hasBrief) pending.set(sessionId, { at: now(), digest: lead.digest });
     try {
       await request(`/api/session/${encodeURIComponent(sessionId)}/compact`, directory, { method: 'POST', body: JSON.stringify({}) });
     } catch (error) {
       pending.delete(sessionId);
+      quiet?.unmark(sessionId);
       throw error;
     }
   };
 
-  const arm = async (sessionId: string, directory: string) => {
-    cancel(sessionId);
-    const generation = generations.get(sessionId) ?? 0;
+  const arm = async (sessionId: string, directory: string, idleSince: () => Promise<number>) => {
+    const seen = generations.get(sessionId) ?? 0;
     const lead = readLead(await readSessionMetadata(sessionId, { directory }).catch(() => undefined));
     if (!lead) return;
-    const lifetime = await readCacheLifetime(sessionId, directory).catch(() => null) ?? DEFAULT_CACHE_LIFETIME_MS;
-    if (!isCurrent(sessionId, generation)) return;
+    const lifetime = sleepLifetime(await readModel(sessionId, directory).catch(() => null));
+    const idleAt = await idleSince();
+    if (!isCurrent(sessionId, seen)) return;
+    cancel(sessionId);
+    const generation = generations.get(sessionId) ?? 0;
     timers.set(sessionId, setTimer(() => {
       timers.delete(sessionId);
       if (!isCurrent(sessionId, generation)) return;
       return sleep(sessionId, directory, lifetime, generation)
         .catch((error) => warn('[session-lead] sleep compaction failed:', error instanceof Error ? error.message : String(error)));
-    }, lifetime + AFTER_CACHE_MS));
+    }, Math.max(0, idleAt + lifetime + AFTER_CACHE_MS - now())));
+  };
+
+  const resumeSleep = async () => {
+    const leads = await listLeads().catch((error: Error) => {
+      warn('[session-lead] could not list leads to resume sleep compaction:', error.message);
+      return [];
+    });
+    for (const { id, directory } of leads) {
+      const idleSince = async () => {
+        const turn = await lastTurn(id, directory).catch(() => null);
+        if (!turn) return now();
+        const latest = Math.max(turn.endedAt ?? -Infinity, idles.get(id) ?? -Infinity);
+        return Number.isFinite(latest) ? latest : now();
+      };
+      void arm(id, directory, idleSince);
+    }
   };
 
   const processPayload = (payload: TranslatedEvent, directory: string) => {
@@ -196,7 +248,7 @@ export const createSessionLeadRuntime = ({
     }
     if (event.data.type === 'session.deleted') {
       cancel(sessionID);
-      generations.delete(sessionID);
+      idles.delete(sessionID);
       pending.delete(sessionID);
       void briefs.remove(sessionID).catch((error) => warn('[session-lead] could not remove a deleted lead\'s brief:', error instanceof Error ? error.message : String(error)));
       return;
@@ -205,7 +257,9 @@ export const createSessionLeadRuntime = ({
       if (status?.type === 'busy' || status?.type === 'retry') cancel(sessionID);
       return;
     }
-    void arm(sessionID, directory);
+    const idleAt = now();
+    idles.set(sessionID, idleAt);
+    void arm(sessionID, directory, () => Promise.resolve(idleAt));
   };
 
   const sleepSummary = async (sessionId: string) => {
@@ -220,5 +274,5 @@ export const createSessionLeadRuntime = ({
     for (const sessionId of [...timers.keys()]) cancel(sessionId);
   };
 
-  return { processPayload, sleepSummary, isBusy, stop };
+  return { processPayload, resumeSleep, sleepSummary, isBusy, stop };
 };

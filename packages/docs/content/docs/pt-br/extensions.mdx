@@ -39,6 +39,8 @@ Instalações SSH aceitam `git@github.com:owner/extension.git` e `ssh://git@gith
 
 A identidade global usa a configuração Git/SSH e o agente SSH do usuário que executa o servidor OpenChamber selecionado. Em uma instância remota, a chave precisa estar disponível naquele servidor. Desbloqueie chaves protegidas por senha no agente SSH do processo do servidor antes de instalar. HTTPS usa as credenciais HTTPS do Git, sem trocar automaticamente para SSH. Os hosts Git devem resolver para endereços públicos; aliases SSH locais e destinos de redes privadas não são aceitos.
 
+Uma identidade Git com login configurado como Conta usa essa conta conectada em instalações por HTTPS, verificações de atualização e atualizações, então um repositório privado nesse host não precisa de chave SSH nem de Git credential helper no servidor. Se a conta for desconectada, a instalação falha; as credenciais Git do próprio servidor não são usadas no lugar.
+
 ## O que uma extensão pode fazer
 
 Mostrar um painel e ler qual projeto e sessão estão abertos não precisa de permissão. Tudo que age em seu nome precisa, e você vê a lista inteira uma vez, na instalação:

@@ -1,7 +1,8 @@
 
 import { OpenCode } from '@opencode/client';
-import type { CredentialCreateInput, CredentialEntry, CredentialOAuth, CredentialValue, IntegrationInfo, JsonValue, UsageLimitsInfo } from '@opencode/client';
+import type { CredentialCreateInput, CredentialEntry, CredentialOAuth, CredentialValue, IntegrationInfo, JsonValue, ProviderInfo, UsageLimitsInfo } from '@opencode/client';
 import { z } from 'zod';
+import { LOCATION_PLUGINS_NOT_READY, waitForLocationPlugins } from './location-plugins.js';
 
 export type LegacyAuthEntry =
   | { type: 'api'; key: string; label?: string; metadata?: { [key: string]: JsonValue } }
@@ -22,6 +23,8 @@ export interface CredentialSource {
   create?: CreateCredential;
   remove?: (credentialID: string) => Promise<void>;
   listEnvironmentKeys?: () => Promise<Record<string, string>>;
+  launchEnvironment?: () => NodeJS.ProcessEnv | null;
+  listProviders?: () => Promise<ProviderInfo[]>;
   readUsageLimits?: () => Promise<UsageLimitsInfo | null>;
 }
 
@@ -29,7 +32,7 @@ interface CredentialConnection {
   buildOpenCodeUrl: (path: string, prefix?: string) => string;
   getOpenCodeAuthHeaders: () => Record<string, string>;
   getLaunchEnvironment?: () => NodeJS.ProcessEnv | null;
-  getDefaultDirectory?: () => string | null;
+  getDefaultDirectory?: () => string | null | Promise<string | null>;
 }
 
 let source: CredentialSource | null = null;
@@ -73,13 +76,19 @@ export const openCodeCredentialSource = ({
     list: () => client().credential.list(),
     create,
     remove: (credentialID: string) => client().credential.remove({ credentialID }),
+    launchEnvironment: getLaunchEnvironment,
     listEnvironmentKeys: async () => {
       const environment = getLaunchEnvironment();
       if (!environment) return {};
-      const { data } = await client(getDefaultDirectory()).integration.list();
+      const { data } = await client(await getDefaultDirectory()).integration.list();
       return projectEnvironmentKeys(data, environment);
     },
-    readUsageLimits: async () => (await client(getDefaultDirectory()).experimental.usage.limits()).data,
+    listProviders: async () => {
+      const location = client(await getDefaultDirectory());
+      if (!(await waitForLocationPlugins(location))) throw new Error(LOCATION_PLUGINS_NOT_READY);
+      return (await location.provider.list()).data;
+    },
+    readUsageLimits: async () => (await client(await getDefaultDirectory()).experimental.usage.limits()).data,
   };
 };
 
@@ -130,6 +139,27 @@ const readWithEnvironment = async (current: CredentialSource) => {
   return { ...result, ...stored };
 };
 
+export interface KeyCredential {
+  key: string;
+  credentialID?: string;
+}
+
+const readKeyCredentialsFrom = async (current: CredentialSource) => {
+  const noEnvironment: Record<string, string> = {};
+  const [entries, environmentKeys] = await Promise.all([
+    current.list(),
+    current.listEnvironmentKeys ? current.listEnvironmentKeys() : noEnvironment,
+  ]);
+  const result: Record<string, KeyCredential> = {};
+  for (const [integrationID, key] of Object.entries(environmentKeys)) result[integrationID] = { key };
+  for (const entry of entries) {
+    if (!entry.active) continue;
+    if (entry.value.type === 'key') result[entry.integrationID] = { key: entry.value.key, credentialID: entry.id };
+    else delete result[entry.integrationID];
+  }
+  return result;
+};
+
 const coalesce = <Result>() => {
   let pending: Promise<Result> | null = null;
   return (read: (current: CredentialSource) => Promise<Result>) => {
@@ -147,6 +177,7 @@ const coalesce = <Result>() => {
 const sharedRead = coalesce<LegacyAuthFile>();
 const sharedStoredRead = coalesce<LegacyAuthFile>();
 const sharedLoginRead = coalesce<Record<string, StoredLogin>>();
+const sharedKeyRead = coalesce<Record<string, KeyCredential>>();
 
 export interface StoredLogin {
   methodID: string;
@@ -180,6 +211,19 @@ export function readOpenCodeCredentials() {
 export async function readStoredOpenCodeCredentials() {
   if (!source) throw new Error('OpenCode is not connected yet');
   return source.list();
+}
+
+export function readKeyCredentials() {
+  return sharedKeyRead(readKeyCredentialsFrom);
+}
+
+export function readLaunchEnvironment() {
+  return source?.launchEnvironment?.() ?? null;
+}
+
+export async function readOpenCodeProviders() {
+  if (!source?.listProviders) throw new Error('OpenCode is not connected yet');
+  return source.listProviders();
 }
 
 export async function readOpenCodeUsageLimits() {

@@ -24,6 +24,23 @@ A rotated phone's viewport and `screen.width` both report the long side, so a wi
 
 `hover: none` and touch points also match touch laptops driven by a mouse. On those the short side would keep the mobile shell at full width, so they stay on the viewport width rule.
 
+# OpenChamber control stream
+
+## Ownership
+
+`openchamberEvents.ts` owns the authenticated server control stream and its renderer subscriptions. `appearanceEvents.ts` parses theme and settings change hints at the stream boundary. Runtime HTTP owns credentials and routing; settings and theme consumers own reconciliation.
+
+## Invariants
+
+- Desktop and relay streams use `runtimeFetch`, preserving instance headers and aborting on unsubscribe or runtime change.
+- Web and hosted mobile retain EventSource. Capacitor retains its header-aware fetch path. VS Code does not open the server-only stream.
+
+## Decisions
+
+### Why desktop uses HTTP authentication rather than the realtime URL proxy
+
+HMR can serve the UI and API from different origins while its local proxy URL token is unavailable. A URL-only stream can then miss file changes even though settings reads work. The existing fetch stream uses the same authenticated transport as those reads without changing the server's auth gates.
+
 # On-demand imports
 
 ## Ownership
@@ -39,6 +56,36 @@ Imports retry once by default. Browser failures can reload; VS Code never naviga
 ### Why detached work can opt out of recovery navigation
 
 Image capture still needs the page after its source fallback succeeds, so detached loading preserves the page. Screen recovery stays unchanged.
+
+# Native session notifications
+
+## Ownership
+
+`nativeNotifications.ts` removes the Android and iOS apps' delivered banners for sessions the user has seen, without waiting for the server's clearing push. The desktop shell clears its own through Electron IPC (`desktop.ts`); a browser has no delivered list. `notification-store.ts` checks `nativeSessionBannersAvailable` before it computes any session ids, so web, desktop, VS Code and hosted mobile do no native-only work.
+
+## Invariants
+
+- A banner is removed only when its push names a session, the server that sent it (`serverId`) equals the active connection's push identity (`apps/mobilePushIdentity.ts`), and it carries its push id (`nid`). Pull-request alerts, banners from another paired server sharing or cloning the session, and banners whose server cannot be told stay.
+- Opening a session removes the banners of that session and of every known session it owns by the server's rules (`web/server/lib/session-lineage.ts`): OpenCode's `parentID`, and the `metadata.openchamber.parentID` of workflow agents and operator children, nested, through archived records too. Its dock shows the requests they wait on. A review session links to its original through other metadata and keeps its banners.
+- "Mark all as read" clears the banners of every session this runtime's store knows, including one with no unread mark such as a permission request, and the mobile menu offers it while such a banner shows, asking again as sessions load (`hooks/useHasNativeSessionBanners.ts`).
+- Removal names each banner by its slot (tag and id) and the push it showed. Android reuses the slot for a newer push about the same thing, so a push that replaced a listed banner before the removal stays, including one the system has not shown yet: posts and removals share a lock and the removal checks the push the slot last got (`PushBannersPlugin.java`, `SeenBanners.java`). iOS keeps the identifier (the collapse id) for a newer push, so its removal reads the list again and takes an identifier only while it still carries the listed `nid` (`ios/App/App/PushBanners.swift`); iOS offers no lock against delivery, so a push that lands between that read and the removal can go with it.
+- Android keeps the push id in the extras as `openchamber.nid`; iOS keeps the push's own `nid` in `userInfo`.
+- A list read that fails before push registration completes is harmless on Android; the next view clears what this one missed. iOS lists through the app plugin, which needs no registration.
+- The session ids and the server identity belong to the same runtime: a clear or check whose runtime was switched away while the native bridge loaded does nothing.
+
+## Decisions
+
+### Why Android lists through the push plugin and an app plugin removes
+
+The push plugin already returns each delivered banner with its notification extras, into which Android's `SealedPushMessagingService` copies `sessionId`, `serverId` and the push id. Its removal cancels by tag and id only, which would also take a replacement, so `PushBanners.remove` cancels a banner only while it still shows the listed push.
+
+### Why iOS lists through the app plugin and not the push plugin
+
+On iOS the push plugin rejects `getDeliveredNotifications` until APNs registration has been attempted in this launch, and the app registers only after the server reports a push target. A cold start while the server is unreachable, the case this clear exists for, would therefore never read the list. `PushBanners.list` reads `UNUserNotificationCenter` directly and returns each banner's identifier and `userInfo`, the shape the push plugin returns. `nativeNotifications.ios.plugin.test.ts` runs the clear through the real proxy with the push plugin refusing.
+
+### Why the loader returns functions and not the plugin
+
+A Capacitor plugin is a proxy that turns every property into a native call, `then` included. A promise resolved with it calls `PushNotifications.then()`, which never settles on a device, so the clear never reads the list. The loader resolves to plain functions that call the plugins, and `nativeNotifications.plugin.test.tsx` runs the session actions through the real proxy.
 
 # Shared library contracts
 
@@ -88,10 +135,11 @@ The library owns shared session metadata readers, runtime transport and credenti
 - Desktop host probes check an unauthenticated server identity before sending credentials to a learned LAN address because DHCP can assign it to another machine. HTTPS addresses remain unchanged by LAN discovery; empty discovery cannot erase the stored address.
 - Relay-capable desktop hosts boot the local UI and race a short direct head start against relay fallback. A late identity-checked direct success changes transport under the same runtime key; an explicit target wins over the default host.
 - Relay probes span transient tunnel reconnects within one total deadline and stop on terminal refusal. Successful callers may take ownership of the live tunnel; other results close it. Displayed latency measures a request on the established tunnel, excluding handshake cost.
-- Host status outlives the switcher and publishes immutable snapshots. Per-host generations and explicit switch results supersede older probes, each answer publishes independently, and only an authoritative configured-host list removes statuses.
+- Host status outlives the switcher and publishes immutable snapshots. Per-host generations and explicit switch results supersede older probes, each answer publishes independently, and only an authoritative configured-host list removes statuses. Snapshots carry which hosts have a probe in flight; a background recheck marks its hosts pending without counting as probing and without marking the cached result stale for a switch, so a periodic recheck neither locks the Refresh control nor turns an instant switch into a check dialog.
 - Local desktop identity comes from the shell's reported server, never the page origin. Relays match by stable runtime key because their virtual API bases share the window origin; unconfigured addresses display only with credential redaction.
 - Desktop capabilities depend on trusted local page identity even while a remote API is selected. Mini Chat and notification links preserve the owning instance; queued shell actions are consumed once, and one failure does not block later actions. Pairing changes the default only when none exists.
 - Desktop startup waits for a valid native boot outcome, while a usable app shell need not wait for OpenCode initialization. Recovery before the local HTTP origin exists requires native restart. Update install failures propagate their actionable cause, and native update completion verifies its target version after reauthentication.
+- Which URL schemes count as links to another app is one rule, `appLinkSchemes.ts`, read by the chat and by the VS Code extension host. Inside VS Code it also excludes `command:`, `vscode:`, `vscode-insiders:`, `vscode-*` and the editor's own URI scheme from the bootstrap config, because the host refuses them; the chat must never offer a link the host refuses.
 - Theme and splash colors sent to the desktop shell are device state and never enter shared settings. VS Code bootstrap detection reads the host's early HTML injection before store initialization or runtime API registration.
 
 ### Persistence and project APIs
@@ -166,10 +214,14 @@ The library owns shared session metadata readers, runtime transport and credenti
 - Scheduled-task candidate validation uses the scheduler's own membership rule and chunks beyond the route cap so the picker cannot disagree with execution. Optional malformed fields drop independently; the run's directory names its actual chat or project location.
 - Snippet naming matches the server's case-insensitive ASCII contract and transliterates non-Latin suggestions to retain a readable name. Names and aliases share a collision domain, and restoring a draft starter derives scope from its owning settings or project list.
 - System font lists retain ordered fallbacks and strip CSS-breaking characters, allowing mixed-script coverage and unavailable local faces without blank text. Variable font ranges preserve intermediate weights, while VS Code's own chrome justifies its tighter text density.
-- The common send guard reports a folder-trust refusal separately from model failure and lets callers suppress only their intended fallback statuses or duplicate notifications. Restart refuses to manage an externally owned OpenCode process, and updater classification preserves unknown installer text so actionable failures remain visible.
+- The common send guard reports a folder-trust refusal separately from model failure and lets callers suppress only their intended fallback statuses or duplicate notifications. Restart refuses to manage an externally owned OpenCode process. On a shared-service connection it names the terminal command and sends no reload, because a restart would cut off other clients; the connection comes from `/health`, since the saved shared-service setting stays on while `OPENCODE_HOST` overrides it. A failed `/health` read sends no reload, since the connection may be shared, and an instance switch during the read drops the action. Open settings re-read the connection on every `server.connected` (`sync/server-connect.ts`): moving between managed and shared rebinds the server's event stream without a client stream gap, so `sync/stream-gap.ts` misses it. Updater classification preserves unknown installer text so actionable failures remain visible.
 
 ## Transport decisions
 
 ### Why candidate and asset reads bypass the runtime bridge
 
 Pairing and connection checks address a server before selecting it. Routing them through the active runtime could redeem a secret on the wrong server or attach that runtime's credentials. Bundled assets belong to the local UI build, while external and data/blob URLs retain their own destination. `fetchBypassingRuntimeBridge` preserves these requests without active-runtime URL rewriting or auth injection.
+
+### Why a pairing link is cleaned around its edges and inside `p` only, and not across the whole text
+
+A link moved between machines picks up characters it never holds: line breaks from a wrapped mail or terminal line (a text field turns them into spaces), zero-width spaces and word joiners from chat apps, direction marks, a byte order mark. `parsePairingConnectionPayload` and `parsePairingConnectionPayloadString` drop whitespace, control and format characters around the text and from the decoded `p` value, which also covers the percent-encoded forms macOS hands over (`%0A`, `%E2%80%8B`). Removing them from the whole text was rejected: `& p=A&p=B` would become `&p=A&p=B`, and this parser would read A while the desktop shell, which confirms the server from the text as it came, showed B. The browser's `atob` refuses these characters where Node's `Buffer` skips them, so without the cleaning the shell's confirmation dialog accepts a link the window then rejects.

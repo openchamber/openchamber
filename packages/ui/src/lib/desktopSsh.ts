@@ -1,4 +1,7 @@
-import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
+import { z } from 'zod';
+
+import { hasDesktopInvoke, invokeDesktop, isDesktopShell } from '@/lib/desktop';
+import { getRuntimeKey, isSshForwardedRuntime } from '@/lib/runtime-switch';
 
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -381,6 +384,32 @@ export const desktopSshImportHosts = async (): Promise<DesktopSshImportCandidate
   return raw
     .map((item) => parseImportCandidate(item))
     .filter((item): item is DesktopSshImportCandidate => Boolean(item));
+};
+
+export const isDesktopSshRuntimeActive = (): boolean => isDesktopShell() && isSshForwardedRuntime();
+
+const sshEditorOpenResultSchema = z.discriminatedUnion('opened', [
+  z.object({ opened: z.literal(true) }),
+  z.object({
+    opened: z.literal(false),
+    reason: z.enum(['instance-changed', 'unsupported', 'unresolved', 'settings-mismatch', 'launch-failed']).catch('unresolved'),
+    settings: z.array(z.string()).catch([]),
+  }),
+]);
+
+export type SshEditorOpenResult = z.infer<typeof sshEditorOpenResultSchema>;
+
+export const openDesktopProjectInAppOverSsh = async (projectPath: string, appId: string): Promise<SshEditorOpenResult> => {
+  const invoke = getInvoke();
+  if (!invoke) return { opened: false, reason: 'unsupported', settings: [] };
+  try {
+    const raw = await invoke('desktop_open_in_app_over_ssh', { projectPath: projectPath.trim(), appId, runtimeKey: getRuntimeKey() });
+    const parsed = sshEditorOpenResultSchema.safeParse(raw);
+    return parsed.success ? parsed.data : { opened: false, reason: 'unresolved', settings: [] };
+  } catch (error) {
+    console.warn('Failed to open project over SSH', error);
+    return { opened: false, reason: 'unresolved', settings: [] };
+  }
 };
 
 export const desktopSshConnect = async (id: string): Promise<void> => {

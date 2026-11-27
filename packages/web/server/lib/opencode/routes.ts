@@ -11,7 +11,9 @@ import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR, readConfigLayers } from './config-files.js';
 import { settingsSurfaceOf } from '../settings/settings-files.js';
 import { compactionUpdateSchema, parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
-import { getWebSearchSource, setCompactionSettings, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
+import { getWebSearchSource, setCompactionSettings, setMcpSkillsEnabled, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
+import { createSkillClientFactory } from './skill-body.js';
+import { applyMcpSkillsFlag } from './mcp-skills-apply.js';
 import {
   CREDENTIAL_LIST_ERROR,
   ENTERPRISE_MODE_ERROR,
@@ -42,6 +44,7 @@ export interface OpenCodeRouteDependencies<Settings extends { opencodeBinary?: u
   installOpenCodeV2: () => Promise<void>;
   formatSettingsResponse: (settings: Settings) => SettingsResponse;
   readSettingsFromDiskMigrated: (options?: { surface?: SettingsSurface | null }) => Promise<Settings>;
+  takeSetAsideSettingsFiles: () => string[];
   persistSettings: (update: JsonObject, options?: { surface?: SettingsSurface | null }) => Promise<SettingsResponse>;
   resolveProjectDirectory: ReturnType<typeof createProjectDirectoryRuntime>['resolveProjectDirectory'];
   getProviderSources: typeof getProviderSources;
@@ -94,6 +97,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     installOpenCodeV2,
     formatSettingsResponse,
     readSettingsFromDiskMigrated,
+    takeSetAsideSettingsFiles,
     persistSettings,
     resolveProjectDirectory,
     getProviderSources,
@@ -153,7 +157,8 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
   app.get('/api/config/settings', async (req, res) => {
     try {
       const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
-      res.json(formatSettingsResponse(settings));
+      const setAside = takeSetAsideSettingsFiles();
+      res.json(setAside.length > 0 ? { ...formatSettingsResponse(settings), settingsFilesSetAside: setAside } : formatSettingsResponse(settings));
     } catch (error) {
       console.error('Failed to read settings:', error);
       res.status(500).json({ error: 'Failed to read settings' });
@@ -416,8 +421,8 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
       : next()
   ));
 
-  app.use((req, res, next) => {
-    const refusal = vcsInitRefusal(req.method ?? '', req.originalUrl, req.headers);
+  app.use(async (req, res, next) => {
+    const refusal = await vcsInitRefusal(req.method ?? '', req.originalUrl, req.headers);
     return refusal ? res.status(400).json(vcsInitRefusalBody(refusal)) : next();
   });
 
@@ -551,6 +556,21 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     }
   });
 
+  app.put('/api/config/skill-mcp', async (req, res) => {
+    const enabled = routeInputFields(req.body)?.enabled;
+    if (!isBoolean(enabled)) {
+      return res.status(400).json({ error: 'enabled must be a boolean' });
+    }
+    try {
+      const { changed, path: configPath } = setMcpSkillsEnabled(enabled);
+      if (changed) await applyMcpSkillsFlag(createSkillClientFactory(getOpenCodeAuthHeaders, buildOpenCodeUrl), configPath, enabled).catch((error) => console.warn('MCP skills apply on the next OpenCode start:', error));
+      return res.json({ success: true, changed });
+    } catch (error) {
+      console.error('Failed to save MCP skills:', error);
+      return res.status(500).json({ error: errorFields(error).message || 'Failed to save MCP skills' });
+    }
+  });
+
   app.put('/api/config/compaction', (req, res) => {
     const parsed = compactionUpdateSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -565,7 +585,15 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     }
   });
 
-  app.delete('/api/provider/:providerId/auth', async (req, res) => {
+  const removeProviderFromAllLayers = (providerId: string, directory: string | null) => {
+    let removed = false;
+    while (removeProviderConfig(providerId, directory, 'user')) removed = true;
+    if (directory && removeProviderConfig(providerId, directory, 'project')) removed = true;
+    if (removeProviderConfig(providerId, directory, 'custom')) removed = true;
+    return removed;
+  };
+
+  app.delete('/api/provider/:providerId/auth', refuseInEnterpriseMode, async (req, res) => {
     try {
       const { providerId } = req.params;
       if (!providerId) {
@@ -602,10 +630,7 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
       } else if (scope === 'user' || scope === 'project' || scope === 'custom') {
         removed = removeProviderConfig(providerId, directory, scope);
       } else if (scope === 'all') {
-        const userRemoved = removeProviderConfig(providerId, directory, 'user');
-        const projectRemoved = directory ? removeProviderConfig(providerId, directory, 'project') : false;
-        const customRemoved = removeProviderConfig(providerId, directory, 'custom');
-        removed = userRemoved || projectRemoved || customRemoved;
+        removed = removeProviderFromAllLayers(providerId, directory);
       } else {
         return res.status(400).json({ error: 'Invalid scope' });
       }

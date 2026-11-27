@@ -13,7 +13,7 @@ Pick how replies are spoken:
 
 - **browser** uses the voices available to your browser. On Linux desktop, install `speech-dispatcher`, its `libspeechd` client library, and a voice engine such as `espeak-ng`. Enable the speech-dispatcher service if your distribution does not start it automatically, then restart OpenChamber.
 - **OpenAI** — OpenAI's voices; paste your API key and pick a voice
-- **OpenAI-compatible** — any service that speaks the OpenAI format; enter its URL and, if it needs one, an API key. If the service names its speech endpoint differently, put that path in **Endpoint path**; leaving it empty keeps `/audio/speech`
+- **OpenAI-compatible** — any service that speaks the OpenAI format; enter its URL and, if it needs one, an API key. If the service names its speech endpoint differently, put that path in **Endpoint path**; leaving it empty keeps `/audio/speech`. If the service lists its voices, **Voice** is a dropdown that ends in **Custom…** for any other voice name; otherwise type the name
 - **macOS say** — the built-in `say` command, on Macs that have it
 
 Once on, you get a play button on messages to hear them read aloud.
@@ -38,6 +38,10 @@ The Whisper and Qwen3-ASR models detect the language on their own, and on a shor
 Turn on **Fix misheard words** to have your Small Model (Settings → Sessions → Small Model) go over the text after you stop. It replaces words the speech model misheard and drops filler sounds such as "uh". The text then goes to the Small Model's provider and appears a second or two later. Without a Small Model the text is inserted as heard.
 
 API keys you enter for these services are kept by the OpenChamber server, not in your browser. Type a key and press Enter to save it; the field then shows that a key is saved, and the cross removes it.
+
+**OpenCode provider key** sits below the API key field. It lets the service use the key of a provider you already set up in OpenCode, so you don't type it again. OpenChamber selects a provider for you only when exactly one provider that has a key has the same address (scheme, host and port) as the service; if two do, or none does, nothing is selected. Selecting a provider sends no key yet. Pick a provider, or **None**, to decide yourself. A key you typed in the API key field is used first. The OpenChamber server reads the provider's key when it needs it and never sends it to the browser. It sends the key to a server only after you tap **Send key** for that provider and that address, also when it is the address OpenCode uses for that provider. An approval covers the key the provider has at that moment: if you switch to another account, or the key changes, even under the same name, you tap **Send key** again.
+
+The built-in OpenCode provider appears only if it has a key other than the `public` placeholder.
 
 ## A note for phones
 

@@ -59,7 +59,7 @@ const linearPersonSchema = z.object({ name: optionalText, displayName: optionalT
   .nullish()
   .catch(null)
   .transform((person): TrackerPerson | null => {
-    const name = person?.displayName || person?.name || null;
+    const name = person?.name || person?.displayName || null;
     const avatarUrl = person?.avatarUrl ?? null;
     return name || avatarUrl ? { name, avatarUrl } : null;
   });
@@ -237,6 +237,10 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
 
     refreshListReads: async (provider) => {
       await call(provider, '/read-cache/refresh?scope=lists', { method: 'POST' }, z.unknown(), 'Failed to refresh Linear lists');
+    },
+
+    refreshItemReads: async (provider, identifier) => {
+      await call(provider, `/read-cache/refresh?${new URLSearchParams({ scope: 'item', identifier }).toString()}`, { method: 'POST' }, z.unknown(), 'Failed to refresh Linear issue');
     },
 
     get: (provider, id) => call(provider, `/issues/get?${new URLSearchParams({ id }).toString()}`, GET, itemResult(provider), 'Failed to load Linear issue'),

@@ -67,8 +67,10 @@ export interface ControlInput {
   inWork?: unknown;
   busy?: unknown;
   mine?: unknown;
+  leads?: unknown;
   brief?: unknown;
   edits?: unknown;
+  strands?: unknown;
   needsYou?: unknown;
   now?: unknown;
   news?: unknown;
@@ -136,6 +138,8 @@ export interface ControlInput {
   path?: unknown;
   readonly label?: unknown;
   maxBytes?: unknown;
+  folder?: unknown;
+  parentId?: unknown;
 }
 
 export interface ActionContext {

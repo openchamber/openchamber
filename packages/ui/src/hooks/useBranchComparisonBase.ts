@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { comparisonBaseBranchName, resolveBranchComparisonBase, type BranchComparisonBaseSource } from '@/components/views/git/baseBranch';
+import { comparisonBaseBranchName, resolveBranchComparisonBase, resolveRecordedBaseRef, type BranchComparisonBaseSource } from '@/components/views/git/baseBranch';
 import type { GitBranch } from '@/lib/api/types';
 import { getBranchBase } from '@/lib/gitApi';
 import type { useRepositoryBinding } from '@/lib/source-control/repository-binding';
@@ -21,6 +21,7 @@ export function useBranchComparisonBase(
   branch: string | null,
   enabled: boolean,
   repository: BranchComparisonRepository,
+  shownBase?: string | null,
 ) {
   const { branches, remoteNames, primaryRemote, readContext } = repository;
   const runtimeKey = useGitStore((state) => state.runtimeKey);
@@ -57,19 +58,25 @@ export function useBranchComparisonBase(
   const resolution = useMemo(() => {
     if (!branch || !branches) return null;
     const all = branches.all ?? [];
+    const localBranches = all.filter((name) => !name.startsWith('remotes/'));
+    const remoteBranches = all.filter((name) => name.startsWith('remotes/')).map((name) => name.slice('remotes/'.length));
+    if (shownBase) {
+      const ref = resolveRecordedBaseRef(shownBase, { localBranches, remoteBranches, headBranch: branch });
+      return ref ? { ref, source: 'chosen' as const } : null;
+    }
     return resolveBranchComparisonBase({
       chosen: override,
       pullRequest: pullRequestBase,
       createdFrom,
       defaultBranch: detectedSettled && primaryRemote ? branches.defaultBranches?.[primaryRemote] ?? null : null,
     }, {
-      localBranches: all.filter((name) => !name.startsWith('remotes/')),
-      remoteBranches: all.filter((name) => name.startsWith('remotes/')).map((name) => name.slice('remotes/'.length)),
+      localBranches,
+      remoteBranches,
       remoteNames,
       primaryRemote,
       headBranch: branch,
     });
-  }, [branch, branches, createdFrom, detectedSettled, override, primaryRemote, pullRequestBase, remoteNames]);
+  }, [branch, branches, createdFrom, detectedSettled, override, primaryRemote, pullRequestBase, remoteNames, shownBase]);
 
   const source: BranchComparisonBaseSource | null = resolution?.source ?? null;
   return {
@@ -77,6 +84,7 @@ export function useBranchComparisonBase(
     source,
     resolved: Boolean(resolution) || (detectedSettled && branches !== null),
     revision: JSON.stringify([runtimeKey, statusFetchedAt]),
+    shownBaseMissing: Boolean(shownBase && branch && branches && !resolution),
   };
 }
 

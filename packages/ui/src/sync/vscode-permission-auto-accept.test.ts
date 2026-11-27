@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
+import { OpencodeApiError } from "@/lib/opencode/client"
 import type { PermissionRequest, Session } from "@/lib/opencode/model"
 import { createVSCodePermissionAutoAcceptRuntime } from "./vscode-permission-auto-accept"
 
@@ -84,6 +85,55 @@ describe("VS Code permission auto-accept runtime", () => {
     expect(await first).toBe(true)
     expect(await second).toBe(true)
     expect(attempts).toBe(2)
+  })
+
+  test("treats a reply another window already won as handled, without retrying", async () => {
+    let attempts = 0
+    let waits = 0
+    const runtime = createVSCodePermissionAutoAcceptRuntime({
+      getPolicy: () => ({ child: true }),
+      getSessions: () => new Map(),
+      getSession: async () => session("child"),
+      listPendingPermissions: async () => [],
+      getPermissionState: async () => "ok",
+      reply: async () => {
+        attempts += 1
+        throw new OpencodeApiError("permission.reply", "Permission request not found", {
+          status: 404,
+          tag: "PermissionNotFoundError",
+        })
+      },
+      wait: async () => { waits += 1 },
+    })
+
+    // A true result keeps the "Permission required" notification and the
+    // replayed card away: nothing waits for the user.
+    expect(await runtime.processPermission(permission, "/repo", { verifyPending: false })).toBe(true)
+    expect(attempts).toBe(1)
+    expect(waits).toBe(0)
+
+    // A fresh request may reuse the settled ID; it is answered, not skipped.
+    expect(await runtime.processPermission(permission, "/repo", { verifyPending: false })).toBe(true)
+    expect(attempts).toBe(2)
+  })
+
+  test("leaves a reply that keeps failing for another reason to the user", async () => {
+    let attempts = 0
+    const runtime = createVSCodePermissionAutoAcceptRuntime({
+      getPolicy: () => ({ child: true }),
+      getSessions: () => new Map(),
+      getSession: async () => session("child"),
+      listPendingPermissions: async () => [],
+      getPermissionState: async () => "ok",
+      reply: async () => {
+        attempts += 1
+        throw new OpencodeApiError("permission.reply", "boom", { status: 500 })
+      },
+      wait: async () => undefined,
+    })
+
+    expect(await runtime.processPermission(permission, "/repo", { verifyPending: false })).toBe(false)
+    expect(attempts).toBe(3)
   })
 
   test("routes the state check and reply through the permission event directory", async () => {

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 import type { TerminalServerSession } from '@/lib/api/types';
 import { normalizeTerminalDirectory } from '@/lib/pathNormalization';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import type { TerminalTab, TerminalTabLifecycle, TerminalTabPurpose } from './terminalTab';
 export type { TerminalTab } from './terminalTab';
 
@@ -261,19 +262,17 @@ const originOf = (url: string): string | null => {
   }
 };
 
-export const isProjectActionRunningAtOrigin = (
-  sessions: ReadonlyMap<string, DirectoryTerminalState>,
-  url: string,
-): boolean => {
+export const runningProjectActionPreviewUrls = (sessions: ReadonlyMap<string, DirectoryTerminalState>, sameNetworkAs?: string): string[] => (
+  [...sessions].flatMap(([directory, state]) => (
+    sameNetworkAs === undefined || spaceIdOfDirectory(directory) === spaceIdOfDirectory(sameNetworkAs) ? state.tabs : []
+  ).flatMap((tab) => (
+    tab.previewUrl !== null && tab.lifecycle !== 'stopping' && isActiveProjectActionTab(tab) ? [tab.previewUrl] : []
+  )))
+);
+
+export const isProjectActionRunningAtOrigin = (sessions: ReadonlyMap<string, DirectoryTerminalState>, url: string): boolean => {
   const origin = originOf(url);
-  if (origin === null) return false;
-  for (const state of sessions.values()) {
-    for (const tab of state.tabs) {
-      if (tab.previewUrl === null || tab.lifecycle === 'stopping' || !isActiveProjectActionTab(tab)) continue;
-      if (originOf(tab.previewUrl) === origin) return true;
-    }
-  }
-  return false;
+  return origin !== null && runningProjectActionPreviewUrls(sessions).some((previewUrl) => originOf(previewUrl) === origin);
 };
 
 const isLiveRunningTerminal = (tab: TerminalTab | undefined): boolean =>

@@ -1,3 +1,5 @@
+import { directoryReachability } from '../directory-reachability/index.js';
+import { GIT_LAUNCH_DIRECTORY, launchesFrom } from '../git/git-launch.js';
 import path from 'node:path';
 
 import { summarizeText as summarizeSharedText } from '../text/summarization.js';
@@ -408,15 +410,15 @@ export const createNotificationTemplateRuntime = (deps: NotificationTemplateDepe
       }
     }
 
-    if (worktreeDir) {
+    if (worktreeDir && !await directoryReachability.isUnreachable(worktreeDir)) {
       try {
         const { simpleGit } = await import('simple-git');
-        const git = simpleGit({
-          baseDir: worktreeDir,
+        const git = launchesFrom(simpleGit({
+          baseDir: GIT_LAUNCH_DIRECTORY,
           spawnOptions: { windowsHide: true },
           binary: resolveGitBinaryForSpawn(),
           unsafe: { allowUnsafeCustomBinary: true },
-        });
+        }), worktreeDir);
         branch = await withGitTimeout(git.revparse(['--abbrev-ref', 'HEAD'])).catch(() => '');
       } catch {
         void 0;

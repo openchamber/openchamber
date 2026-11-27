@@ -9,6 +9,7 @@ import { useChangeRequestReviewContext } from '@/components/review/useChangeRequ
 import { diffLineSource } from '@/lib/diff/selectedDiffLines';
 import { textLineSource } from '@/lib/commentAnchor';
 import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { useLiveRowReport } from '@/hooks/useStackedLiveRows';
 import { extractSelectedCode } from './diffSelection';
 import type { DiffAnnotation } from './types';
 
@@ -22,6 +23,7 @@ interface DiffCommentsInput {
   enableComments: boolean;
   isMobile: boolean;
   diffInstanceRef: RefObject<PierreFileDiff<DiffAnnotation> | null>;
+  onUnsavedCommentChange?: (unsaved: boolean) => void;
 }
 
 export const useDiffComments = ({
@@ -34,6 +36,7 @@ export const useDiffComments = ({
   enableComments,
   isMobile,
   diffInstanceRef,
+  onUnsavedCommentChange,
 }: DiffCommentsInput) => {
   const commentLineSources = useMemo(() => (incomingFileDiff
     ? { additions: diffLineSource(incomingFileDiff, 'additions'), deletions: diffLineSource(incomingFileDiff, 'deletions') }
@@ -74,9 +77,15 @@ export const useDiffComments = ({
     startEdit,
     deleteDraft,
   } = diffCommentController;
+  const reportUnsavedComment = useCallback(
+    (_fileName: string, unsaved: boolean) => onUnsavedCommentChange?.(unsaved),
+    [onUnsavedCommentChange],
+  );
+  useLiveRowReport(fileName ?? '', commentText.length > 0, onUnsavedCommentChange ? reportUnsavedComment : undefined);
   const fileDrafts = useMemo(() => diffDrafts.filter((draft) => !isWholeFileComment(draft)), [diffDrafts]);
 
   const review = useChangeRequestReviewContext();
+  const reviewUnavailable = review?.readFailed === true && !review.state;
   const reviewItems = useMemo<ReviewLineItem[]>(() => {
     if (!review?.state || !fileName) return [];
     const onLine = <T extends { path: string; line: number | null }>(entry: T): entry is T & { line: number } => (
@@ -103,7 +112,7 @@ export const useDiffComments = ({
   const selectionSide = selection?.side;
   const selectionCrossesSides = Boolean(selection?.endSide && selection.endSide !== selection.side);
   const reviewField = useMemo(() => {
-    if (!review || !fileName || selectionCrossesSides) return undefined;
+    if (!review?.canWrite || !fileName || selectionCrossesSides) return undefined;
     return {
       add: async (text: string, range?: SelectedLineRange) => {
         const target = range ?? selectionRef.current;
@@ -233,6 +242,7 @@ export const useDiffComments = ({
     deleteDraft,
     fileDrafts,
     review,
+    reviewUnavailable,
     reviewItems,
     reviewField,
     excerptOf,

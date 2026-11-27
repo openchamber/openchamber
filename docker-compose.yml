@@ -1,8 +1,11 @@
 services:
   openchamber:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/openchamber/openchamber:latest
+    # To build from this checkout instead of pulling the release image,
+    # uncomment build and run: docker compose up -d --build
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: openchamber
     ports:
       - "3000:3000"
@@ -26,7 +29,6 @@ services:
     # OPENCHAMBER_TUNNEL_HOSTNAME: app.example.com  # required for managed-remote
     # OPENCHAMBER_TUNNEL_TOKEN: your_cloudflare_token  # required for managed-remote
     # OPENCHAMBER_TUNNEL_CONFIG: /home/openchamber/.cloudflared/config.yml  # optional for managed-local
-    # OH_MY_OPENCODE: true # enable oh-my-opencode
     # OPENCODE_HOST: http://172.17.0.1:4096 # Connect to external OpenCode server
     # OPENCODE_SKIP_START: true # skip start opencode
     # OPENCHAMBER_OPENCODE_HOSTNAME: 0.0.0.0 # Bind OpenCode to all interfaces

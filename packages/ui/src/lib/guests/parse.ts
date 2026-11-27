@@ -33,6 +33,7 @@ import {
   isGuestProviderLogoPath,
   isGuestRequestPath,
   isOpenCodeProviderId,
+  linkOriginValidator,
 } from '@openchamber/sdk';
 import { guestToolCardSchema } from '@openchamber/sdk/schemas';
 import { z } from 'zod';
@@ -179,7 +180,7 @@ const publicLinksSchema = z.object({
   action: z.enum(GUEST_LINK_ACTIONS),
   keys: z.array(z.string().regex(GUEST_LINK_KEY)).max(GUEST_LINK_KEYS_MAX),
   urls: z.object({
-    origin: z.string().refine((value) => URL.canParse(value) && new URL(value).protocol === 'https:' && new URL(value).origin === value),
+    origin: z.string().refine(linkOriginValidator((value) => URL.canParse(value) && new URL(value).protocol === 'https:' && new URL(value).origin === value)),
     identifierPattern: z.string().min(1),
     patterns: z.array(z.object({
       path: z.string().min(1),

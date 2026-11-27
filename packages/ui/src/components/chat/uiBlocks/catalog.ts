@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createLibrary, createParser, defineComponent, evaluateRoot, tokenize, type ElementNode, type OpenUIError, type ParseResult } from '@openuidev/lang-core';
+import { STRAY_QUOTE_ERROR, escapeStrayQuotes } from './strayQuote';
 
 
 export const tones = ['neutral', 'info', 'success', 'warning', 'error'] as const;
@@ -254,6 +255,31 @@ const canDropParts = (source: string, kept: BlockValue): boolean => (
 );
 
 export function parseUiBlock(source: string, complete: boolean, salvage = false, extensions: ExtensionBlocks = NO_EXTENSION_BLOCKS): UiBlockParse {
+  const parsed = parseProgram(source, complete, salvage, extensions);
+  const errors = parseProblems(parsed);
+  const escaped = complete && errors.length ? escapeStrayQuotes(source) : null;
+  if (escaped === null) return parsed;
+  const remaining = parseProblems(parseProgram(escaped, complete, salvage, extensions));
+  if (remaining.includes(INCOMPLETE_ERROR)) return parsed;
+  const unmatched = [...remaining];
+  const unchanged = errors.every((error) => {
+    const at = unmatched.indexOf(error);
+    if (at !== -1) unmatched.splice(at, 1);
+    return at !== -1;
+  });
+  if (unchanged) return parsed;
+  const problems = [STRAY_QUOTE_ERROR, ...remaining];
+  return parsed.kind === 'ready' ? { ...parsed, dropped: problems } : { kind: 'invalid', errors: problems };
+}
+
+const parseProblems = (parsed: UiBlockParse): string[] => {
+  if (parsed.kind === 'invalid') return parsed.errors;
+  return parsed.kind === 'ready' ? parsed.dropped : [];
+};
+
+const INCOMPLETE_ERROR = 'The block ends in the middle of a statement';
+
+function parseProgram(source: string, complete: boolean, salvage: boolean, extensions: ExtensionBlocks): UiBlockParse {
   const result = parserFor(extensions).parse(source);
   const errors = result.meta.errors
     .filter((error) => !(error.component === 'Details' && error.path === '/children' && error.code === 'missing-required'))
@@ -263,7 +289,7 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false,
     if (result.meta.unresolved.length) errors.push(`Undefined names: ${result.meta.unresolved.join(', ')}`);
     if (result.meta.orphaned.length) errors.push(`Defined but never used: ${result.meta.orphaned.join(', ')}`);
     const unusable: string[] = [];
-    if (result.meta.incomplete) unusable.push('The block ends in the middle of a statement');
+    if (result.meta.incomplete) unusable.push(INCOMPLETE_ERROR);
     if (Object.keys(result.stateDeclarations).length || result.queryStatements.length || result.mutationStatements.length) {
       unusable.push('State, queries and mutations are not supported');
     }

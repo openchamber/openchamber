@@ -17,7 +17,7 @@ import {
   wasBrowserTabOpenedWithAddress,
   type BrowserTabReferrer,
 } from '@/lib/browser/devServerWait';
-import { browserTabRequestSchema, openBrowserTabFromLink, useBrowserTabReferrer } from '@/hooks/useBrowserTabReferrer';
+import { useBrowserTabReferrer } from '@/hooks/useBrowserTabReferrer';
 import {
   cancelAnnotationSession,
   runAnnotationSession,
@@ -25,7 +25,7 @@ import {
   type PageCapture,
 } from '@/lib/browser/annotationSession';
 import { resolveAnnotationOverlayTheme } from '@/lib/browser/overlayTheme';
-import { openBrowserTabForSession, registerBrowserController } from '@/lib/browser/controlClient';
+import { registerBrowserController } from '@/lib/browser/controlClient';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 import {
@@ -59,14 +59,17 @@ import {
   viewportSize,
 } from '@/lib/browser/viewport';
 import { BrowserEmptyState } from './BrowserEmptyState';
+import { BrowserFrame } from './BrowserFrame';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
-import { AnnotationDictation, type AnnotationVoiceChannel } from './AnnotationDictation';
+import { AnnotationDictation } from './AnnotationDictation';
 import { useAnnotationVoice } from './useAnnotationVoice';
-import type { AnnotationOverlayMessage } from '@/lib/browser/annotationOverlay';
+import { useAnnotationVoiceRun, type AnnotationRun } from './useAnnotationVoiceRun';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
 import { useSteadyStage } from './useSteadyStage';
 import { isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
 import { usePageDrawn } from './usePageDrawn';
+import { useAgentInputMark } from './useAgentInputMark';
+import { useBrowserOpenTabRequests } from './useBrowserOpenTabRequests';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -74,9 +77,11 @@ export type BrowserPaneProps = {
   siteDirectory: string;
   tabID: string;
   ownerSessionId: string | null;
+  usesUserLogins?: boolean;
   showHome?: boolean;
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   visible: boolean;
+  panelOpen?: boolean;
 };
 
 const isChromiumHost = (): boolean => (
@@ -99,7 +104,6 @@ const browserPartitionOf = (directory: string, agentProfile = false): string => 
   if (spaceId) return `openchamber-space-preview:${spaceId}`;
   return agentProfile ? AGENT_BROWSER_PARTITION : BROWSER_PARTITION;
 };
-const BROWSER_OPEN_TAB_EVENT = 'openchamber:browser-panel-open-tab';
 const CONSOLE_PROBLEM_LIMIT = 20;
 const VIEW_READY_TIMEOUT_MS = 15_000;
 const PAGE_QUIET_MS = 500;
@@ -112,9 +116,8 @@ const quietResultSchema = z.object({ quiet: z.boolean() });
 const answeredDialogsSchema = z.array(z.object({ answer: z.string() }).catchall(z.json()));
 let keyboardTurn: Promise<void> = Promise.resolve();
 const jsonObjectSchema = z.record(z.string(), z.json());
+const discardedReplySchema = z.object({ discarded: z.literal(true) });
 const annotateReplySchema = z.object({ value: z.json().nullable() });
-const annotationMessageReplySchema = z.object({ ended: z.boolean().optional(), message: z.string().nullable().optional() });
-const overlayMessageSchema = z.object({ type: z.literal('voice'), action: z.enum(['start', 'finish', 'cancel']) });
 
 // external: https://wayland.freedesktop.org/docs/html/apa.html#protocol-spec-wl_surface-request-frame A compositor may withhold frame callbacks for an invisible surface.
 const waitForTwoFrames = (): Promise<boolean> => new Promise((resolve) => {
@@ -161,7 +164,7 @@ const revealStage = (stage: HTMLElement | null, purpose: 'capture' | 'input'): (
   return () => { stage.style.cssText = previousStyle; };
 };
 
-const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, ownerSessionId, visible }) => {
+const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, ownerSessionId, usesUserLogins = false, visible, panelOpen = visible }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const webviewRef = React.useRef<WebviewElement | null>(null);
@@ -172,7 +175,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, []);
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
-  const partition = browserPartitionOf(directory, ownerSessionId !== null && !agentBrowserSharesLogins);
+  const partition = browserPartitionOf(directory, ownerSessionId !== null && !usesUserLogins && !agentBrowserSharesLogins);
 
   const initialUrlRef = React.useRef(normalizeBrowserUrl(initialUrl));
   const startUrl = initialUrlRef.current !== BLANK_URL ? initialUrlRef.current : '';
@@ -387,32 +390,10 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     },
   }), []);
 
-  const [voiceChannel, setVoiceChannel] = React.useState<AnnotationVoiceChannel | null>(null);
+  const { channel: voiceChannel, open: openVoice, close: closeVoice, discard: discardVoice } = useAnnotationVoiceRun({
+    driveStep, directory: tabsDirectory, tabID, panelOpen, pageUrl: navigation.url,
+  });
 
-  const listenToOverlay = React.useCallback(async (listeners: Set<(message: AnnotationOverlayMessage) => void>, session: { id: number; done: boolean }) => {
-    while (!session.done) {
-      let reply: z.infer<typeof annotationMessageReplySchema>;
-      try {
-        reply = annotationMessageReplySchema.parse(await driveStep('annotationMessage', { sessionId: session.id, timeoutMs: 20_000 }));
-      } catch {
-        return;
-      }
-      if (reply.ended) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        continue;
-      }
-      if (!reply.message) continue;
-      let parsed: z.infer<typeof overlayMessageSchema> | null = null;
-      try {
-        parsed = overlayMessageSchema.parse(JSON.parse(reply.message));
-      } catch {
-        continue;
-      }
-      for (const listener of [...listeners]) listener(parsed);
-    }
-  }, [driveStep]);
-
-  type AnnotationRun = { id: number; done: boolean; cancelled: boolean };
   const annotationRunRef = React.useRef<AnnotationRun | null>(null);
   const annotationRunsRef = React.useRef(0);
 
@@ -420,13 +401,13 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     const run = annotationRunRef.current;
     annotationRunRef.current = null;
     setIsAnnotating(false);
-    setVoiceChannel(null);
+    if (run) run.cancelled = true;
+    discardVoice();
     if (run) {
-      run.cancelled = true;
       void driveStep('annotationCancel', { sessionId: run.id }).catch(() => undefined);
     }
     void cancelAnnotationSession(annotationHost);
-  }, [annotationHost, driveStep]);
+  }, [annotationHost, discardVoice, driveStep]);
 
   const handleAnnotate = React.useCallback(() => {
     if (isAnnotating) {
@@ -448,26 +429,23 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     const owns = () => annotationRunRef.current === run;
     setIsAnnotating(true);
 
-    const listeners = new Set<(message: AnnotationOverlayMessage) => void>();
-    if (annotationVoice) {
-      setVoiceChannel({
-        send: async (message) => { await driveStep('annotationSend', { message }); },
-        subscribe: (listener) => {
-          listeners.add(listener);
-          return () => { listeners.delete(listener); };
-        },
-      });
-    }
+    let settleAttached: (attached: boolean) => void = () => {};
+    const attached = new Promise<boolean>((resolve) => { settleAttached = resolve; });
+    const listen = annotationVoice ? openVoice(run, attached) : null;
     const host: AnnotationHost = {
       ...annotationHost,
       runIsolated: async (script) => {
-        if (annotationVoice) void listenToOverlay(listeners, run);
+        listen?.();
         try {
-          return await runOverlayIsolated(script, run.id);
+          const reply = await runOverlayIsolated(script, run.id);
+          if (!discardedReplySchema.safeParse(reply).success) return reply;
+          run.cancelled = true;
+          if (owns()) discardVoice();
+          return null;
         } catch (error) {
           run.done = true;
           if (run.cancelled) return null;
-          if (owns()) setVoiceChannel(null);
+          if (owns()) closeVoice();
           throw error;
         }
       },
@@ -482,17 +460,17 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         run.done = true;
         if (!owns()) return;
         annotationRunRef.current = null;
-        setVoiceChannel(null);
+        closeVoice();
         setIsAnnotating(false);
       })
       .then(async (result) => {
-        if (!result || run.cancelled) return;
-        await attachAnnotation(result);
+        settleAttached(result !== null && !run.cancelled && await attachAnnotation(result, () => !run.cancelled));
       })
       .catch(() => {
+        settleAttached(false);
         if (!run.cancelled) toast.error(t('contextPanel.browser.annotate.failed'));
       });
-  }, [annotationHost, annotationVoice, attachAnnotation, cancelAnnotation, currentTheme, driveStep, isAnnotating, listenToOverlay, navigation.url, overlayLabels, runOverlayIsolated, t]);
+  }, [annotationHost, annotationVoice, attachAnnotation, cancelAnnotation, closeVoice, currentTheme, discardVoice, isAnnotating, navigation.url, openVoice, overlayLabels, runOverlayIsolated, t]);
 
   React.useEffect(() => {
     if (!isAnnotating) return;
@@ -679,6 +657,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, [driveStep, ownerSessionId, webviewElement]);
 
   const guardAgentAction = useWebviewFocusGuard(webviewElement, stageRef);
+  const markAgentInput = useAgentInputMark(webviewRef);
   const [agentDriven, setAgentDriven] = React.useState(false);
   const answeringOwnDialogs = React.useCallback(async <T,>(action: string, acceptDialogs: boolean, run: () => Promise<T>): Promise<T | JsonObject> => {
     if (ownerSessionId === null) return run();
@@ -713,14 +692,14 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   }, [driveStep, ownerSessionId]);
 
   const actionQueueRef = React.useRef<Promise<unknown>>(Promise.resolve());
-  const runControlAction = React.useCallback((action: string, parameters: Record<string, unknown>) => {
+  const runControlAction = React.useCallback((action: string, parameters: Record<string, unknown>, actingSessionId: string | null) => {
     setAgentDriven(true);
-    const next = actionQueueRef.current.catch(() => undefined).then(() => guardAgentAction((holdPageFocus) => (
+    const next = actionQueueRef.current.catch(() => undefined).then(() => guardAgentAction((holdPageFocus) => markAgentInput(action, actingSessionId, () => (
       answeringOwnDialogs(action, parameters.dialog === 'accept', () => performControlAction(action, parameters, holdPageFocus))
-    )));
+    ))));
     actionQueueRef.current = next;
     return next;
-  }, [answeringOwnDialogs, guardAgentAction, performControlAction]);
+  }, [answeringOwnDialogs, guardAgentAction, markAgentInput, performControlAction]);
 
   const describeTab = React.useCallback(() => {
     const webview = webviewRef.current;
@@ -840,26 +819,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     };
   }, [directory, loadUrl, webviewElement]);
 
-  React.useEffect(() => {
-    if (!webviewElement) return;
-    const onOpenTab = (event: Event) => {
-      if (!(event instanceof CustomEvent)) return;
-      const request = browserTabRequestSchema.safeParse(event.detail);
-      if (!request.success) return;
-      let ownId = -1;
-      try {
-        ownId = webviewElement.getWebContentsId();
-      } catch {
-        return;
-      }
-      if (request.data.webContentsId !== ownId) return;
-      openBrowserTabFromLink(tabDirectory, request.data.referrer, () => (ownerSessionId !== null
-        ? openBrowserTabForSession(request.data.url, { directory: tabDirectory, sessionId: ownerSessionId })
-        : useUIStore.getState().openContextBrowser(tabDirectory, request.data.url, { reveal: !request.data.background })));
-    };
-    window.addEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
-    return () => window.removeEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
-  }, [ownerSessionId, tabDirectory, webviewElement]);
+  useBrowserOpenTabRequests(webviewElement, tabDirectory, ownerSessionId, usesUserLogins);
 
   const applyZoom = React.useCallback((level: number) => {
     const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level));
@@ -1264,13 +1224,7 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
             </span>
           </div>
         ) : loadedUrl ? (
-          <iframe
-            key={`${loadedUrl}|${reloadNonce}`}
-            src={loadedUrl}
-            title={t('contextPanel.browser.frameTitle')}
-            className="h-full w-full border-none bg-white"
-            sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-          />
+          <BrowserFrame key={`${loadedUrl}|${reloadNonce}`} src={loadedUrl} title={t('contextPanel.browser.frameTitle')} />
         ) : (
           <BrowserEmptyState onOpen={navigate} directory={directory} visible={visible} />
         )}

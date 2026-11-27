@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand"
 import { type SessionMaterializationReason } from "./event-reducer"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
+import { runBackgroundNetworkTask } from "@/lib/background-network"
 import { retry } from "./retry"
 import { hasPromptInFlight } from "./prompts-in-flight"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -8,6 +9,7 @@ import { upsertSessionRecord } from "./session-records"
 import { syncDebug } from "./debug"
 import { opencodeClient } from "@/lib/opencode/client"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { isSpaceDirectoryStopped } from "@/lib/spaces/spaces-store"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { applyGlobalSessionStatusEvents, buildActiveListReconcileEvents, watchGlobalSessionStatusWrites } from "./global-session-status"
 import { getRuntimeKey } from "@/lib/runtime-switch"
@@ -16,6 +18,8 @@ import { type EventRoutingIndex, setIndexedSessionDirectory, setIndexedSessionMe
 import { getActiveSessionCandidateIds, resyncDirectorySessionStatuses } from "./session-status-recovery"
 import { markRecordedInterruptedTurn } from "./interrupted-turn-recovery"
 import { resyncBlockingRequestsForDirectory } from "./blocking-request-recovery"
+import { indexedBlockingRequestDirectories, indexedBlockingRequestSessionIds } from "./global-blocking-requests"
+import { getReconnectRequestSessionIds } from "./reconnect-recovery"
 import { isCatalogRuntimeCurrent } from "./sync-catalog-refresh"
 
 const RECONNECT_MESSAGE_LIMIT = 30
@@ -30,10 +34,13 @@ export async function resyncDirectoryAfterReconnect(
   if (isStale()) return
   const current = store.getState()
   const candidateSessionIds = getActiveSessionCandidateIds(directory, current)
-  if (candidateSessionIds.length === 0) return true
+  const requestSessionIds = isSpaceDirectoryStopped(directory)
+    ? candidateSessionIds
+    : getReconnectRequestSessionIds(current, candidateSessionIds, indexedBlockingRequestSessionIds(directory))
+  if (requestSessionIds.length === 0) return true
 
-  const statuses = await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative", isStale)
-  let succeeded = statuses !== null
+  let succeeded = candidateSessionIds.length === 0
+    || await resyncDirectorySessionStatuses(directory, store, candidateSessionIds, "authoritative", isStale) !== null
   if (isStale()) return
 
   if (reason !== "stream-replayed") await Promise.all(candidateSessionIds.map(async (sessionId) => {
@@ -69,11 +76,17 @@ export async function resyncDirectoryAfterReconnect(
   }))
 
   if (isStale()) return
-  const blockingRequestsSucceeded = await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
+  const blockingRequestsSucceeded = await resyncBlockingRequestsForDirectory(directory, store, requestSessionIds)
 
   if (isStale()) return
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
   return succeeded && blockingRequestsSucceeded
+}
+
+export function recoverDirectoriesAfterGap(childStores: ChildStoreManager, resync: (directory: string) => void): void {
+  for (const directory of indexedBlockingRequestDirectories()) childStores.ensureChild(directory, { bootstrap: false })
+  for (const directory of childStores.children.keys()) resync(directory)
+  void reconcileActivityAfterGap(childStores)
 }
 
 export async function reconcileActivityAfterGap(childStores: ChildStoreManager): Promise<void> {
@@ -92,7 +105,16 @@ export async function reconcileActivityAfterGap(childStores: ChildStoreManager):
       },
     })
     for (const [directory, payloads] of events) applyGlobalSessionStatusEvents(directory, payloads)
-    childStores.refreshStaleDirectoriesWithActiveSessions(activeSessionIds)
+    const refreshing = childStores.refreshStaleDirectoriesWithActiveSessions(activeSessionIds)
+    await Promise.all([...childStores.children].map(async ([directory, store]) => {
+      if (refreshing.has(directory) || store.getState().status !== "complete") return
+      const recovering = new Set(getActiveSessionCandidateIds(directory, store.getState()))
+      const sessionIds = store.getState().session
+        .map((session) => session.id)
+        .filter((sessionId) => activeSessionIds.has(sessionId) && !recovering.has(sessionId))
+      if (sessionIds.length === 0) return
+      await runBackgroundNetworkTask(() => resyncBlockingRequestsForDirectory(directory, store, sessionIds), "active-session")
+    }))
   } finally {
     writes.stop()
   }

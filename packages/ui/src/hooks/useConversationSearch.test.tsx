@@ -216,6 +216,18 @@ test('a changed query drops shown content at once, keeps metadata, and ignores t
   }
 });
 
+test('a message-only match can open an individually listed session without admitting its directory', async () => {
+  const f = await setup();
+  try {
+    await f.render({ searchIn: 'messages', metadataItems: [ITEMS[0]!],
+      isAdmitted: (directory, id) => directory === '/repo/a' && id === 'ses_a' });
+    await f.fireTimers(DEBOUNCE_MS);
+    await f.respond(f.contentRequests[0], page([hit('ses_a'), hit('other')], { totals: { sessions: 2, byDirectory: { '/repo/a': 2 } } }));
+    expect(ids(f.state().results)).toEqual(['ses_a']);
+    expect(f.state().totalCount).toBeNull();
+  } finally { await f.dispose(); }
+});
+
 test('a session list rebuilt with the same matches keeps the shown content and asks nothing', async () => {
   const f = await setup();
   try {

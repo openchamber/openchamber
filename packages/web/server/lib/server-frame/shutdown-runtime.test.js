@@ -3,7 +3,18 @@ import http from 'node:http';
 import net from 'node:net';
 import { once } from 'node:events';
 
+import { spawn } from 'node:child_process';
+
 import { createGracefulShutdownRuntime } from './shutdown-runtime.js';
+
+const isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const createRuntime = (server, overrides = {}) => {
   const runtime = createGracefulShutdownRuntime({
@@ -185,6 +196,37 @@ describe('graceful shutdown runtime', () => {
       await shutdown;
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it.skipIf(process.platform === 'win32')('stops a running exec command and its children before the command timeout', async () => {
+    const server = { close: vi.fn((callback) => callback()) };
+    // Earlier shutdowns in this file closed command admission on the shared
+    // module, so the command and its sweep run on a fresh module instance.
+    vi.resetModules();
+    const { runCommandInDirectory, stopActiveCommands } = await import('../fs/exec-command.js');
+    let output = '';
+    const result = runCommandInDirectory({
+      shell: '/bin/sh',
+      shellFlag: '-c',
+      command: 'sleep 30 & echo $!; wait',
+      resolvedCwd: process.cwd(),
+      maxOutputBytes: 1024,
+      spawn: (...args) => {
+        const child = spawn(...args);
+        child.stdout.on('data', (chunk) => { output += chunk; });
+        return child;
+      },
+      execEnv: process.env,
+      commandTimeoutMs: 30_000,
+    });
+    await vi.waitFor(() => expect(output).toMatch(/^\d+\n/));
+    const grandchild = Number(output.trim());
+    expect(isAlive(grandchild)).toBe(true);
+
+    await createRuntime(server, { stopExecCommands: stopActiveCommands }).gracefulShutdown({ exitProcess: false });
+
+    expect((await result).success).toBe(false);
+    await vi.waitFor(() => expect(isAlive(grandchild)).toBe(false));
   });
 
   it('stops guest services during shutdown', async () => {

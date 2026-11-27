@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { registerGitStatusBatchRoute } from './status-batch.js';
+import { registerGitRangeRoutes } from './range-routes.js';
 import { isPlainObject, isString } from '../shared/guards.js';
+import { whileReachable } from '../directory-reachability/while-reachable.js';
+import { DIRECTORY_UNREACHABLE } from '../directory-reachability/index.js';
+import { readProjects } from './project-batch.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor } from './redaction.js';
 import { runAsUserAction } from '../environment/refresh-scope.js';
@@ -49,7 +53,7 @@ type UncheckedFields = {
   readonly fields?: unknown; readonly directories?: unknown; readonly shas?: unknown;
   readonly tempWorktreePath?: unknown; readonly plan?: unknown; readonly state?: unknown;
   readonly repoRoot?: unknown; readonly sourceBranch?: unknown; readonly targetBranch?: unknown;
-  readonly commits?: unknown; readonly cleanTargetWorktrees?: unknown; readonly remainingCommits?: unknown;
+  readonly commits?: unknown; readonly targetSha?: unknown; readonly pickBase?: unknown; readonly skippedCommits?: unknown; readonly remainingCommits?: unknown;
   readonly currentCommit?: unknown; readonly paths?: unknown; readonly staged?: unknown; readonly context?: unknown;
   readonly path?: unknown; readonly scope?: unknown; readonly patch?: unknown; readonly action?: unknown;
   readonly refs?: unknown; readonly remote?: unknown; readonly expectedHead?: unknown; readonly onto?: unknown;
@@ -145,7 +149,7 @@ export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAu
 };
 
 
-const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user') });
+const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user'), session: z.string().optional() });
 const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
 
 const userAction = (handler: RouteHandler) => (req: Request, res: Response, next: NextFunction) => runAsUserAction(() => handler(req, res, next));
@@ -197,8 +201,8 @@ export function registerGitRoutes(app: Application, {
   };
 
   const isNonRepoGitError = <Cause>(error: Cause) => /not a git repository/i.test(extractGitErrorText(error));
-  const isUnreadableRepositoryError = <Cause>(error: Cause) => errorFields(error)?.code === 'GIT_REPOSITORY_UNREADABLE';
-  const unreadableRepositoryBody = <Cause>(error: Cause) => ({ error: messageOf(error), code: errorFields(error)?.code });
+  const isUnreadableRepositoryError = <Cause>(error: Cause) => ['GIT_REPOSITORY_UNREADABLE', DIRECTORY_UNREACHABLE].some((code) => errorFields(error)?.code === code);
+  const unreadableRepositoryBody = <Cause>(error: Cause) => ({ error: messageOf(error), code: 'GIT_REPOSITORY_UNREADABLE' });
   const probeOptions = { failOnGitError: true };
 
   const instanceDisposer = () => (buildOpenCodeUrl && getOpenCodeAuthHeaders
@@ -341,7 +345,7 @@ export function registerGitRoutes(app: Application, {
     resolveChangeRequestSource,
     createHttpsCredentialReference,
     resolveSourceControlAccount,
-    worktreeBootstrapStore,
+    worktreeBootstrapStore, disposeInstance: instanceDisposer(),
   });
   const rejectLegacyNetworkOperation = async (directory: string, res: Response) => {
     if (contributorProvenance?.read instanceof Function) {
@@ -642,7 +646,6 @@ export function registerGitRoutes(app: Application, {
   });
 
   const PROJECT_BATCH_MAX_DIRECTORIES = 200;
-  const PROJECT_BATCH_CONCURRENCY = 4;
 
   const resolveBatchDirectories = <Body>(body: Body) => {
     if (!isPlainObject(body) || !Array.isArray(body.directories)) return null;
@@ -658,7 +661,7 @@ export function registerGitRoutes(app: Application, {
     return directories;
   };
 
-  const readProjectBatch = async <Entry>(req: Request, res: Response, readDirectory: (directory: string) => Promise<Entry>) => {
+  const readProjectBatch = async <Entry>(req: Request, res: Response, readDirectory: (directory: string) => Promise<Entry>, failedDirectory: (directory: string, message: string) => Entry) => {
     const directories = resolveBatchDirectories(req.body);
     if (!directories || directories.length === 0) {
       return res.status(400).json({ error: 'directories array is required' });
@@ -667,19 +670,7 @@ export function registerGitRoutes(app: Application, {
       return res.status(400).json({ error: `At most ${PROJECT_BATCH_MAX_DIRECTORIES} directories may be read at once` });
     }
 
-    const projects: Entry[] = [];
-    let nextIndex = 0;
-    const worker = async () => {
-      for (;;) {
-        const index = nextIndex;
-        nextIndex += 1;
-        if (index >= directories.length) return;
-        const directory = directories[index];
-        if (directory !== undefined) projects[index] = await readDirectory(directory);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(PROJECT_BATCH_CONCURRENCY, directories.length) }, worker));
-    return res.json({ projects: projects.filter(Boolean) });
+    return res.json({ projects: await readProjects(directories, readDirectory, failedDirectory) });
   };
 
   app.post('/api/git/projects', async (req, res) => {
@@ -741,7 +732,7 @@ export function registerGitRoutes(app: Application, {
         console.error('Failed to read git project overview:', directory, error);
         return { directory, error: 'Failed to read project repository' };
       }
-    });
+    }, (directory, error) => ({ directory, error }));
   });
 
   app.post('/api/git/project-worktrees', async (req, res) => {
@@ -757,7 +748,7 @@ export function registerGitRoutes(app: Application, {
         console.error('Git project worktree batch failed:', directory, error);
         return { directory, worktrees: null, errors: ['worktrees'] };
       }
-    });
+    }, (directory) => ({ directory, worktrees: null, errors: ['worktrees'] }));
   });
 
   app.get('/api/git/remote-url', async (req, res) => {
@@ -855,7 +846,7 @@ export function registerGitRoutes(app: Application, {
     }
   });
 
-  registerGitStatusBatchRoute(app, async (directory, mode) => {
+  registerGitStatusBatchRoute(app, (directory, mode) => whileReachable(directory, async () => {
     const { getStatus, isGitRepository, observeWorktreeTopology } = await getGitLibraries();
     const isRepo = await isGitRepository(directory, probeOptions);
     if (!isRepo) return {
@@ -864,7 +855,7 @@ export function registerGitRoutes(app: Application, {
     };
     void observeWorktreeTopology(directory);
     return { isGitRepository: true, status: await getStatus(directory, { mode }) };
-  });
+  }));
 
   app.get('/api/git/status', async (req, res) => {
     const { getStatus, isGitRepository, observeWorktreeTopology } = await getGitLibraries();
@@ -956,10 +947,9 @@ export function registerGitRoutes(app: Application, {
     });
   };
 
-  handleIntegrateAction('plan', async () => {
-    const { computeIntegratePlan } = await getGitLibraries();
-    return (body: UncheckedFields) => computeIntegratePlan(body);
-  });
+  handleIntegrateAction('plan', async () => (await getGitLibraries()).computeIntegratePlan);
+
+  handleIntegrateAction('conflicts', async () => (body: UncheckedFields) => getGitLibraries().then((git) => git.listIntegrateConflicts(body.directory)));
 
   handleIntegrateAction('conflict-details', async () => {
     const { getIntegrateConflictDetails } = await getGitLibraries();
@@ -967,8 +957,8 @@ export function registerGitRoutes(app: Application, {
   });
 
   handleIntegrateAction('cherry-pick-status', async () => {
-    const { isCherryPickInProgress } = await getGitLibraries();
-    return (body: UncheckedFields) => isCherryPickInProgress(body.tempWorktreePath);
+    const { isIntegrateInProgress } = await getGitLibraries();
+    return (body: UncheckedFields) => isIntegrateInProgress(body.tempWorktreePath);
   });
 
   handleIntegrateAction('run', async () => {
@@ -1092,101 +1082,7 @@ export function registerGitRoutes(app: Application, {
     }
   });
 
-  app.get('/api/git/range-diff', async (req, res) => {
-    const { getRangeDiff } = await getGitLibraries();
-    try {
-      const directory = req.query.directory;
-      if (!directory || !isString(directory)) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const base = req.query.base;
-      const head = req.query.head;
-      if (!base || !isString(base) || !head || !isString(head)) {
-        return res.status(400).json({ error: 'base and head parameters are required' });
-      }
-
-      const pathParam = isString(req.query.path) && req.query.path ? req.query.path : undefined;
-      const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
-      const previousPath = String(req.query.previousPath ?? '') || undefined;
-
-      const diff = await getRangeDiff(directory, {
-        base,
-        head,
-        includeWorkingTree: req.query.includeWorkingTree === 'true',
-        path: pathParam,
-        previousPath,
-        contextLines: Number.isFinite(context) ? context : 3,
-      });
-
-      res.json({ diff });
-    } catch (error) {
-      console.error('Failed to get git range diff:', error);
-      res.status(500).json({ error: messageOf(error) || 'Failed to get git range diff' });
-    }
-  });
-
-  app.get('/api/git/range-file-versions', async (req, res) => {
-    const { getRangeFileVersions } = await getGitLibraries();
-    try {
-      const directory = resolveDirectoryQuery(req.query.directory);
-      const [base, head, filePath] = [req.query.base, req.query.head, req.query.path].map((value) => String(value ?? ''));
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-      if (!base || !head || !filePath) {
-        return res.status(400).json({ error: 'base, head and path parameters are required' });
-      }
-      const previousPath = String(req.query.previousPath ?? '') || undefined;
-      res.json(await getRangeFileVersions(directory, { base, head, path: filePath, previousPath, includeWorkingTree: req.query.includeWorkingTree === 'true' }));
-    } catch (error) {
-      console.error('Failed to read file versions:', error);
-      res.status(500).json({ error: messageOf(error) || 'Failed to read file versions' });
-    }
-  });
-
-  app.get('/api/git/branch-base', async (req, res) => {
-    const { getBranchBase } = await getGitLibraries();
-    try {
-      const directory = resolveDirectoryQuery(req.query.directory);
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const branch = resolveDirectoryQuery(req.query.branch);
-      if (!branch) {
-        return res.status(400).json({ error: 'branch parameter is required' });
-      }
-
-      const result = await getBranchBase(directory, branch);
-      res.json(result);
-    } catch (error) {
-      console.error('Failed to get branch base:', error);
-      res.status(500).json({ error: messageOf(error) || 'Failed to get branch base' });
-    }
-  });
-
-  app.get('/api/git/range-files', async (req, res) => {
-    const { getRangeFiles } = await getGitLibraries();
-    try {
-      const directory = resolveDirectoryQuery(req.query.directory);
-      if (!directory) {
-        return res.status(400).json({ error: 'directory parameter is required' });
-      }
-
-      const base = resolveDirectoryQuery(req.query.base);
-      const head = resolveDirectoryQuery(req.query.head);
-      if (!base || !head) {
-        return res.status(400).json({ error: 'base and head parameters are required' });
-      }
-
-      const files = await getRangeFiles(directory, { base, head, includeWorkingTree: req.query.includeWorkingTree === 'true' });
-      res.json({ files });
-    } catch (error) {
-      console.error('Failed to get git range files:', error);
-      res.status(500).json({ error: messageOf(error) || 'Failed to get git range files' });
-    }
-  });
+  registerGitRangeRoutes(app, getGitLibraries, { networkOperations, getSourceControlBinding });
 
   app.post('/api/git/revert', async (req, res) => {
     const { revertFile } = await getGitLibraries();
@@ -1796,7 +1692,7 @@ export function registerGitRoutes(app: Application, {
   });
 
   app.put('/api/git/worktrees/title', userAction(async (req, res) => {
-    const { setWorktreeTaskTitle } = await getGitLibraries();
+    const { setLinkedTaskTitle } = await getGitLibraries();
     try {
       const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
@@ -1806,7 +1702,7 @@ export function registerGitRoutes(app: Application, {
       if (!body.success) {
         return res.status(400).json({ error: 'title must be a string' });
       }
-      res.json(await setWorktreeTaskTitle(directory, body.data));
+      res.json(await setLinkedTaskTitle(directory, body.data));
     } catch (error) {
       console.error('Failed to set the worktree task title:', error);
       res.status(statusOf(error) ?? 500).json({ error: messageOf(error) || 'Failed to set the task title' });
@@ -1843,7 +1739,7 @@ export function registerGitRoutes(app: Application, {
         return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
       }
       const input = await worktreeCreation.validationInput(directory, req.body || {});
-      const result = await validateWorktreeCreate(directory, input);
+      const result = await validateWorktreeCreate(directory, input, { bootstrapStore: worktreeBootstrapStore });
       res.json(result);
     } catch (error) {
       if (error instanceof WorktreeCreationError) {

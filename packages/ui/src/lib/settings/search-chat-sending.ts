@@ -2,6 +2,13 @@ import type { SettingsSearchItem } from './search';
 
 export const CHAT_SENDING_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
+    id: 'chat.keep-model-on-agent-switch',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.keepModelOnAgentSwitch',
+    descriptionKey: 'settings.openchamber.visual.field.keepModelOnAgentSwitchInfo',
+    keywords: ['agent', 'plan', 'build', 'mode', 'switch', 'model', 'thinking', 'effort', 'reasoning', 'variant', 'cost'],
+  },
+  {
     id: 'chat.composer',
     page: 'chat',
     titleKey: 'settings.layout.chat.section.sending',

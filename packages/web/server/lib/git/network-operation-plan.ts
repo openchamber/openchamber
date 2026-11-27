@@ -8,7 +8,7 @@ import { normalizeSourceControlProviderInstance } from '../source-control/provid
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 import { loopbackHttpPermitted } from './loopback-http.js';
-import { inspectForHydrationPlan } from './hydration-results.js';
+import { inspectForHydrationPlan, withDerivedFromRemote } from './hydration-results.js';
 import type { CheckoutHydrationFailure } from './network-execution-contracts.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type {
@@ -131,8 +131,8 @@ const parseHydrationRequirements = (value: JsonValue | undefined) => {
 const parseHydrationTransfers = (value: JsonValue | undefined, requirements: HydrationRequirement[]) => {
   if (!Array.isArray(value) || value.length > 256) throw planError('checkout hydration transfers are invalid');
   const transfers = value.map((entry) => {
-    if (!isPlainObject(entry) || !hasExactKeys(entry, ['kind', 'path', 'endpoint', 'rawEndpoint'])
-      || !isAuxiliaryKind(entry.kind) || !isPlainObject(entry.endpoint)
+    if (!isPlainObject(entry) || !hasExactKeys(entry, ['kind', 'path', 'endpoint', 'rawEndpoint'], ['derivedFromRemote'])
+      || !isAuxiliaryKind(entry.kind) || !isPlainObject(entry.endpoint) || (entry.derivedFromRemote !== undefined && !isString(entry.derivedFromRemote))
       || !hasExactKeys(entry.endpoint, ['displayUrl', 'fingerprint'])) {
       throw planError('checkout hydration transfer is invalid');
     }
@@ -151,10 +151,10 @@ const parseHydrationTransfers = (value: JsonValue | undefined, requirements: Hyd
       || fingerprintRemoteUrl(rawEndpoint) !== transfer.endpoint.fingerprint) {
       throw planError('checkout hydration transfer endpoint is invalid');
     }
-    return transfer;
+    return withDerivedFromRemote(transfer, isString(entry.derivedFromRemote) ? entry.derivedFromRemote : undefined);
   });
   const requirementKeys = new Set(requirements.map((entry) => JSON.stringify(entry)));
-  if (transfers.some(({ rawEndpoint: _rawEndpoint, ...entry }) => !requirementKeys.has(JSON.stringify(entry)))) {
+  if (transfers.some(({ rawEndpoint: _rawEndpoint, derivedFromRemote: _derivedFromRemote, ...entry }) => !requirementKeys.has(JSON.stringify(entry)))) {
     throw planError('checkout hydration transfers do not match requirements');
   }
   const transferKeys = transfers.map((entry) => `${entry.kind}\0${entry.path}\0${entry.endpoint.fingerprint}`);
@@ -216,7 +216,7 @@ const parseAuxiliaryGrants = (value: JsonValue | undefined) => {
   return grants;
 };
 const isSafeTransferEndpoint = (value: string, providers: typeof sourceControlProviderDescriptors | null = null, { httpsName = false } = {}) => {
-  if (value.length > 4096) return false;
+  if (value.length > 4096 || /[\0-\x20\x7f]/.test(value)) return false;
   if (!value.includes('://')) {
     const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
     return match !== null && !/[?#]/.test(value) && !capture(match, 1).startsWith('-')
@@ -235,7 +235,7 @@ const isSafeTransferEndpoint = (value: string, providers: typeof sourceControlPr
     && (!parsed.username || ((parsed.protocol === 'ssh:' || httpsName) && /^[A-Za-z0-9._][A-Za-z0-9._-]*$/.test(parsed.username)))
     && !parsed.password && !parsed.search && !parsed.hash
     && Boolean(parsed.hostname) && Boolean(parsed.pathname) && parsed.pathname !== '/'
-    && !/[\0-\x20\x7f\\]/.test(pathname)
+    && /^[\x20-\x5b\x5d-\x7e\u0080-\uffff]*$/.test(pathname)
     && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
 };
 const assertSafeExistingEndpoint = (endpoint: JsonValue | undefined, providers: typeof sourceControlProviderDescriptors | null = null, options: { httpsName: boolean } | undefined = undefined) => {

@@ -23,8 +23,10 @@
             {"do": "see", "on": "usage.unconfiguredProvider", "text": "Codex"},
             {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true},
             {"do": "see", "on": "usage.message", "text": "Add credentials in the Providers tab"},
-            {"do": "click", "on": "usage.provider", "text": "Google"},
-            {"do": "see", "on": "usage.heading", "text": "Google usage"},
+            {"do": "gone", "on": "usage.provider", "text": "Google"},
+            {"do": "gone", "on": "usage.provider", "text": "Antigravity"},
+            {"do": "click", "on": "usage.provider", "text": "OpenRouter"},
+            {"do": "see", "on": "usage.heading", "text": "OpenRouter usage"},
             {"do": "gone", "on": "usage.heading", "text": "Codex usage"},
             {"do": "click", "on": "settings.close"},
             {"do": "see", "on": "composer.model", "text": "Fixture stream, seeding speed"}
@@ -269,6 +271,7 @@
             {"do": "click", "on": "usage.provider", "text": "Codex"},
             {"do": "see", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
             {"do": "network.allow"},
+            {"do": "see", "on": "usage.refresh", "disabled": false, "timeout": 60},
             {"do": "click", "on": "usage.refresh"},
             {"do": "gone", "on": "usage.message", "text": "Failed to refresh usage data", "exact": true},
             {"do": "see", "on": "usage.message", "text": "Provider not configured", "exact": true}

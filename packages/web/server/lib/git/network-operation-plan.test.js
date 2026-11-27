@@ -147,6 +147,17 @@ describe('Git network operation planner', () => {
     }
   });
 
+  it('clones over System Git from an encoded-space path and refuses the same path with literal spaces', async () => {
+    const plan = (remoteUrl) => makePlanner().planNetworkOperation({
+      operation: 'clone', remoteUrl, destinationPath: '/new/repo', transportMode: 'system', unverifiedConfirmed: true,
+    });
+    const encoded = 'https://dev.azure.com/example-org/CRM%202.0/_git/CRM%20Example';
+    const plans = await plan(encoded);
+    expect(plans.internalPlan.rawEndpoint).toBe(encoded);
+    expect(plans.publicPlan.target.remote.displayUrl).toBe(encoded);
+    await expect(plan('https://dev.azure.com/example-org/CRM 2.0/_git/CRM Example')).rejects.toThrow('remoteUrl is invalid');
+  });
+
   it('requires separate System consent for every clone auxiliary grant and keeps grants private', async () => {
     const endpoint = { displayUrl: 'https://modules.example/child.git', fingerprint: fingerprintRemoteUrl('https://modules.example/child.git') };
     const input = {
@@ -279,6 +290,9 @@ describe('Git network operation planner', () => {
       transfers: [{
         kind: 'submodule', path: 'vendor/library', rawEndpoint: 'https://modules.example/library.git',
         endpoint: { displayUrl: 'https://modules.example/library.git', fingerprint: fingerprintRemoteUrl('https://modules.example/library.git') },
+      }, {
+        kind: 'lfs', path: '.', rawEndpoint: 'https://media.example/library.git', derivedFromRemote: 'https://media.example/library',
+        endpoint: { displayUrl: 'https://media.example/library.git', fingerprint: fingerprintRemoteUrl('https://media.example/library.git') },
       }],
     }));
     const validateGitTransportContext = vi.fn(async () => authority);
@@ -304,10 +318,14 @@ describe('Git network operation planner', () => {
     });
     expect(plans.internalPlan).toMatchObject({
       expectedHeadSha: SHA, parentEndpoint: authority.endpoint, parentRemoteName: 'upstream',
-      plannedTransfers: [{ kind: 'submodule', path: 'vendor/library', rawEndpoint: 'https://modules.example/library.git' }],
+      plannedTransfers: [
+        { kind: 'submodule', path: 'vendor/library', rawEndpoint: 'https://modules.example/library.git' },
+        { kind: 'lfs', path: '.', rawEndpoint: 'https://media.example/library.git', derivedFromRemote: 'https://media.example/library' },
+      ],
       plannedSourceRequired: false,
       repositoryAuthority: { directory: '/repository', repositoryId: 'repo_one', bindingRevision: 4, configRevision: 'config_one' },
     });
+    expect(JSON.stringify(plans.publicPlan)).not.toContain('derivedFromRemote');
     expect(JSON.stringify(plans.publicPlan)).not.toContain('"directory":"/repository"');
     expect(JSON.stringify(plans.publicPlan)).not.toContain('credential_one');
   });
@@ -584,6 +602,8 @@ describe('Git network operation planner', () => {
     'ssh://example.com/owner/repo.git?key=secret',
     'git@example.com:owner/repo.git?key=secret',
     'git@example.com:owner/repo.git#private',
+    'https://example.com/owner/repo%0A.git',
+    'https://dev.azure.com/example-org/CRM 2.0/_git/CRM Example',
   ])('rejects unsafe authoritative endpoint %s before producing a plan', async (endpoint) => {
     const planner = makePlanner({ validateGitTransportContext: async () => ({ ...authority, endpoint }) });
     await expect(planner.planNetworkOperation(existingInput('fetch')))
@@ -594,6 +614,7 @@ describe('Git network operation planner', () => {
     'https://example.com/owner/repo.git',
     'ssh://example.com/owner/repo.git',
     'git@example.com:owner/repo.git',
+    'https://dev.azure.com/example-org/CRM%202.0/_git/CRM%20Example',
   ])('accepts strict authoritative endpoint %s', async (endpoint) => {
     const endpointAuthority = {
       ...authority,

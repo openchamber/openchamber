@@ -27,8 +27,9 @@ import { CONTAIN_LAYOUT_STYLE } from './messageBodyStyles';
 import { INLINE_TEXT_LINK_STYLE, USER_BUBBLE_TEXT_LINK_CLASS } from './userBubbleLinkStyle';
 import { PromptOriginLink } from './PromptOriginLink';
 
-export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onSaveAsSnippet, onSelectMessages, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userMessagePart = 'bubble', extraActions, promptOrigin }: {
+export const UserMessageBody = React.memo(({ parts, isPending = false, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onSaveAsSnippet, onSelectMessages, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userMessagePart = 'bubble', extraActions, promptOrigin }: {
     parts: Part[];
+    isPending?: boolean;
     promptOrigin?: PromptOrigin;
     messageCreatedAt?: number | null;
     isMobile: boolean;
@@ -249,160 +250,164 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
         return formatted.length > 0 ? formatted : null;
     }, [locale, messageCreatedAt, timeFormatPreference]);
     const hasExtraActions = Boolean(extraActions && extraActions.length > 0);
-    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions) ? (
+    const hasActions = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions);
+    const actionsContainer = hasActions ? (
+        <div
+            className={cn(
+                'flex items-center justify-end gap-1.5 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-[13px]',
+                alwaysShowActions
+                    ? 'pointer-events-auto opacity-100'
+                    : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100 has-[[data-popup-open]]:pointer-events-auto has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100'
+            )}
+        >
+            {timestamp && !alwaysShowActions && !isPending ? (
+                <span
+                    className="me-1 flex items-center gap-1 typography-meta tabular-nums text-muted-foreground"
+                    aria-label={t('contextTooltips.chat.messageTime', { time: timestamp })}
+                >
+                    <Icon name="time" className="h-3.5 w-3.5" />
+                    <span>{timestamp}</span>
+                </span>
+            ) : null}
+            {alwaysShowActions ? (
+                <>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={t('chat.messageBody.actions.moreActions')}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            setUserActionSheetOpen(true);
+                        }}
+                    >
+                        <Icon name="more" className="h-3.5 w-3.5" />
+                    </Button>
+                    <MobileOverlayPanel
+                        open={userActionSheetOpen}
+                        onClose={() => setUserActionSheetOpen(false)}
+                        title={t('chat.messageBody.actions.moreActions')}
+                    >
+                        {timestamp && !isPending ? (
+                            <div className="mb-1 flex items-center gap-2.5 border-b border-edge-muted px-2 pb-2 typography-meta text-muted-foreground">
+                                <Icon name="time" className="size-4" />
+                                <span>{timestamp}</span>
+                            </div>
+                        ) : null}
+                        {userSheetActions.map((action) => (
+                            <MobileSheetRow
+                                key={action.id}
+                                disabled={action.disabled}
+                                leading={<span className="flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-4">{action.icon}</span>}
+                                onClick={() => {
+                                    setUserActionSheetOpen(false);
+                                    action.onSelect();
+                                }}
+                            >
+                                {action.label}
+                            </MobileSheetRow>
+                        ))}
+                    </MobileOverlayPanel>
+                </>
+            ) : (
+                <>
+                {onRevert && (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
+                                aria-label={t('chat.messageBody.actions.revertAria')}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onRevert();
+                                }}
+                            >
+                                <Icon name="arrow-go-back" className="h-3 w-3" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.revert')}</TooltipContent>
+                    </Tooltip>
+                )}
+                {canCopyMessage && hasCopyableText && (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                data-visible={copyHintVisible || isMessageCopied ? 'true' : undefined}
+                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
+                                aria-label={t('chat.messageBody.actions.copyMessageAria')}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={handleCopyButtonClick}
+                                onFocus={() => setCopyHintVisible(true)}
+                                onBlur={() => {
+                                    if (!isMessageCopied) {
+                                        setCopyHintVisible(false);
+                                    }
+                                }}
+                            >
+                                {isMessageCopied ? (
+                                    <Icon name="check" className="h-3 w-3 text-[color:var(--status-success)]" />
+                                ) : (
+                                    <Icon name="file-copy" className="h-3 w-3" />
+                                )}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
+                    </Tooltip>
+                )}
+                {userMenuActions.length > 0 ? (
+                    <DropdownMenu>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
+                                        aria-label={t('chat.messageBody.actions.moreActions')}
+                                        onPointerDown={(event) => event.stopPropagation()}
+                                    >
+                                        <Icon name="more" className="h-3 w-3" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.moreActions')}</TooltipContent>
+                        </Tooltip>
+                        <DropdownMenuContent align="end" onPointerDown={(event) => event.stopPropagation()}>
+                            {userMenuActions.map((action) => (
+                                <DropdownMenuItem
+                                    key={action.id}
+                                    className="typography-meta"
+                                    disabled={action.disabled}
+                                    onSelect={() => action.onSelect()}
+                                >
+                                    <span className="flex size-4 shrink-0 items-center justify-center">{action.icon}</span>
+                                    {action.label}
+                                </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                ) : null}
+                </>
+            )}
+
+        </div>
+    ) : null;
+    const actionsBlock = hasActions ? (
         <div data-user-message-actions="" className={cn(
             'group/user-actions flex items-start justify-end',
             isMobile ? 'h-11 pt-0 in-data-[turn-sticky-header]:h-9' : 'h-8 pt-2'
         )}>
-            <div
-                className={cn(
-                    'flex items-center justify-end gap-1.5 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-[13px]',
-                    alwaysShowActions
-                        ? 'pointer-events-auto opacity-100'
-                        : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100 has-[[data-popup-open]]:pointer-events-auto has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100'
-                )}
-            >
-                {timestamp && !alwaysShowActions ? (
-                    <span
-                        className="me-1 flex items-center gap-1 typography-meta tabular-nums text-muted-foreground"
-                        aria-label={t('contextTooltips.chat.messageTime', { time: timestamp })}
-                    >
-                        <Icon name="time" className="h-3.5 w-3.5" />
-                        <span>{timestamp}</span>
-                    </span>
-                ) : null}
-                {alwaysShowActions ? (
-                    <>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
-                            aria-label={t('chat.messageBody.actions.moreActions')}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                setUserActionSheetOpen(true);
-                            }}
-                        >
-                            <Icon name="more" className="h-3.5 w-3.5" />
-                        </Button>
-                        <MobileOverlayPanel
-                            open={userActionSheetOpen}
-                            onClose={() => setUserActionSheetOpen(false)}
-                            title={t('chat.messageBody.actions.moreActions')}
-                        >
-                            {timestamp ? (
-                                <div className="mb-1 flex items-center gap-2.5 border-b border-edge-muted px-2 pb-2 typography-meta text-muted-foreground">
-                                    <Icon name="time" className="size-4" />
-                                    <span>{timestamp}</span>
-                                </div>
-                            ) : null}
-                            {userSheetActions.map((action) => (
-                                <MobileSheetRow
-                                    key={action.id}
-                                    disabled={action.disabled}
-                                    leading={<span className="flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-4">{action.icon}</span>}
-                                    onClick={() => {
-                                        setUserActionSheetOpen(false);
-                                        action.onSelect();
-                                    }}
-                                >
-                                    {action.label}
-                                </MobileSheetRow>
-                            ))}
-                        </MobileOverlayPanel>
-                    </>
-                ) : (
-                    <>
-                    {onRevert && (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
-                                    aria-label={t('chat.messageBody.actions.revertAria')}
-                                    onPointerDown={(event) => event.stopPropagation()}
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        onRevert();
-                                    }}
-                                >
-                                    <Icon name="arrow-go-back" className="h-3 w-3" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.revert')}</TooltipContent>
-                        </Tooltip>
-                    )}
-                    {canCopyMessage && hasCopyableText && (
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    data-visible={copyHintVisible || isMessageCopied ? 'true' : undefined}
-                                    className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
-                                    aria-label={t('chat.messageBody.actions.copyMessageAria')}
-                                    onPointerDown={(event) => event.stopPropagation()}
-                                    onClick={handleCopyButtonClick}
-                                    onFocus={() => setCopyHintVisible(true)}
-                                    onBlur={() => {
-                                        if (!isMessageCopied) {
-                                            setCopyHintVisible(false);
-                                        }
-                                    }}
-                                >
-                                    {isMessageCopied ? (
-                                        <Icon name="check" className="h-3 w-3 text-[color:var(--status-success)]" />
-                                    ) : (
-                                        <Icon name="file-copy" className="h-3 w-3" />
-                                    )}
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
-                        </Tooltip>
-                    )}
-                    {userMenuActions.length > 0 ? (
-                        <DropdownMenu>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button
-                                            type="button"
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
-                                            aria-label={t('chat.messageBody.actions.moreActions')}
-                                            onPointerDown={(event) => event.stopPropagation()}
-                                        >
-                                            <Icon name="more" className="h-3 w-3" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                </TooltipTrigger>
-                                <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.moreActions')}</TooltipContent>
-                            </Tooltip>
-                            <DropdownMenuContent align="end" onPointerDown={(event) => event.stopPropagation()}>
-                                {userMenuActions.map((action) => (
-                                    <DropdownMenuItem
-                                        key={action.id}
-                                        className="typography-meta"
-                                        disabled={action.disabled}
-                                        onSelect={() => action.onSelect()}
-                                    >
-                                        <span className="flex size-4 shrink-0 items-center justify-center">{action.icon}</span>
-                                        {action.label}
-                                    </DropdownMenuItem>
-                                ))}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    ) : null}
-                    </>
-                )}
-
-            </div>
+            {actionsContainer}
         </div>
     ) : null;
 
@@ -467,7 +472,9 @@ export const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, 
                             style={INLINE_TEXT_LINK_STYLE}
                             aria-expanded={messageExpanded}
                         >
-                            {t(messageExpanded ? 'chat.message.userText.showLess' : 'chat.message.userText.showMore')}
+                            {hidesContextParts
+                                ? t('chat.message.userText.showMoreHidden', { count: contextPartsToHide.size })
+                                : t(messageExpanded ? 'chat.message.userText.showLess' : 'chat.message.userText.showMore')}
                         </button>
                     )}
                 </div>

@@ -21,7 +21,89 @@ hardening verification, command execution and space errors. Its
 - Docker CLI JSON gets its types from `docker-wire.ts` only, at the parse.
   Output of a container or of a space's network never takes a wire type.
 
+- A shared SSH connection belongs to one Docker over SSH place of one running
+  host. Its socket is in a folder of mode 0700 under
+  `<dataDir>/spaces/ssh/<pid>-<random>/<n>`, which no other user, place or
+  running copy of the app uses. ssh itself refuses a client of another user.
+- A shared connection logs in with the user's own ssh and configuration. No
+  option touches the host key check, the keys or the agent choice. `BatchMode`
+  makes a login that would ask a question fail; agent and X11 forwarding and
+  the port forwards of the user's configuration are off on it, because it lives
+  longer than one command.
+- Sharing never decides whether a command runs. A command that finds no proven
+  connection runs at once as `docker --host ssh://...` with its own SSH
+  connections, while a login for the next ones goes on beside it. Every command
+  keeps its own time limit; proving a connection that was silent may come before
+  it and takes three seconds at most. Failed logins are retried after a pause of
+  5 seconds, doubling to 60.
+- Nothing is shared unless every folder from the root down to the connections'
+  belongs to this user or root and is writable by nobody else, or lies inside a
+  folder only this user can enter; whoever can write there would own the script.
+  On Linux an ACL that lets another user write shows in the group bits, so a
+  group-writable folder is refused. On macOS any ACL entry that allows anything
+  refuses, asked once, outside the event loop and with a deadline.
+- `close()` ends a place's connections: their input at once, the process after
+  five seconds. Process exit ends them at once. When the app is killed, a guard
+  process per connection, a shell that waits for the end of a pipe from the host,
+  ends it, whatever runs on it. A retired connection still carries the commands
+  that began on it and ends with the last.
+- A connection carries one space's commands or the place's own, never two
+  spaces'. What a hostile space sends can stall its own connection only.
+- Git transfers never use a shared connection, see below. A connection on which
+  a command was killed takes no further command.
+- Windows shares nothing and starts no extra process.
+
 ## Decisions
+
+### Why docker's ssh is replaced on PATH and the connection is held by `cat`
+
+The docker CLI opens SSH connections by running `ssh` from its PATH, one or two
+per command, and takes no ssh options. So a place's docker commands get a PATH
+that begins with a folder holding one script named `ssh`, which adds the control
+socket, puts the original PATH back and runs the real ssh. The PATH is put back
+for a `ProxyCommand` that runs ssh itself: through the script it would reach the
+jump host over the connection to the target. A forwarded daemon socket was
+rejected: it bypasses the remote docker CLI's own choice of daemon, and the CLI's
+failures, which `check()` tells apart, would change.
+
+ssh's own `ControlMaster=auto` with `ControlPersist` was rejected: the master
+would be a background process nobody owns, it would outlive the app, and a
+socket that cannot be bound ends the command. The connection is a foreground
+child running `cat` on the machine, and the echo of a random mark proves the
+whole way there and back. The end of its input alone would leave it for as long
+as a command runs on it, so the guard ends it when the host dies. A connection silent for five seconds is proved before its
+next command and retired when no echo comes in three; `ServerAliveInterval`
+ends a dead one within a minute.
+
+Killing docker closes its own SSH connection. On a shared one it leaves the
+channel: the server decides when the far side ends, and a server that does not
+know OpenSSH's end-of-write message may keep it, full of what the space sent, and
+stall the connection. Measured on 2026-11-25 with a transfer stopped at the size
+cap: the next command hung for its whole 120 seconds. Transfers are the commands
+that are killed while a space sends, so they log in for themselves, as before. A stream to a
+space that is destroyed has two seconds to end by its input, which the bridge
+does; one that has to be killed takes its connection out of use, like any
+killed command.
+
+A connection carries four docker commands at most. `docker exec` takes two
+sessions and OpenSSH's `MaxSessions` is 10 by default; past it ssh opens its own
+connection, which works and is slow. Another connection opens when four are in use and
+ends after a minute without any; the last one of a space or the place ends after
+ten.
+
+The folders are under the data folder and never in the system's temporary
+folder: a clean-up there removes the folder of a long-running app, and another
+user could then make it again and own the script and the socket.
+
+### Why a listing asks for the three kinds at once
+
+While a connection is shared, containers, volumes and networks are listed in
+parallel, since each command costs round trips to the machine. The order of the
+result stays. Without one they are listed one after the other, so a place that
+logs in for every command never opens more logins at once than it did.
+The dispatcher's listing also answers whether the space's place is reachable,
+so a request lists once; the two used to list one after the other.
+
 
 ### Why registry results retain the implementation type
 
@@ -176,6 +258,10 @@ Choices a later reader could undo by mistake:
   SQLite, waiting for OpenCode's lock, and reads the table back, because
   OpenCode's integration listing cannot see a provider its catalog does not
   know.
+- The credential test waits for OpenCode's plugins before it reads the
+  integration list. Since OpenCode 2.4.0 the first read of a cold location
+  answers at once with an empty list, measured 0 and then 334 entries, and an
+  empty list shows no credential whether one is there or not.
 - The second space shares the owner's tools volume, so its create costs seconds.
 
 ### Why fake Docker resources have separate entry types

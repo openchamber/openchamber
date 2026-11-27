@@ -94,6 +94,7 @@ describe("bootstrapDirectory", () => {
     expect(await bootstrap.sessions).toBe("failed")
     expect(await bootstrap.environment).toBe("complete")
     expect(input.store.getState().session).toBe(cached)
+    expect(input.store.getState().requestCoverage).toEqual(new Set(["cached"]))
   })
 
   test("a config failure cannot suppress status or pending-form recovery", async () => {

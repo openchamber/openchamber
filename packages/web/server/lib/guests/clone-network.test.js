@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cloneGitRepository, isGitAuthFailure, runGit, runGitNetwork } from './clone.js';
+import { checkGuestUpdate } from './updates.js';
 
 const dirs = [];
 afterEach(() => {
@@ -123,14 +124,12 @@ describe('isGitAuthFailure', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('cloneGitRepository', () => {
-  const lookup = async () => [{ address: '93.184.216.34', family: 4 }];
-
   it('answers clone-auth-failed when the host refuses the login', async () => {
     const { gitBinary } = fakeGit(`echo "fatal: Authentication failed for 'https://example.com/r.git/'" >&2
 exit 128`);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary, lookup });
+    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary });
 
     expect(result).toEqual({ ok: false, code: 'clone-auth-failed' });
   });
@@ -140,8 +139,81 @@ exit 128`);
 exit 128`);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary, lookup });
+    const result = await cloneGitRepository('https://example.com/r.git', 'dest', { gitBinary });
 
     expect(result).toEqual({ ok: false, code: 'clone-failed' });
+  });
+
+  describe('with a Git identity that signs in with a connected account', () => {
+    const token = 'account-private-token';
+    const source = 'https://github.com/acme/private-extension.git';
+    const account = { provider: 'github', instance: 'github.com', accountId: 'github-account' };
+    const gitAccounts = () => ({
+      readAccount: vi.fn(async () => ({ credentialId: 'github-account', credentialRevision: 1, providerUserId: 'github.com#42' })),
+      credentialResolver: {
+        resolve: vi.fn(async ({ endpoint }) => ({
+          mode: 'managed', transport: 'https', username: 'x-access-token', password: token, allowedEndpoint: endpoint,
+        })),
+      },
+    });
+    // Asks the helpers it was configured with for the login, the way git does when the host answers 401.
+    const loginRecordingGit = () => fakeGit(`echo "$*" >> "$(dirname "$0")/calls"
+printf '%s' "$GIT_CONFIG_NOSYSTEM:$GIT_CONFIG_GLOBAL" > "$(dirname "$0")/config-env"
+helper=""
+for arg in "$@"; do case "$arg" in credential.helper=!*) helper="\${arg#credential.helper=!}";; esac; done
+[ -n "$helper" ] || exit 128
+printf 'protocol=https\\nhost=github.com\\npath=acme/private-extension.git\\n\\n' | sh -c "$helper get" > "$(dirname "$0")/login"`);
+
+    it('clones over HTTPS with that account, without putting its token on the command line', async () => {
+      const { createProfile } = await import('../git/identity-storage.js');
+      createProfile({ id: 'work-account', name: 'Work', userName: 'Work', userEmail: 'work@example.com', transport: 'account', account });
+      const { gitBinary, calls } = loginRecordingGit();
+      const accounts = gitAccounts();
+
+      const result = await cloneGitRepository(source, 'dest', { gitBinary, gitIdentityId: 'work-account', gitAccounts: accounts });
+
+      expect(result).toEqual({ ok: true });
+      expect(fs.readFileSync(path.join(path.dirname(gitBinary), 'login'), 'utf8')).toBe(`username=x-access-token\npassword=${token}\n\n`);
+      expect(fs.readFileSync(calls, 'utf8')).not.toContain(token);
+      expect(accounts.readAccount).toHaveBeenCalledWith(account);
+      // No system or user Git config: a server-side insteadOf, helper or proxy must not see the login.
+      expect(fs.readFileSync(path.join(path.dirname(gitBinary), 'config-env'), 'utf8')).toBe('1:/dev/null');
+    });
+
+    it('fails instead of falling back to the server login when no account can be read', async () => {
+      const { createProfile } = await import('../git/identity-storage.js');
+      createProfile({ id: 'gone-account', name: 'Gone', userName: 'Gone', userEmail: 'gone@example.com', transport: 'account', account });
+      const { gitBinary, calls } = loginRecordingGit();
+      const accounts = gitAccounts();
+      accounts.readAccount.mockResolvedValue(null);
+
+      const result = await cloneGitRepository(source, 'dest', { gitBinary, gitIdentityId: 'gone-account', gitAccounts: accounts });
+
+      expect(result).toEqual({ ok: false, code: 'clone-failed' });
+      expect(fs.existsSync(calls)).toBe(false);
+    });
+
+    it('checks for updates with that account', async () => {
+      const { createProfile } = await import('../git/identity-storage.js');
+      createProfile({ id: 'update-account', name: 'Update', userName: 'Update', userEmail: 'update@example.com', transport: 'account', account });
+      const manifest = JSON.stringify({ name: 'fixture', version: '1.1.0',
+        openchamber: { apiVersion: 1, contributes: { panel: { id: 'fixture', name: 'Fixture', icon: 'window', entry: 'panel/index.html' } } } });
+      const { gitBinary } = fakeGit(`case "$1" in
+  init) exit 0;;
+  show) [ -s "$(dirname "$0")/login" ] && printf '%s' '${manifest}' && exit 0; exit 128;;
+esac
+helper=""
+for arg in "$@"; do case "$arg" in credential.helper=!*) helper="\${arg#credential.helper=!}";; esac; done
+[ -n "$helper" ] || exit 128
+printf 'protocol=https\\nhost=github.com\\npath=acme/private-extension.git\\n\\n' | sh -c "$helper get" > "$(dirname "$0")/login"`);
+
+      const result = await checkGuestUpdate({
+        guest: { version: '1.0.0', packageRoot: '/extensions/fixture' },
+        origin: { url: source, gitIdentityId: 'update-account' },
+        gitBinary, gitAccounts: gitAccounts(),
+      });
+
+      expect(result).toEqual({ available: true, version: '1.1.0', requested: [] });
+    });
   });
 });

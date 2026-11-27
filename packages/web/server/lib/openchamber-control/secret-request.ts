@@ -71,6 +71,8 @@ const CHAT_SENT_EARLIER_NOTE = "The card did not wait: the user had already writ
 
 export const SECRET_REQUEST_CLOSED_IN_CHAT_NOTE = "The user wrote in the chat before the call finished; their message follows this result. If the card was still waiting, they gave no secret; if they pasted one in the chat, tell them to rotate it, since the chat keeps it. A command secret.run had started was stopped.";
 
+export const SECRET_CONNECTION_LOST_NOTE = "The connection to OpenChamber was lost before this call finished, so its card is closed and no result came back. If secret.run had already started its command, that command may have finished or may still be running. Don't call this again on your own: say what is blocked and end your turn; the user can ask you to continue.";
+
 const NOT_WAITING_MESSAGE = 'This request is no longer waiting for a secret';
 
 const isText = (value: unknown): value is string => isString(value);

@@ -29,6 +29,7 @@ const pageSchema = z.object({
   callId: z.string().min(1),
   directory: z.string().min(1).nullable(),
   title: z.string(),
+  field: z.enum(['html', 'ui']).catch('ui'),
   question: z.string().catch(''),
   questionCaptured: z.enum(['static-text', 'truncated', 'none']).optional().catch(undefined),
   openedAt: z.number().finite().nonnegative(),
@@ -47,6 +48,7 @@ export interface LaterPageInput {
   sessionId: string;
   callId: string;
   title: string;
+  field: 'html' | 'ui';
   question?: string;
   questionCaptured?: z.infer<typeof pageSchema>['questionCaptured'];
   directory?: string | null | undefined;
@@ -96,11 +98,17 @@ const buildLaterAnswerMessage = (page: LaterPage) => {
     ]
     : answer.reason === 'declined'
       ? ['The user declined to answer a page you showed earlier with answerLater.', shown, "Don't choose for them and don't ask the same question again."]
-      : [
-        'The chat could not draw a page you showed earlier with answerLater, so the user saw its source instead of fields. errors are the parser\'s.',
-        { ...shown, errors: answer.errors ?? [] },
-        'Fix the program from the errors and show it again.',
-      ];
+      : page.field === 'html'
+        ? [
+          'The script of a page you showed earlier with answerLater threw before the page showed anything to answer with, so the user saw an empty page. errors are what it threw.',
+          { ...shown, errors: answer.errors ?? [] },
+          'Fix the script from the errors and show the page again.',
+        ]
+        : [
+          'The chat could not draw a page you showed earlier with answerLater, so the user saw its source instead of fields. errors are the parser\'s.',
+          { ...shown, errors: answer.errors ?? [] },
+          'Fix the program from the errors and show it again.',
+        ];
   const outcome = answer.answered ? 'answered' : answer.reason;
   const excerpt = shown.questionCaptured
     ? ` page may be only part of what the user saw (questionCaptured: static-text means text the page's scripts wrote is missing, truncated that it was cut, none that no text was found), so don't assume what it asked beyond it.`
@@ -233,7 +241,7 @@ export function createLaterPages({
 
   const snapshot = () => ({ revision, pages: Array.from(pages.values(), publicPage) });
 
-  const open = async ({ sessionId, callId, title, question = '', questionCaptured, directory }: LaterPageInput) => {
+  const open = async ({ sessionId, callId, title, field, question = '', questionCaptured, directory }: LaterPageInput) => {
     const key = keyOf(sessionId, callId);
     try {
       await mutate(() => {
@@ -244,7 +252,7 @@ export function createLaterPages({
           throw new OpenChamberControlError(`${MAX_PAGES} pages already wait for a later answer; ask in text`, 409);
         }
         if (evicted) pages.delete(keyOf(evicted.sessionId, evicted.callId));
-        pages.set(key, { sessionId, callId, directory: directory || null, title, question, ...(questionCaptured && { questionCaptured }), openedAt: now(), answer: null, answeredAt: null, messageID: null });
+        pages.set(key, { sessionId, callId, directory: directory || null, title, field, question, ...(questionCaptured && { questionCaptured }), openedAt: now(), answer: null, answeredAt: null, messageID: null });
         return () => {
           pages.delete(key);
           if (evicted) pages.set(keyOf(evicted.sessionId, evicted.callId), evicted);

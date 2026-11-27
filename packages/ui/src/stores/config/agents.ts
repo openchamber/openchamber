@@ -16,14 +16,12 @@ import { clearProjectConfigError, _agentsLoadErrors } from './projectErrors';
 import { getSyncConfig } from '@/sync/sync-refs';
 import {
     normalizeOptionalString,
-    resolveGitGenerationModelSelection,
     resolveDefaultAgentModelSelection,
     readFallbackModelPrefs,
     resolveSelectionWithManualGuard,
     variantAfterResolve,
 } from './selectionResolution';
 import { configModelIdentifier } from '@/lib/opencode/projection';
-import { updateDesktopSettings } from '@/lib/persistence';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { hasLiveCatalog } from './directorySnapshots';
 import { readProjectConfigError, isSameProjectConfigError } from '@/lib/opencode/configError';
@@ -114,13 +112,6 @@ export const createAgentCatalog: ConfigSlice<'loadAgents'> = (set, get) => ({
                     ? get().providers
                     : (get().directoryScoped[directoryKey]?.providers ?? []);
 
-                const defaultZenModel = normalizeOptionalString(get().settingsZenModel);
-                const resolvedGitSelection = resolveGitGenerationModelSelection({
-                    providers,
-                    settingsZenModel: defaultZenModel,
-                });
-                const resolvedZenModel = resolvedGitSelection?.modelId || defaultZenModel;
-
                 if (!isCurrentAgentLoad()) return false;
                 set((state) => {
                     if (!isCurrentAgentLoad()) return state;
@@ -150,7 +141,6 @@ export const createAgentCatalog: ConfigSlice<'loadAgents'> = (set, get) => ({
                     };
 
                     const nextState: Partial<ConfigStore> = {
-                        settingsZenModel: resolvedZenModel,
                         directoryScoped: {
                             ...state.directoryScoped,
                             [directoryKey]: nextSnapshot,
@@ -172,17 +162,6 @@ export const createAgentCatalog: ConfigSlice<'loadAgents'> = (set, get) => ({
                     ?? (latestConfigState.activeDirectoryKey === directoryKey ? latestConfigState.opencodeDefaultAgent : undefined);
                 const opencodeDefaultModel = latestSnapshot?.opencodeDefaultModel
                     ?? (latestConfigState.activeDirectoryKey === directoryKey ? latestConfigState.opencodeDefaultModel : undefined);
-
-                const shouldPersistResolvedZenModel =
-                    !!resolvedZenModel &&
-                    resolvedZenModel !== defaultZenModel;
-
-                if (shouldPersistResolvedZenModel && resolvedZenModel) {
-                    updateDesktopSettings({
-                        zenModel: resolvedZenModel,
-                    }).catch(() => {
-                    });
-                }
 
                 if (safeAgents.length === 0) {
                     if (

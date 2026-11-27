@@ -114,3 +114,13 @@ export type ReferencesApi = {
   readReferences: (read: TimelineRead | null, budgetMs?: number) => Promise<SourceControlReferenceLink[]>;
   withReferences: <T extends object>(detail: T, references: SourceControlReferenceLink[]) => T & { references?: SourceControlReferenceLink[] };
 };
+
+export const itemReferences = <Call>(
+  api: <T>(call: Call, method: 'GET', path: string, options: { query: Record<string, string> }) => Promise<{ data: T; total: number | null }>,
+  call: Call,
+  repo: string,
+  number: number,
+  include: boolean,
+): TimelineRead | null => (include ? (page, limit) => api<ReferenceEvent[]>(call, 'GET', `${repo}/issues/${number}/timeline`, {
+  query: { page: String(page), limit: String(limit) },
+}) : null);

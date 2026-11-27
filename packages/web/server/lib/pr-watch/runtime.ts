@@ -3,10 +3,10 @@ import path from 'path';
 import { z } from 'zod';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
-import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { createMessageId, escapeAttribute } from '../dispatch-results/runtime.js';
 import { isTrackedItemInput, parseTrackedItem, threadInstance, trackedItemKey } from '../tracked-items/items.js';
 import type { createTrackedItemReaders } from '../tracked-items/readers.js';
+import { armQueueRemoval, cleanQueueRemovalReason, latestQueueRemovalSchema, observeQueueRemoval, queueRemovalStateSchema } from './queue-removal.js';
 
 const FILE_NAME = 'pr-watch.json';
 const FILE_VERSION = 1;
@@ -26,10 +26,11 @@ const EVENT_TEXT = {
   'checks-passed': 'every check passed',
   conflict: 'it conflicts with its base branch',
   behind: 'its branch is behind the base branch',
+  'queue-removed': 'it was removed from the merge queue',
   activity: 'someone commented or reviewed',
 };
 export type PrWatchEvent = keyof typeof EVENT_TEXT;
-const EVENTS: PrWatchEvent[] = ['merged', 'closed', 'checks-failed', 'checks-passed', 'conflict', 'behind', 'activity'];
+const EVENTS: PrWatchEvent[] = ['merged', 'closed', 'checks-failed', 'checks-passed', 'conflict', 'behind', 'queue-removed', 'activity'];
 
 const sessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{4,128}$/);
 const snapshotSchema = z.object({
@@ -48,11 +49,13 @@ const watchSchema = z.object({
   startedAt: z.number().finite().nonnegative(),
   baselineAt: z.number().finite().nonnegative().catch(0),
   last: snapshotSchema.nullable(),
+  queueRemoval: queueRemovalStateSchema,
   wake: z.object({
     events: z.array(z.enum(EVENTS)).min(1),
     messageID: z.string().nullable(),
     failedChecks: z.array(z.string()).catch([]),
     authors: z.array(z.string()).catch([]),
+    queueRemovalReason: z.string().optional().transform(cleanQueueRemovalReason).catch(undefined),
   }).nullable(),
 });
 const detailsSchema = z.object({
@@ -74,6 +77,7 @@ const pullStateSchema = z.object({
   mergeableState: z.string().nullable().optional(),
   checks: z.object({ state: z.enum(['success', 'failure', 'pending', 'unknown']) }).nullable().optional(),
   activity: z.number().int().nonnegative().optional(),
+  latestQueueRemoval: latestQueueRemovalSchema,
 });
 const statusEventSchema = z.object({
   type: z.literal('session.status'),
@@ -117,7 +121,7 @@ export interface TrackedWatchState {
 }
 
 export interface PrWatchTrackedItems {
-  setServerInterest: (owner: string, items: Map<string, ThreadItem>) => void;
+  setServerInterest: (owner: string, items: Map<string, ThreadItem>, options?: { queueRemovals?: boolean }) => void;
   subscribe: (listener: (states: TrackedWatchState[]) => void) => () => void;
 }
 
@@ -206,12 +210,15 @@ const snapshotOf = (value: TrackedWatchState['state']) => {
   const state = parsed.success ? parsed.data : null;
   if (!state) return null;
   return {
-    state: state.state,
-    headSha: state.headSha ?? null,
-    checks: state.checks?.state ?? null,
-    merge: state.mergeableState ?? null,
-    activity: state.activity ?? null,
-    title: state.title ?? '',
+    snapshot: {
+      state: state.state,
+      headSha: state.headSha ?? null,
+      checks: state.checks?.state ?? null,
+      merge: state.mergeableState ?? null,
+      activity: state.activity ?? null,
+      title: state.title ?? '',
+    },
+    latestQueueRemoval: state.latestQueueRemoval,
   };
 };
 
@@ -244,6 +251,7 @@ const nameList = (names: string[]) => {
 };
 
 const describeEvent = (event: PrWatchEvent, wake: Wake) => {
+  if (event === 'queue-removed' && wake.queueRemovalReason) return `${EVENT_TEXT[event]} (${wake.queueRemovalReason})`;
   const names = event === 'checks-failed' ? nameList(wake.failedChecks) : event === 'activity' ? nameList(wake.authors) : '';
   return names ? `${EVENT_TEXT[event]} (${names})` : EVENT_TEXT[event];
 };
@@ -264,6 +272,7 @@ const buildWakeMessage = (watch: WakingWatch) => {
       events: watch.wake.events,
       failedChecks: cleanNames(watch.wake.failedChecks),
       authors: cleanNames(watch.wake.authors),
+      queueRemovalReason: watch.wake.queueRemovalReason,
     },
   };
 };
@@ -292,7 +301,7 @@ const PR_WAIT = {
   source: PR_WAIT_SOURCE,
   extension: 'OpenChamber',
   title: 'Pull request',
-  description: 'Wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed. Each pull request is its own wait; starting one again starts it over',
+  description: 'Wakes the session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, GitHub removes it from the merge queue, or it is merged or closed. Each pull request is its own wait; starting one again starts it over',
   params: { url: { type: 'string', description: 'Address of a GitHub pull request or GitLab merge request', required: true } },
 };
 
@@ -338,6 +347,7 @@ export function createPrWatchRuntime({
   const deferred = new Set<string>();
   const failures = new Map<string, number>();
   const enriching = new Set<Watch>();
+  const appliedReadAt = new WeakMap<Watch, number>();
 
   const watchesOf = (sessionID: string) => Array.from(watches.values()).filter((watch) => watch.sessionID === sessionID);
   const hasWake = (sessionID: string) => watchesOf(sessionID).some((watch) => watch.wake);
@@ -418,7 +428,7 @@ export function createPrWatchRuntime({
     for (const watch of watches.values()) {
       if (!watch.wake) items.set(trackedItemKey(watch.item), watch.item);
     }
-    trackedItems.setServerInterest(INTEREST_OWNER, items);
+    trackedItems.setServerInterest(INTEREST_OWNER, items, { queueRemovals: true });
   };
 
   const openCodeRequest = async (fetchPath: string, { method = 'GET', body }: { method?: 'GET' | 'POST'; body?: ReturnType<typeof buildWakeMessage> & { id: string; delivery: 'steer'; resume: true } } = {}) => {
@@ -437,7 +447,6 @@ export function createPrWatchRuntime({
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };
 
-  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl, signal: undefined });
 
   const clearTimer = (sessionID: string) => {
     const timer = timers.get(sessionID);
@@ -503,10 +512,6 @@ export function createPrWatchRuntime({
 
   async function attemptWake(watch: WakingWatch) {
     const { sessionID } = watch;
-    const statuses = await activityProbe.fetchActiveSessionStatuses();
-    if (!isCurrent(watch)) return undefined;
-    if (!statuses) return retry(watch, 'OpenCode could not be asked');
-    if (statuses[sessionID]) return undefined;
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(watch)) return undefined;
     if (archived) return drop(...watchesOf(sessionID));
@@ -547,40 +552,49 @@ export function createPrWatchRuntime({
     await persist().catch(() => undefined);
   }
 
+  const applySnapshot = async (watch: Watch, next: PrWatchSnapshot, requestedAt: number, latestQueueRemoval?: z.infer<typeof latestQueueRemovalSchema>) => {
+    if (watch.wake || !isCurrent(watch)) return;
+    if (requestedAt < (appliedReadAt.get(watch) ?? watch.baselineAt)) return;
+    appliedReadAt.set(watch, requestedAt);
+    const events = changesBetween(watch.last, next);
+    const removal = watch.item.provider === 'github' && next.state === 'open' && latestQueueRemoval !== undefined
+      ? observeQueueRemoval(watch.queueRemoval, latestQueueRemoval, watch.baselineAt || watch.startedAt)
+      : null;
+    if (removal?.removed) events.push('queue-removed');
+    if (removal?.degraded) {
+      console.warn(`[pr-watch] pull request #${watch.item.number}: a merge queue removal stamped within a second of the watch start, with no timeline read before it, is taken as history and does not wake the session`);
+    }
+    if (events.length === 0 && !removal && JSON.stringify(next) === JSON.stringify(watch.last)) return;
+    const newActivity = (next.activity ?? 0) - (watch.last?.activity ?? 0);
+    watch.last = next;
+    if (removal) watch.queueRemoval = removal.state;
+    if (events.length === 0) return commit(watch.sessionID);
+    if (events.includes('merged')) {
+      const cleanup = await readCleanupOnMerge().catch(() => false) === true;
+      if (!isCurrent(watch)) return;
+      if (cleanup) return drop(watch);
+    }
+    watch.wake = { events, messageID: null, failedChecks: [], authors: [], queueRemovalReason: removal?.reason };
+    const withDetails = events.includes('checks-failed') || events.includes('activity');
+    if (withDetails) enriching.add(watch);
+    try {
+      syncInterest();
+      await commit(watch.sessionID);
+      if (withDetails) await addDetails(watch, newActivity);
+    } finally {
+      enriching.delete(watch);
+    }
+    arm(watch.sessionID, 0);
+  };
+
   const onStatesChanged = (states: TrackedWatchState[]) => {
     void (async () => {
       for (const { key, state, requestedAt = 0 } of states) {
-        const next = snapshotOf(state);
-        if (!next) continue;
+        const read = snapshotOf(state);
+        if (!read) continue;
         for (const watch of Array.from(watches.values())) {
-          if (watch.wake || trackedItemKey(watch.item) !== key || !isCurrent(watch)) continue;
-          if (requestedAt < watch.baselineAt) continue;
-          const events = changesBetween(watch.last, next);
-          const newActivity = (next.activity ?? 0) - (watch.last?.activity ?? 0);
-          watch.last = next;
-          if (events.length === 0) {
-            await commit(watch.sessionID);
-            continue;
-          }
-          if (events.includes('merged')) {
-            const cleanup = await readCleanupOnMerge().catch(() => false) === true;
-            if (!isCurrent(watch)) continue;
-            if (cleanup) {
-              await drop(watch);
-              continue;
-            }
-          }
-          watch.wake = { events, messageID: null, failedChecks: [], authors: [] };
-          const withDetails = events.includes('checks-failed') || events.includes('activity');
-          if (withDetails) enriching.add(watch);
-          try {
-            syncInterest();
-            await commit(watch.sessionID);
-            if (withDetails) await addDetails(watch, newActivity);
-          } finally {
-            enriching.delete(watch);
-          }
-          arm(watch.sessionID, 0);
+          if (trackedItemKey(watch.item) !== key) continue;
+          await applySnapshot(watch, read.snapshot, requestedAt, read.latestQueueRemoval);
         }
       }
     })().catch((error) => console.warn('[pr-watch] could not apply a change:', failureMessage(error) ?? error));
@@ -598,13 +612,14 @@ export function createPrWatchRuntime({
     await load();
 
     let last: PrWatchSnapshot | null = null;
+    let latestQueueRemoval: z.infer<typeof latestQueueRemovalSchema>;
     const baselineAt = now();
     try {
       const result = await readers.sourceControl({
         provider: item.provider,
         instance: threadInstance(item),
         accountId: null,
-        pulls: [{ owner: item.owner, repo: item.repo, number: item.number }],
+        pulls: [{ owner: item.owner, repo: item.repo, number: item.number, queueRemoval: true }],
         issues: [],
       });
       if (result?.status === 'disconnected') {
@@ -613,7 +628,9 @@ export function createPrWatchRuntime({
       if (result?.status === 'ok') {
         const summary = (result.pulls ?? []).find((pull: PullSummaryReference | null) => pull?.number === item.number);
         if (!summary) throw httpError('The pull request could not be read: it does not exist, or the connected account cannot see it', 404);
-        last = snapshotOf(summary);
+        const read = snapshotOf(summary);
+        last = read?.snapshot ?? null;
+        if (item.provider === 'github') latestQueueRemoval = read?.latestQueueRemoval;
       }
     } catch (error) {
       if (hasHttpStatus(error)) throw error;
@@ -623,9 +640,13 @@ export function createPrWatchRuntime({
     }
 
     const record: Watch = { sessionID, directory, url: String(url).trim(), item, startedAt: now(), baselineAt, last, wake: null };
-    watches.delete(keyOf(record));
-    failures.delete(keyOf(record));
-    watches.set(keyOf(record), record);
+    const key = keyOf(record);
+    if (item.provider === 'github') {
+      record.queueRemoval = armQueueRemoval(watches.get(key)?.queueRemoval, latestQueueRemoval, baselineAt);
+    }
+    watches.delete(key);
+    failures.delete(key);
+    watches.set(key, record);
     if (!hasWake(sessionID)) clearTimer(sessionID);
     if (watches.size > MAX_WATCHES) {
       const oldest = Array.from(watches.values()).sort((left, right) => left.startedAt - right.startedAt)[0];
@@ -635,7 +656,7 @@ export function createPrWatchRuntime({
     await commit(sessionID);
     return {
       watching: toPublicWatch(record),
-      next: 'A message arrives in this session when a check fails, every check passes, someone comments or reviews, the branch conflicts or falls behind, or the pull request is merged or closed.',
+      next: 'A message arrives in this session when a check fails, every check passes, someone comments or reviews, the branch conflicts or falls behind, GitHub removes it from the merge queue, or the pull request is merged or closed.',
     };
   };
 

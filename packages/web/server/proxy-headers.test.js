@@ -39,6 +39,18 @@ describe('OpenCode proxy header handling', () => {
     expect(headers.accept).toBe('application/json');
   });
 
+  it('drops the UI session cookie from forwarded request headers', () => {
+    const headers = collectForwardProxyHeaders({
+      accept: 'application/json',
+      cookie: 'oc_ui_session_3001=ui-session-secret',
+      Cookie: 'oc_ui_session_3001=ui-session-secret',
+    });
+
+    expect(headers.cookie).toBeUndefined();
+    expect(headers.Cookie).toBeUndefined();
+    expect(headers.accept).toBe('application/json');
+  });
+
   it('keeps a packaged client cross-site fetch metadata away from OpenCode', () => {
     const headers = collectForwardProxyHeaders({
       origin: 'capacitor://localhost',
@@ -58,6 +70,17 @@ describe('OpenCode proxy header handling', () => {
   it('drops transfer-encoding from forwarded response headers', () => {
     expect(shouldForwardProxyResponseHeader('transfer-encoding')).toBe(false);
     expect(shouldForwardProxyResponseHeader('Transfer-Encoding')).toBe(false);
+  });
+
+  it('drops an upstream clear-site-data so it cannot wipe the browser origin', () => {
+    expect(shouldForwardProxyResponseHeader('clear-site-data')).toBe(false);
+    expect(shouldForwardProxyResponseHeader('Clear-Site-Data')).toBe(false);
+    expect(shouldForwardProxyResponseHeader('content-type')).toBe(true);
+  });
+
+  it('drops an upstream set-cookie before it reaches the browser origin', () => {
+    expect(shouldForwardProxyResponseHeader('set-cookie')).toBe(false);
+    expect(shouldForwardProxyResponseHeader('Set-Cookie')).toBe(false);
   });
 
   it('still keeps ordinary response headers', () => {

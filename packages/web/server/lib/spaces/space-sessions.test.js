@@ -82,6 +82,9 @@ describe('spaceEventDropCode', () => {
     ['a created session that lands outside', event('session.created', { sessionID: 's1', location: { directory: '/home/me' } }, `/spaces/${ID}/repo`), SPACE_DROP_CODES.eventOutsideRoot],
     ['a moved session that lands outside', event('session.moved', { sessionID: 's1', location: { directory: `/spaces/${OTHER}` } }, `/spaces/${ID}/repo`), SPACE_DROP_CODES.eventOutsideRoot],
     ['an event that names a host session', event('session.execution.started', { sessionID: 'host-1' }), SPACE_DROP_CODES.eventHostSession],
+    ['a job update for a host session', event('experimental.job.updated', { info: { kind: 'image', id: 'image_1', sessionID: 'host-1' } }), SPACE_DROP_CODES.eventHostSession],
+    ['a job update of its own session', event('experimental.job.updated', { info: { kind: 'image', id: 'image_1', sessionID: 's1' } }), null],
+    ['a shell started for a host session', event('shell.created', { info: { id: 'sh_1', metadata: { sessionID: 'host-1' } } }), SPACE_DROP_CODES.eventHostSession],
     ['not an object', 'text', SPACE_DROP_CODES.malformed],
   ])('%s', (_name, payload, code) => {
     expect(spaceEventDropCode({ spaceId: ID, payload, isHostSessionId: (id) => id === 'host-1' })).toBe(code);
@@ -166,6 +169,10 @@ describe('createSpaceSessionIndex', () => {
     // Nor may another space speak for it in any other event.
     expect(index.acceptSpaceEvent(OTHER, { type: 'session.execution.started', data: { sessionID: 's1' } })).toBe(false);
     expect(index.acceptSpaceEvent(ID, { type: 'session.execution.started', data: { sessionID: 's1' } })).toBe(true);
+    // Nor through a record it carries: a background job's or a shell's session.
+    expect(index.acceptSpaceEvent(OTHER, { type: 'experimental.job.updated', data: { info: { kind: 'image', id: 'image_1', sessionID: 's1' } } })).toBe(false);
+    expect(index.acceptSpaceEvent(OTHER, { type: 'shell.created', data: { info: { id: 'sh_1', metadata: { sessionID: 's1' } } } })).toBe(false);
+    expect(index.acceptSpaceEvent(ID, { type: 'experimental.job.updated', data: { info: { kind: 'image', id: 'image_1', sessionID: 's1' } } })).toBe(true);
     expect(index.acceptSpaceList(OTHER, [record('s1', `/spaces/${OTHER}/repo`)], { complete: true }).records).toEqual([]);
     index.forget(ID);
     expect(index.claimedBy('s1')).toBeNull();

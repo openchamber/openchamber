@@ -1,6 +1,7 @@
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from '../useFilesViewTabsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { commentComparisonScope } from '@/lib/commentLocation';
 import { forgetBrowserTabOpenedWithAddress, noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { CONTEXT_ZONES, getZoneView, resolveZoneActiveTab, resolveZoneActiveTabId, withZoneView, zoneOfMode } from '@/lib/workspace/zones';
 import type { ContextPanelTab, ContextPanelDirectoryState, UIStore, UIStoreSlice } from './types';
@@ -59,6 +60,7 @@ export const createContextTabActions: UIStoreSlice<
   | 'openContextPanelTab'
   | 'openTrackerItem'
   | 'openContextDiff'
+  | 'openCommentLocation'
   | 'openContextFile'
   | 'openContextFileAtLine'
   | 'openContextOverview'
@@ -75,7 +77,8 @@ export const createContextTabActions: UIStoreSlice<
   | 'closeContextFile'
   | 'closeContextPanelTabs'
 > = (set, get) => ({
-  openContextSurface: (directory, mode) => {
+  openContextSurface: (directory, rawMode) => {
+    const mode = rawMode === 'diff' ? 'git' : rawMode;
     const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
     if (!normalizedDirectory) {
       return;
@@ -118,7 +121,7 @@ export const createContextTabActions: UIStoreSlice<
     if (tabsOfMode.length > 0) {
       clearTerminalTarget();
       const mostRecent = tabsOfMode.reduce((best, tab) => (tab.touchedAt >= best.touchedAt ? tab : best));
-      if ((mode === 'diff' || mode === 'walkthrough') && mostRecent.targetDirectory) {
+      if (mode === 'walkthrough' && mostRecent.targetDirectory) {
         state.openContextPanelTab(normalizedDirectory, {
           mode,
           targetPath: mostRecent.targetPath,
@@ -145,14 +148,22 @@ export const createContextTabActions: UIStoreSlice<
       return;
     }
 
-    const nextTab = tab.mode !== 'chat' && contextPanelModeKeepsTargetDirectory(tab.mode)
+    const rawTargetDirectory = tab.mode !== 'chat' && contextPanelModeKeepsTargetDirectory(tab.mode)
+      ? normalizeContextTargetDirectory(tab.targetDirectory)
+      : null;
+    const resolvedTargetDirectory = rawTargetDirectory === normalizedDirectory ? null : rawTargetDirectory;
+    const nextTab = tab.mode === 'diff' && !resolvedTargetDirectory
       ? {
           ...tab,
-          targetDirectory: normalizeContextTargetDirectory(tab.targetDirectory) === normalizedDirectory
-            ? null
-            : normalizeContextTargetDirectory(tab.targetDirectory),
+          mode: 'git' as const,
+          targetDirectory: null,
         }
-      : tab;
+      : tab.mode !== 'chat' && contextPanelModeKeepsTargetDirectory(tab.mode)
+        ? {
+            ...tab,
+            targetDirectory: resolvedTargetDirectory,
+          }
+        : tab;
 
     const reveals = options?.reveal !== false;
     const showsFile = nextTab.mode === 'file' && Boolean(nextTab.targetPath) && reveals;
@@ -237,11 +248,16 @@ export const createContextTabActions: UIStoreSlice<
     const diffScope = normalizePendingDiffScope(scope) ?? (staged ? 'staged' : 'working');
 
     get().openContextPanelTab(normalizedDirectory, {
-      mode: 'diff',
+      mode: 'git',
       targetPath: normalizedFilePath,
       stagedDiff: diffScope === 'staged',
       diffScope,
     });
+  },
+
+  openCommentLocation: (request) => {
+    set({ pendingCommentLocation: request });
+    get().openContextDiff(request.directory, request.filePath, false, commentComparisonScope(request.origin));
   },
 
   openContextFile: (directory, filePath, options) => {
@@ -306,7 +322,7 @@ export const createContextTabActions: UIStoreSlice<
     });
   },
 
-  openAgentBrowserTab: (directory, url, ownerSessionId) => {
+  openAgentBrowserTab: (directory, url, ownerSessionId, options) => {
     const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
     if (!normalizedDirectory || isVSCodeRuntime()) return null;
     browserTabSequence += 1;
@@ -318,6 +334,7 @@ export const createContextTabActions: UIStoreSlice<
       dedupeKey,
       label: null,
       ownerSessionId,
+      usesUserLogins: options?.usesUserLogins === true,
     }, { reveal: false });
     return buildContextPanelTabID('browser', dedupeKey);
   },
@@ -531,9 +548,6 @@ export const createContextTabActions: UIStoreSlice<
         }
       }
 
-      const fileView = getZoneView(next, zoneOfMode(placement, 'file'));
-      const activeTab = next.tabs.find((tab) => tab.id === fileView.activeTabId);
-      const returnedToTree = fileView.isOpen && activeTab?.mode === 'file' && !activeTab.targetPath;
       const byDirectory = {
         ...state.contextPanelByDirectory,
         [normalizedDirectory]: next,
@@ -543,7 +557,6 @@ export const createContextTabActions: UIStoreSlice<
       return {
         contextPanelByDirectory: clamped,
         contextZoneReturnStack: pruneContextZoneReturnStacks(contextZoneReturnStack, clamped),
-        contextEditorTreeVisible: returnedToTree || state.contextEditorTreeVisible,
       };
     });
 

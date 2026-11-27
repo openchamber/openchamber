@@ -19,7 +19,7 @@ import type { LegacyZoneSizes, UIStore } from './types';
 const uiStorePersistOptions = {
   name: 'ui-store',
   storage: createDeferredSafeJSONStorage(),
-  version: 30,
+  version: 31,
   migrate: (persistedState, version) => {
     if (!persistedState || typeof persistedState !== 'object') {
       return persistedState;
@@ -40,6 +40,11 @@ const uiStorePersistOptions = {
 
     if (version < 29 && state.contextEditorTreeWidth === 240) {
       state.contextEditorTreeWidth = DEFAULT_CONTEXT_EDITOR_TREE_WIDTH;
+    }
+
+    if (version < 31) {
+      if (state.activityRenderMode === 'text') state.keepEarlierReplies = true;
+      if (state.activityRenderMode === 'text' || state.activityRenderMode === 'summary') state.activityRenderMode = 'grouped';
     }
 
     if (version < 30) {
@@ -228,6 +233,15 @@ const uiStorePersistOptions = {
       if (state.gitChangesViewMode !== 'flat' && state.gitChangesViewMode !== 'tree') {
         state.gitChangesViewMode = 'flat';
       }
+      if (
+        state.lastGitPanelScope !== 'working'
+        && state.lastGitPanelScope !== 'branch'
+        && state.lastGitPanelScope !== 'commit'
+        && state.lastGitPanelScope !== 'pr'
+        && state.lastGitPanelScope !== 'turn'
+      ) {
+        state.lastGitPanelScope = 'working';
+      }
     }
 
     delete state.linearIssueListStatus;
@@ -281,6 +295,7 @@ const uiStorePersistOptions = {
     fileTreeSide: state.fileTreeSide,
     contextEditorVisible: state.contextEditorVisible,
     contextEditorTreeWidth: state.contextEditorTreeWidth,
+    gitSidebarWidth: state.gitSidebarWidth,
     contextZoneSizes: state.contextZoneSizes,
     contextZoneExpandedChatSizes: state.contextZoneExpandedChatSizes,
     workStatusExpandedSections: state.workStatusExpandedSections,
@@ -365,6 +380,7 @@ const uiStorePersistOptions = {
     diffFileTreeWidth: state.diffFileTreeWidth,
     walkthroughTocWidth: state.walkthroughTocWidth,
     gitChangesViewMode: state.gitChangesViewMode,
+    lastGitPanelScope: state.lastGitPanelScope,
     toolJsonViewMode: state.toolJsonViewMode,
     nativeNotificationsEnabled: state.nativeNotificationsEnabled,
     notificationMode: state.notificationMode,
@@ -421,7 +437,9 @@ const uiStorePersistOptions = {
     copyMessagesAsPlainText: state.copyMessagesAsPlainText,
     selectionApprovalText: state.selectionApprovalText,
     showToolFileIcons: state.showToolFileIcons,
+    showLiveActivityPreview: state.showLiveActivityPreview,
     showTurnChangedFiles: state.showTurnChangedFiles,
+    keepEarlierReplies: state.keepEarlierReplies,
     timeFormatPreference: state.timeFormatPreference,
     weekStartPreference: state.weekStartPreference,
     desktopWindowControlsPosition: state.desktopWindowControlsPosition,
@@ -435,6 +453,7 @@ const uiStorePersistOptions = {
     showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
     allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
     savePastedImagesAsFiles: state.savePastedImagesAsFiles,
+    keepModelOnAgentSwitch: state.keepModelOnAgentSwitch,
     draftStartersVisible: state.draftStartersVisible,
     shortcutOverrides: state.shortcutOverrides,
     fileEditorKeymap: state.fileEditorKeymap,

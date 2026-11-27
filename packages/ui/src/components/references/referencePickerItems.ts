@@ -21,6 +21,10 @@ import { prVisualStateOf } from '@/lib/source-control/prVisualState';
 import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 
+const STATE_QUALIFIER = /(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i;
+
+export const stateQualifierIn = (query: string): string | null => query.match(STATE_QUALIFIER)?.[0].trim() ?? null;
+
 export type TrackerReferenceSource = `tracker:${string}`;
 
 export type ReferencePickerSource = 'repository' | TrackerReferenceSource;
@@ -36,7 +40,7 @@ export type ReferencePickerItem =
     | { source: 'tracker'; provider: string; item: TrackerItemSummary };
 
 export type ReferencePickerSelection =
-    | { source: 'repository'; reference: RepositoryReference; includeDiff: boolean }
+    | { source: 'repository'; reference: RepositoryReference; includeDiff: boolean; directory?: string }
     | { source: 'tracker'; provider: string; item: TrackerItemSummary };
 
 export type TrackerReferenceFilter = {
@@ -200,10 +204,15 @@ const discussionStateLook = (state: DiscussionState, answered: boolean | null): 
     }
 };
 
-export const canChangeDiscussionState = (
-    discussion: RepositoryDiscussionReference,
-    permissions: RepositoryReferenceDetail['discussion'],
-): boolean => (!permissions ? true : discussion.state === 'open' ? permissions.canClose : permissions.canReopen);
+export const canChangeReferenceState = (reference: RepositoryReference, detail: RepositoryReferenceDetail | null): boolean => {
+    if (reference.state === 'merged') return false;
+    if (!detail) return true;
+    if (reference.kind === 'discussion') {
+        const permissions = detail.discussion;
+        return !permissions ? true : reference.state === 'open' ? permissions.canClose : permissions.canReopen;
+    }
+    return detail.writeAccess !== false || detail.viewerCanUpdate !== false;
+};
 
 export const TRACKER_PRIORITY_KEYS = {
     urgent: 'tracker.priority.urgent',
@@ -250,3 +259,10 @@ export const labelColor = (color: string | null | undefined): string | null => {
     const hex = color.startsWith('#') ? color.slice(1) : color;
     return /^[0-9a-f]{6}$/i.test(hex) ? `#${hex}` : null;
 };
+
+export function newerTrackerRead(listed: TrackerItemSummary, detail: TrackerItemSummary | null): TrackerItemSummary {
+    if (!detail || detail.id !== listed.id) return listed;
+    const listedAt = Date.parse(listed.updatedAt ?? '');
+    const detailAt = Date.parse(detail.updatedAt ?? '');
+    return listedAt > detailAt ? listed : detail;
+}

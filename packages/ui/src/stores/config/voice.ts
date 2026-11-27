@@ -22,12 +22,14 @@ export const createVoiceSettings: ConfigSlice<
     | 'openaiCompatibleVoice'
     | 'openaiCompatibleTtsModel'
     | 'openaiCompatibleTtsEndpointPath'
+    | 'openaiCompatibleKeyProvider'
     | 'dictationEnabled'
     | 'dictationAutoSend'
     | 'sttProvider'
     | 'sttServerUrl'
     | 'sttModel'
     | 'sttEndpointPath'
+    | 'sttKeyProvider'
     | 'sttLocalModel'
     | 'sttLanguage'
     | 'sttCorrectTranscript'
@@ -55,6 +57,7 @@ export const createVoiceSettings: ConfigSlice<
     | 'setOpenaiCompatibleVoice'
     | 'setOpenaiCompatibleTtsModel'
     | 'setOpenaiCompatibleTtsEndpointPath'
+    | 'setOpenaiCompatibleKeyProvider'
     | 'setDictationEnabled'
     | 'setSttCorrectTranscript'
     | 'setDictationAutoSend'
@@ -62,6 +65,7 @@ export const createVoiceSettings: ConfigSlice<
     | 'setSttServerUrl'
     | 'setSttModel'
     | 'setSttEndpointPath'
+    | 'setSttKeyProvider'
     | 'setSttLocalModel'
     | 'setSttLanguage'
     | 'setShowMessageTTSButtons'
@@ -179,6 +183,7 @@ export const createVoiceSettings: ConfigSlice<
         return 'kokoro';
     })(),
     openaiCompatibleTtsEndpointPath: getSafeStorage().getItem('openaiCompatibleTtsEndpointPath') ?? '',
+    openaiCompatibleKeyProvider: getSafeStorage().getItem('openaiCompatibleKeyProvider') ?? undefined,
     dictationEnabled: (() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('dictationEnabled');
@@ -210,6 +215,7 @@ export const createVoiceSettings: ConfigSlice<
         return 'deepdml/faster-whisper-large-v3-turbo-ct2';
     })(),
     sttEndpointPath: getSafeStorage().getItem('sttEndpointPath') ?? '',
+    sttKeyProvider: getSafeStorage().getItem('sttKeyProvider') ?? undefined,
     sttLocalModel: (() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('sttLocalModel');
@@ -359,9 +365,9 @@ export const createVoiceSettings: ConfigSlice<
         }
     },
 
-    setVoiceApiKey: async (kind, apiKey) => {
+    setVoiceApiKey: async (kind, apiKey, speechServer) => {
         try {
-            set({ voiceApiKeys: await updateVoiceApiKeys({ [kind]: apiKey }) });
+            set({ voiceApiKeys: await updateVoiceApiKeys({ [kind]: apiKey }, speechServer) });
             return true;
         } catch (error) {
             console.warn('Failed to save voice API key:', error);
@@ -415,6 +421,11 @@ export const createVoiceSettings: ConfigSlice<
         getSafeStorage().setItem('openaiCompatibleTtsEndpointPath', path);
     },
 
+    setOpenaiCompatibleKeyProvider: (providerId: string) => {
+        set({ openaiCompatibleKeyProvider: providerId });
+        getSafeStorage().setItem('openaiCompatibleKeyProvider', providerId);
+    },
+
     setDictationEnabled: (enabled: boolean) => {
         set({ dictationEnabled: enabled });
         if (typeof window !== 'undefined') {
@@ -464,6 +475,12 @@ export const createVoiceSettings: ConfigSlice<
         set({ sttEndpointPath: path });
         getSafeStorage().setItem('sttEndpointPath', path);
         updateDesktopSettings({ sttEndpointPath: path }).catch(() => {});
+    },
+
+    setSttKeyProvider: (providerId: string) => {
+        set({ sttKeyProvider: providerId });
+        getSafeStorage().setItem('sttKeyProvider', providerId);
+        updateDesktopSettings({ sttKeyProvider: providerId }).catch(() => {});
     },
 
     setSttLocalModel: (model: string) => {

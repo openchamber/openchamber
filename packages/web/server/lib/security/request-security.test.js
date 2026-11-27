@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isPasswordlessSocketOriginAllowed } from './request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isPasswordlessSocketOriginAllowed, resolveClientCorsHeaders } from './request-security.js';
 
 const createRuntime = () => createRequestSecurityRuntime({
   readSettingsFromDiskMigrated: async () => ({}),
@@ -223,5 +223,58 @@ describe('request security runtime', () => {
     expect(destroyed).toBe(true);
     socket.destroy = () => { throw new Error('closed'); };
     expect(() => runtime.rejectWebSocketUpgrade(socket, 403, 'Denied')).not.toThrow();
+  });
+});
+
+describe('client CORS headers', () => {
+  const preflight = (origin, requested, options) => resolveClientCorsHeaders({
+    headers: { origin, 'access-control-request-headers': requested },
+  }, options);
+
+  test('reflects the requested header names for the desktop origin', () => {
+    const headers = preflight('openchamber-ui://app', 'content-type, x-token');
+    expect(headers['Access-Control-Allow-Origin']).toBe('openchamber-ui://app');
+    expect(headers['Access-Control-Allow-Headers']).toBe('content-type, x-token');
+  });
+
+  test('reflects any valid field-name token, with space or tab around commas', () => {
+    expect(preflight('openchamber-ui://app', 'x-edge*token')['Access-Control-Allow-Headers']).toBe('x-edge*token');
+    expect(preflight('openchamber-ui://app', 'x-a,\tx-b , x-c')['Access-Control-Allow-Headers']).toBe('x-a, x-b, x-c');
+  });
+
+  test('keeps the fixed header list for the mobile origins', () => {
+    for (const origin of ['capacitor://localhost', 'https://localhost']) {
+      const headers = preflight(origin, 'x-token');
+      expect(headers['Access-Control-Allow-Origin']).toBe(origin);
+      expect(headers['Access-Control-Allow-Headers']).not.toContain('x-token');
+      expect(headers['Access-Control-Allow-Headers']).toContain('Authorization');
+    }
+  });
+
+  test('keeps the fixed header list for http://localhost and local dev origins', () => {
+    const localhost = preflight('http://localhost', 'x-openchamber-relay-connection');
+    expect(localhost['Access-Control-Allow-Headers']).not.toContain('x-openchamber-relay-connection');
+    expect(localhost['Access-Control-Allow-Headers']).toContain('Authorization');
+
+    const dev = preflight('http://localhost:5180', 'x-token', { allowLocalDevOrigins: true });
+    expect(dev['Access-Control-Allow-Origin']).toBe('http://localhost:5180');
+    expect(dev['Access-Control-Allow-Headers']).not.toContain('x-token');
+  });
+
+  test('falls back to the fixed list when nothing or something malformed is requested', () => {
+    expect(preflight('openchamber-ui://app')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', 'x-a\r\nSet-Cookie: b')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', '*')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', 'x-token, *')['Access-Control-Allow-Headers']).toContain('Authorization');
+    expect(preflight('openchamber-ui://app', '')['Access-Control-Allow-Headers']).toContain('Authorization');
+    for (const whitespace of ['x-a,\vx-b', 'x-a,\fx-b', 'x-a ,x-b', 'x-a,\nx-b', 'x-a,,x-b']) {
+      expect(preflight('openchamber-ui://app', whitespace)['Access-Control-Allow-Headers']).toContain('Authorization');
+    }
+  });
+
+  test('allows no CORS headers for other origins', () => {
+    expect(preflight('https://example.com', 'x-token')).toBeNull();
+    expect(preflight('http://localhost:5180', 'x-token')).toBeNull();
+    expect(preflight(undefined)).toBeNull();
   });
 });

@@ -2,12 +2,13 @@ import * as React from 'react';
 
 import { pullReferenceFromChangeRequest } from '@/components/references/listBackedReferences';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import { canChangeReferenceState } from '@/components/references/referencePickerItems';
 import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import { forgetRepositoryPullStatus, useRepositoryReferenceDetail } from '@/components/references/referenceSources';
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { SourceBoardLabels, SourceBoardReviewerPicker } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
@@ -72,9 +73,8 @@ export const BranchPullRequestPreview: React.FC<{
     const attachments = usePullAttachments(reference);
 
     const refresh = React.useCallback(() => {
-        refreshDetail();
         setRevision((value) => value + 1);
-        void onChanged();
+        return Promise.all([refreshDetail(), onChanged()]).then(() => undefined);
     }, [onChanged, refreshDetail]);
     const saveText = async (input: { title: string; body: string }) => {
         await updateRepositoryItemText(sourceControl, context, reference, input);
@@ -141,6 +141,7 @@ export const BranchPullRequestPreview: React.FC<{
                         submitRequirements={latestPull?.submitRequirements}
                         submitRequirementsUnreadable={latest.status === 'error'}
                         mergeable={changeRequest.mergeable ?? null}
+                        branchWriteAccess={detail.status === 'ready' ? detail.value.branchWriteAccess : undefined}
                     />
                 )}
                 revisionChoice={latestPull?.revisions ? {
@@ -152,12 +153,14 @@ export const BranchPullRequestPreview: React.FC<{
                 onOpenChecks={() => setChecksOpen(true)}
                 onRefresh={refreshFromHost}
                 onSaveText={saveText}
-                stateMenu={reference.state !== 'merged' ? <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} /> : undefined}
+                stateMenu={canChangeReferenceState(reference, detail.status === 'ready' ? detail.value : null) ? (
+                    <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} />
+                ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}
                 commentActions={commentActions}
                 labelsControl={<SourceBoardLabels reference={reference} context={context} onChanged={refresh} />}
-                reviewersControl={<SourceBoardReviewers pull={reference} detail={detail} context={context} onChanged={refresh} />}
+                reviewersControl={<SourceBoardReviewerPicker pull={reference} detail={detail} context={context} onChanged={refresh} />}
                 reply={(
                     <SourceBoardReply
                         key={reference.number}
@@ -178,6 +181,7 @@ export const BranchPullRequestPreview: React.FC<{
                         projectOwnsDirectory={() => true}
                         currentDirectory={linksDirectory}
                         revision={shownRevision}
+                        writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined}
                     />
                 )}
             />

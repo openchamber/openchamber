@@ -1,4 +1,5 @@
 
+import { GIT_LAUNCH_DIRECTORY, gitArgsIn } from '../git/git-launch.js';
 import nodePath from 'node:path';
 import type { spawn as nodeSpawn, ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
@@ -37,8 +38,8 @@ export const createWorkspaceFileNameIndex = ({
   const listFiles = (directory: string) => new Promise<string | null>((resolve) => {
     let child: ChildProcessByStdio<null, Readable, null>;
     try {
-      child = spawn(resolveGitBinary(), ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-        cwd: directory,
+      child = spawn(resolveGitBinary(), gitArgsIn(directory, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']), {
+        cwd: GIT_LAUNCH_DIRECTORY,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'],
       });

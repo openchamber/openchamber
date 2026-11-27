@@ -38,5 +38,9 @@
   "OpenChamber: Commit message generation already in progress": "OpenChamber: Commit mesajı oluşturma zaten devam ediyor",
   "OpenChamber: Left your commit message unchanged": "OpenChamber: Commit mesajınız değiştirilmedi",
   "OpenChamber: Failed to generate commit message - {0}": "OpenChamber: Commit mesajı oluşturulamadı - {0}",
-  "Open Session": "Oturumu Aç"
+  "OpenChamber: OpenCode is paused for this folder until you trust the plugins and commands in its configuration": "OpenChamber: Bu klasörün yapılandırmasındaki eklentilere ve komutlara güvenene kadar OpenCode bu klasör için duraklatıldı",
+  "Open Session": "Oturumu Aç",
+  "Open": "Aç",
+  "Open this link in another app?": "Bu bağlantı başka bir uygulamada açılsın mı?",
+  "The link uses {0}:// and opens whichever app handles it.\n\n{1}": "Bağlantı {0}:// kullanır ve onu işleyen uygulamada açılır.\n\n{1}"
 }

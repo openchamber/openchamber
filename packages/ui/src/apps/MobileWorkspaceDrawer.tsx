@@ -7,7 +7,12 @@ import { isIMECompositionEvent } from '@/lib/ime';
 
 import { Icon } from '@/components/icon/Icon';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
+import { knowledgePanelKey } from '@/hooks/useKnowledgeDraft';
+import { useProjectContextOwner } from '@/hooks/useProjectContextOwner';
+import { useFieldPanelOpen } from '@/lib/dictation/fieldDictation';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { PauseClock } from '@/components/ui/pause-clock';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
@@ -43,6 +48,7 @@ const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 export const MobileWorkspaceDrawer: React.FC<{
   open: boolean;
+  closing?: boolean;
   onClose: () => void;
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
@@ -52,8 +58,10 @@ export const MobileWorkspaceDrawer: React.FC<{
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   onOpenReceivedPage: (page: { receivedId: string; title: string }) => void;
   variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
+}> = ({ open, closing, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
   const { t, direction } = useI18n();
+  const knowledgeProject = useProjectContextOwner(useSessionUIStore((state) => state.currentSessionDirectory));
+  useFieldPanelOpen(knowledgeProject ? knowledgePanelKey(knowledgeProject.path) : null, open && !closing);
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
   const [entered, setEntered] = React.useState(false);
@@ -68,6 +76,9 @@ export const MobileWorkspaceDrawer: React.FC<{
   const extensionTabs = usePhoneGuestPanelModes();
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
   const guests = useGuestsStore((state) => state.guests);
+  const guestCatalogUnavailable = useGuestsStore(
+    (state) => state.status === 'error' || (state.status === 'loading' && state.failure !== null),
+  );
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
   const [statusSectionsOpen, setStatusSectionsOpen] = React.useState(false);
   const tabRef = React.useRef(tab);
@@ -241,6 +252,13 @@ export const MobileWorkspaceDrawer: React.FC<{
           <Icon name="close" className="size-5" />
         </button>
       </div>
+      <div role="status" className="shrink-0">
+        {guestCatalogUnavailable ? (
+          <p className="mx-3 mb-2 rounded-lg bg-[var(--status-error-background)] px-3 py-2 typography-meta text-[var(--status-error-text)]">
+            {t('settings.extensions.toast.loadFailed')}
+          </p>
+        ) : null}
+      </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {visitedTabs.has('status') ? (
           <div className={cn('h-full', tab !== 'status' && 'hidden')}>
@@ -262,6 +280,7 @@ export const MobileWorkspaceDrawer: React.FC<{
             <ErrorBoundary>
               <MobileChangesSurface
                 visible={open && tab === 'changes'}
+                closing={closing}
                 initialDiff={pendingChangesDiff}
                 initialCommit={pendingChangesCommit}
                 onNavigatedToChat={onClose}
@@ -287,7 +306,9 @@ export const MobileWorkspaceDrawer: React.FC<{
           <div className={cn('relative h-full min-h-0 overflow-hidden', tab !== 'preview' && 'hidden')}>
             <ErrorBoundary>
               <React.Suspense fallback={null}>
-                <MobileBrowserSurface visible={open && tab === 'preview'} registerBackHandler={registerPreviewBackHandler} />
+                <PauseClock paused={!open || tab !== 'preview'}>
+                  <MobileBrowserSurface visible={open && tab === 'preview'} registerBackHandler={registerPreviewBackHandler} />
+                </PauseClock>
               </React.Suspense>
             </ErrorBoundary>
           </div>

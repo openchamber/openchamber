@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { listenForNotificationNavigation, navigateFromNotification } from '@openchamber/ui/lib/router/notificationNavigation';
+import { listenForNotificationNavigation, navigateFromNotification, type BrowserHandoff } from '@openchamber/ui/lib/router/notificationNavigation';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -33,7 +33,7 @@ function setup() {
   const serviceWorker = new EventTarget();
   vi.stubGlobal('navigator', { serviceWorker });
   vi.stubGlobal('window', { location: new URL('https://app.example/') });
-  const accept = vi.fn(() => true);
+  const accept = vi.fn((_url: URL, _handoff?: BrowserHandoff) => true);
   const cleanup = listenForNotificationNavigation(accept);
   return {
     accept,
@@ -59,7 +59,7 @@ function setup() {
 test('a mounted router accepts the notification URL and cleans up on unmount', () => {
   const app = setup();
   app.dispatch();
-  expect(app.accept).toHaveBeenCalledWith(new URL('https://app.example/?session=session-1'));
+  expect(app.accept.mock.calls[0][0]).toEqual(new URL('https://app.example/?session=session-1'));
   app.cleanup();
   app.dispatch();
   expect(app.accept).toHaveBeenCalledOnce();
@@ -101,4 +101,55 @@ test.each([true, false])('acknowledges router acceptance as %s', async (accepted
     channel.port1.close();
     channel.port2.close();
   }
+});
+
+const requestReply = async (url: string, accept: Parameters<typeof listenForNotificationNavigation>[0], canOpenWindow = true) => {
+  const serviceWorker = new EventTarget();
+  vi.stubGlobal('navigator', { serviceWorker });
+  vi.stubGlobal('window', { location: new URL('https://app.example/') });
+  const cleanup = listenForNotificationNavigation(accept);
+  const channel = new MessageChannel();
+  const reply = new Promise<unknown>((resolve) => {
+    channel.port1.onmessage = (event: MessageEvent<unknown>) => resolve(event.data);
+  });
+  try {
+    serviceWorker.dispatchEvent(new MessageEvent('message', {
+      origin: 'https://app.example',
+      data: { type: 'openchamber:notification-navigation', url, expiresAt: Date.now() + 1400, canOpenWindow: canOpenWindow || undefined },
+      ports: [channel.port2],
+    }));
+    return await reply;
+  } finally {
+    cleanup();
+    channel.port1.close();
+    channel.port2.close();
+  }
+};
+
+const itemRoute = 'https://app.example/?item=https%3A%2F%2Fgithub.com%2Facme%2Fapp%2Fpull%2F7&itemDir=%2Fwork%2Fapp';
+
+test('a pull request that belongs to no project here asks the worker to open the browser window', async () => {
+  const reply = await requestReply(itemRoute, (_url, handoff) => {
+    queueMicrotask(() => handoff?.open('https://github.com/acme/app/pull/7'));
+    return true;
+  });
+  expect(reply).toEqual({ type: 'open-window', url: 'https://github.com/acme/app/pull/7' });
+});
+
+test('a pull request opened in the app, or a page that never decides, answers that it took the click', async () => {
+  expect(await requestReply(itemRoute, (_url, handoff) => {
+    queueMicrotask(() => handoff?.release());
+    return true;
+  })).toBe(true);
+  expect(await requestReply(itemRoute, () => true)).toBe(true);
+});
+
+test('an older worker that cannot open the window gets a plain acceptance, and the page opens the browser itself', async () => {
+  let handedOff: boolean | undefined;
+  const reply = await requestReply(itemRoute, (_url, handoff) => {
+    queueMicrotask(() => { handedOff = handoff?.open('https://github.com/acme/app/pull/7'); });
+    return true;
+  }, false);
+  expect(reply).toBe(true);
+  expect(handedOff).toBe(false);
 });

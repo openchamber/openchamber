@@ -48,6 +48,8 @@ L'aperçu montre la description, les labels et les commentaires. Sur une issue L
 
 La ligne **Labels** a un bouton crayon qui ouvre la liste des labels du dépôt, avec une recherche. Coche ou décoche-les. La modification est enregistrée quand tu fermes la liste, donc plusieurs clics comptent pour une seule modification. Une pull request ouverte (merge request sur GitLab) a aussi une ligne **Reviewers** qui fonctionne de la même façon, avec les personnes qui peuvent faire une review dans le dépôt. Sur GitHub, l'auteur de la pull request n'est pas proposé. Les issues Linear n'ont aucune de ces lignes.
 
+Une issue a aussi une ligne **Assignees**. Son crayon liste les personnes assignables dans le dépôt ; choisis qui assigner, ou retire-les toutes, et l'ensemble est enregistré à la fermeture de la liste. Un hébergeur qui ne le prend pas en charge, ou une vue pour laquelle l'hébergeur indique qu'elle ne peut pas écrire, affiche les noms sans le crayon.
+
 Un crayon à côté du titre modifie le titre et la description ensemble. <kbd>⌘</kbd>+<kbd>Enter</kbd> enregistre (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> sous Windows et Linux), <kbd>Esc</kbd> annule, et l'aperçu affiche ensuite ce que l'hébergeur a stocké. Un élément ouvert par un lien n'a pas de crayon, et un hébergeur qui ne peut pas modifier le texte non plus.
 
 Les issues et les pull requests listent dans leur chronologie les éléments qui les mentionnent, chacun avec qui l'a mentionné, quand, et une puce (`owner/repo#42` entre dépôts) qui l'ouvre. Les discussions n'ont pas cette liste : GitHub n'expose pas de chronologie pour elles. Ces lignes s'affichent pour GitHub, GitLab, Gitea et Forgejo, ainsi que pour un hôte ajouté par une extension qui les envoie ; Gerrit n'en affiche aucune.
@@ -73,15 +75,15 @@ Pour une issue Linear, **Start in** montre le projet où la session démarrera. 
 
 ## Pull requests
 
-L'aperçu d'une pull request montre aussi sa branche, sa taille (lignes ajoutées et supprimées, fichiers modifiés), ses checks et sa review. Le fil **Activity** range les commentaires, les verdicts de review et les commits les plus récents dans l'ordre où ils sont arrivés. Les commits qui se suivent sont regroupés, tu vois donc à quels commits une review a répondu.
+L'aperçu d'une pull request montre aussi sa branche, sa taille (lignes ajoutées et supprimées, fichiers modifiés), ses checks et sa review. Quand l'hébergeur l'autorise, un crayon à côté de la branche de base liste les branches du dépôt, sans celle vers laquelle pointe la pull request ; en choisir une y déplace la pull request, et l'aperçu montre la nouvelle base dès que l'hébergeur l'a. Le fil **Activity** range les commentaires, les verdicts de review et les commits les plus récents dans l'ordre où ils sont arrivés. Les commits qui se suivent sont regroupés, tu vois donc à quels commits une review a répondu.
 
 Deux boutons se trouvent à côté de la taille. **Changes** ouvre le diff de la pull request dans le panneau latéral, et **Walkthrough** ouvre sa [parcours des modifications](/fr/walkthrough/). Si l'app est sur un autre projet, elle passe d'abord au projet de la PR. Sur le téléphone, **Changes** ouvre la PR dans l'onglet **Git** du panneau de travail ; **Walkthrough** n'existe que sur le bureau et le web.
 
-En bas, **Merge** demande confirmation avant de fusionner et utilise ta méthode de merge habituelle. Un brouillon a aussi **Ready for review**.
+En bas, **Merge** demande confirmation avant de fusionner et utilise ta méthode de merge habituelle. Un brouillon a aussi **Ready for review**. Une pull request ouverte qui n'est pas un brouillon propose aussi **Update branch** ou **Rebase onto base**, quand l'hébergeur le permet ; l'hébergeur peut terminer en arrière-plan, donc l'élément indique seulement que le travail a commencé.
 
 Sur Gerrit, l'aperçu montre aussi le sujet du changement, et s'il est privé ou en cours. Quand un changement a plus d'un patchset, un sélecteur à côté de **Changes** choisit celui d'où viennent les fichiers et le diff ; il démarre sur le dernier. **Merge** devient **Soumettre**, et reste désactivé tant que les conditions de soumission du changement ne sont pas remplies, avec celles qui manquent indiquées à côté. **Close** et **Reopen** deviennent **Abandonner le changement** et **Restaurer le changement**.
 
-Une issue ou une pull request ouverte a aussi en bas **Close issue** ou **Close pull request** (**Close merge request** sur GitLab), et une fermée a **Reopen issue** ou **Reopen pull request** (**Reopen merge request**). Aucune confirmation n'est demandée, puisqu'on peut annuler. Une pull request fusionnée ne peut être ni fermée ni rouverte. Sur GitHub, une issue est fermée comme terminée.
+Le même menu ferme une issue ou une pull request ouverte (**Close issue**, **Close pull request**, **Close merge request** sur GitLab) et rouvre une fermée (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Aucune confirmation n'est demandée, puisqu'on peut annuler. Une pull request fusionnée n'a pas cette entrée. Sur GitHub, fermer une issue propose **Close as completed** et **Close as not planned**, que l'hébergeur conserve et montre à tout le monde ; les autres hébergeurs ferment sans raison.
 
 ## Pages liées
 

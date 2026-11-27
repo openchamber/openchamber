@@ -1,3 +1,4 @@
+import { findIntegrateCheckout } from '@/lib/worktrees/integrateCheckouts';
 import {
   preserveClientTrackedWorktreeStatus,
   replaceRepositoryWorktrees,
@@ -293,7 +294,7 @@ export const buildSessionWorktreeMenuTargets = (args: {
     });
   }
 
-  if (normalizedSourceDirectory && !targetsByPath.has(normalizedSourceDirectory)) {
+  if (normalizedSourceDirectory && !targetsByPath.has(normalizedSourceDirectory) && !findIntegrateCheckout(normalizedSourceDirectory)) {
     pushTarget({
       metadata: buildSyntheticWorktreeMetadata({
         path: normalizedSourceDirectory,

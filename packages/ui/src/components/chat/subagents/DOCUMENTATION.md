@@ -16,8 +16,8 @@ list. A session an agent started with `ownWork` often lives in another folder
 (a worktree) that has no live store until the user opens it, and it gets its
 agent and model by events after `session.created`; the list record carries
 both, so such a child shows at once with its model
-(`useSessionsWithListedChildren`, which the parent's cost rollup reads too,
-so the rows and the total add up). It takes them from the store's child index
+(`useSessionsWithListedChildren`; the parent's cost rollup reads the same
+membership through `readSessionCostTree`, so the rows and the total add up). It takes them from the store's child index
 (`structure.activeChildrenByParentId`), never by scanning the list: the store
 calls `set` on every streamed step of any session (`noteDeferredSessionUpdate`),
 and every subscriber's selector runs each time. Its permission and question state comes
@@ -33,7 +33,7 @@ tab the child's own folder.
 - A subagent with a permission request or a question starts open, with the
   request cards above its tile, so the answer takes one click. The user's
   toggle flips that default per subagent.
-- The report is the newest `<subagent>` report in the parent: the message
+- The report is the newest subagent report (`<background-result kind="subagent">`) in the parent: the message
   OpenCode appends for a background run, or the call's own result for a
   foreground one (the Claude agent provider runs them that way). A later
   round of work replaces it when its report arrives.

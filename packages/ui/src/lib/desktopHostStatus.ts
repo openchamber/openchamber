@@ -21,19 +21,20 @@ type DesktopHostStatusMap = Record<string, DesktopHostStatus>;
 
 type DesktopHostStatusSnapshot = {
   byHostId: Readonly<DesktopHostStatusMap>;
+  pendingHostIds: ReadonlySet<string>;
   isProbing: boolean;
 };
 
 const statuses = new Map<string, DesktopHostStatus>();
 let probeRunSequence = 0;
 const owningRunByHostId = new Map<string, number>();
-const pendingHostIds = new Set<string>();
+const pendingProbeKindByHostId = new Map<string, 'foreground' | 'background'>();
 let activeProbeRuns = 0;
-let snapshot: DesktopHostStatusSnapshot = { byHostId: {}, isProbing: false };
+let snapshot: DesktopHostStatusSnapshot = { byHostId: {}, pendingHostIds: new Set(), isProbing: false };
 const listeners = new Set<() => void>();
 
 const publishSnapshot = (): void => {
-  snapshot = { byHostId: Object.fromEntries(statuses), isProbing: activeProbeRuns > 0 };
+  snapshot = { byHostId: Object.fromEntries(statuses), pendingHostIds: new Set(pendingProbeKindByHostId.keys()), isProbing: activeProbeRuns > 0 };
   for (const listener of listeners) {
     try {
       listener();
@@ -57,11 +58,11 @@ const setStatus = (hostId: string, status: DesktopHostStatus): void => {
 
 export const setDesktopHostStatus = (hostId: string, status: DesktopHostStatus): void => {
   owningRunByHostId.set(hostId, ++probeRunSequence);
-  pendingHostIds.delete(hostId);
+  pendingProbeKindByHostId.delete(hostId);
   setStatus(hostId, status);
 };
 
-export const isDesktopHostStatusPending = (hostId: string): boolean => pendingHostIds.has(hostId);
+export const isDesktopHostStatusPending = (hostId: string): boolean => pendingProbeKindByHostId.get(hostId) === 'foreground';
 
 export const pruneDesktopHostStatuses = (configuredHostIds: readonly string[]): void => {
   const keep = new Set([LOCAL_HOST_ID, ...configuredHostIds]);
@@ -70,7 +71,7 @@ export const pruneDesktopHostStatuses = (configuredHostIds: readonly string[]): 
     if (keep.has(hostId)) continue;
     statuses.delete(hostId);
     owningRunByHostId.delete(hostId);
-    pendingHostIds.delete(hostId);
+    pendingProbeKindByHostId.delete(hostId);
     changed = true;
   }
   if (changed) publishSnapshot();
@@ -112,28 +113,32 @@ const probeHost = async (host: DesktopHost, localClientToken: string): Promise<D
   return { status: res.status, latencyMs: res.latencyMs };
 };
 
-export const probeDesktopHosts = async (hosts: readonly DesktopHost[]): Promise<void> => {
+export const probeDesktopHosts = async (
+  hosts: readonly DesktopHost[],
+  { background = false }: { background?: boolean } = {},
+): Promise<void> => {
   if (!isDesktopShell()) return;
   const run = ++probeRunSequence;
   for (const host of hosts) {
     owningRunByHostId.set(host.id, run);
-    pendingHostIds.add(host.id);
+    pendingProbeKindByHostId.set(host.id, background ? 'background' : 'foreground');
   }
-  activeProbeRuns += 1;
+  const counted = background ? 0 : 1;
+  activeProbeRuns += counted;
   publishSnapshot();
   try {
     const localClientToken = await getLocalClientToken();
     await Promise.all(hosts.map(async (host) => {
       const status = await probeHost(host, localClientToken);
       if (owningRunByHostId.get(host.id) !== run) return;
-      pendingHostIds.delete(host.id);
+      pendingProbeKindByHostId.delete(host.id);
       setStatus(host.id, status);
     }));
   } finally {
     for (const host of hosts) {
-      if (owningRunByHostId.get(host.id) === run) pendingHostIds.delete(host.id);
+      if (owningRunByHostId.get(host.id) === run) pendingProbeKindByHostId.delete(host.id);
     }
-    activeProbeRuns -= 1;
+    activeProbeRuns -= counted;
     publishSnapshot();
   }
 };

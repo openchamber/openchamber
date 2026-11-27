@@ -26,6 +26,15 @@ describe('quota utils', () => {
     expect(formatQuotaValueLabel({ valueLabel: 'Unlimited' }, null, t)).toBe('Unlimited');
     expect(formatQuotaValueLabel({}, 42, t)).toBe('42%');
   });
+
+  test('metered credits follow the used/remaining display mode instead of the fixed label', () => {
+    const window = { valueLabel: '4,074.9 / 20,000 used', credits: { used: 4074.9, limit: 20000 } };
+    expect(formatQuotaValueLabel(window, 20, t)).toBe('4,074.9 / 20,000');
+    expect(formatQuotaValueLabel(window, 80, t, 'remaining')).toBe('15,925.1 / 20,000');
+    expect(formatQuotaValueLabel({ credits: { used: 21000, limit: 20000 } }, 0, t, 'remaining')).toBe('0 / 20,000');
+    expect(formatQuotaValueLabel({ credits: { used: 20000 - 0.05, limit: 20000 } }, 0, t, 'remaining')).toBe('0.1 / 20,000');
+    expect(formatQuotaValueLabel({ credits: { used: 65, limit: 12000, remaining: 11934 } }, 99, t, 'remaining')).toBe('11,934 / 12,000');
+  });
   test('treats non-finite percentages as missing', () => {
     expect(clampPercent(Infinity)).toBeNull();
     expect(clampPercent(-Infinity)).toBeNull();
@@ -115,10 +124,12 @@ describe('short reset times and compact counts for a narrow row', () => {
     expect(formatQuotaResetShort(elapsed, null, '24h', { providerId: 'claude', now: lateNow })).toBe('23:59');
   });
 
-  test('long numbers in a count compact as token counts do; short ones stay as written', () => {
+  test('numbers from a thousand up compact as token counts do; smaller ones stay as written', () => {
     expect(compactQuotaValueLabel('10.2 / 20,000 used')).toBe('10.2 / 20K used');
+    expect(compactQuotaValueLabel('4,074.9 / 20,000')).toBe('4.1K / 20K');
     expect(compactQuotaValueLabel('1,250,000 tokens')).toBe('1.3M tokens');
-    expect(compactQuotaValueLabel('3,233 Credits Used')).toBe('3,233 Credits Used');
+    expect(compactQuotaValueLabel('3,233 Credits Used')).toBe('3.2K Credits Used');
+    expect(compactQuotaValueLabel('999.5 / 1000')).toBe('999.5 / 1K');
     expect(compactQuotaValueLabel('42%')).toBe('42%');
   });
 });

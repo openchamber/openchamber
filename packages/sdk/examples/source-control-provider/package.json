@@ -6,7 +6,7 @@
   "openchamber": {
     "apiVersion": 1,
     "engines": {
-      "openchamber": ">=2.5.1"
+      "openchamber": ">=2.8.1"
     },
     "contributes": {
       "panel": {
@@ -58,7 +58,12 @@
           },
           "changeRequestPatch": true,
           "liveSummaries": true,
-          "commentEdit": true
+          "commentEdit": true,
+          "reviewDrafts": {
+            "fileComments": false
+          },
+          "reviewDismiss": "others",
+          "reviewUndismiss": true
         },
         "token": {
           "header": "authorization",

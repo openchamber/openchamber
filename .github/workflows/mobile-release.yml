@@ -142,7 +142,7 @@ jobs:
         with:
           node-version: '26'
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
         with:
           distribution: temurin
           java-version: 21
@@ -187,7 +187,7 @@ jobs:
           ./packages/mobile/android/gradlew -p packages/mobile/android bundleRelease assembleRelease
 
       - name: Upload Android artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: openchamber-android-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
           path: |
@@ -291,9 +291,10 @@ jobs:
           IOS_APP_PROFILE_BASE64: ${{ secrets.IOS_APP_PROFILE_BASE64 }}
           IOS_WIDGET_PROFILE_BASE64: ${{ secrets.IOS_WIDGET_PROFILE_BASE64 }}
           IOS_NSE_PROFILE_BASE64: ${{ secrets.IOS_NSE_PROFILE_BASE64 }}
+          IOS_SHARE_PROFILE_BASE64: ${{ secrets.IOS_SHARE_PROFILE_BASE64 }}
         run: |
           set -euo pipefail
-          for name in IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_APP_PROFILE_BASE64 IOS_WIDGET_PROFILE_BASE64 IOS_NSE_PROFILE_BASE64; do
+          for name in IOS_DISTRIBUTION_CERTIFICATE_BASE64 IOS_APP_PROFILE_BASE64 IOS_WIDGET_PROFILE_BASE64 IOS_NSE_PROFILE_BASE64 IOS_SHARE_PROFILE_BASE64; do
             if [[ -z "${!name}" ]]; then
               echo "$name secret is required."
               exit 1
@@ -326,9 +327,11 @@ jobs:
           app_profile="$RUNNER_TEMP/openchamber-app.mobileprovision"
           widget_profile="$RUNNER_TEMP/openchamber-widget.mobileprovision"
           nse_profile="$RUNNER_TEMP/openchamber-notification-service.mobileprovision"
+          share_profile="$RUNNER_TEMP/openchamber-share.mobileprovision"
           printf '%s' "$IOS_APP_PROFILE_BASE64" | base64 -D > "$app_profile"
           printf '%s' "$IOS_WIDGET_PROFILE_BASE64" | base64 -D > "$widget_profile"
           printf '%s' "$IOS_NSE_PROFILE_BASE64" | base64 -D > "$nse_profile"
+          printf '%s' "$IOS_SHARE_PROFILE_BASE64" | base64 -D > "$share_profile"
 
           profile_uuid() {
             security cms -D -i "$1" > "$RUNNER_TEMP/profile.plist"
@@ -345,6 +348,7 @@ jobs:
           install_profile "$app_profile" IOS_APP_PROFILE_UUID
           install_profile "$widget_profile" IOS_WIDGET_PROFILE_UUID
           install_profile "$nse_profile" IOS_NSE_PROFILE_UUID
+          install_profile "$share_profile" IOS_SHARE_PROFILE_UUID
 
       # cap sync installs the iOS pods; a runner image is not guaranteed to
       # ship CocoaPods.
@@ -363,6 +367,7 @@ jobs:
           IOS_APP_PROFILE_NAME: ${{ secrets.IOS_APP_PROFILE_NAME }}
           IOS_WIDGET_PROFILE_NAME: ${{ secrets.IOS_WIDGET_PROFILE_NAME }}
           IOS_NSE_PROFILE_NAME: ${{ secrets.IOS_NSE_PROFILE_NAME }}
+          IOS_SHARE_PROFILE_NAME: ${{ secrets.IOS_SHARE_PROFILE_NAME }}
         run: |
           set -euo pipefail
           /usr/libexec/PlistBuddy -c "Set :aps-environment production" App/App.entitlements
@@ -390,6 +395,11 @@ jobs:
               bundle: 'com.openchamber.app.OpenChamberNotificationService',
               profile: process.env.IOS_NSE_PROFILE_NAME,
               uuid: process.env.IOS_NSE_PROFILE_UUID,
+            },
+            {
+              bundle: 'com.openchamber.app.OpenChamberShare',
+              profile: process.env.IOS_SHARE_PROFILE_NAME,
+              uuid: process.env.IOS_SHARE_PROFILE_UUID,
             },
           ];
 
@@ -441,9 +451,10 @@ jobs:
           IOS_APP_PROFILE_NAME: ${{ secrets.IOS_APP_PROFILE_NAME }}
           IOS_WIDGET_PROFILE_NAME: ${{ secrets.IOS_WIDGET_PROFILE_NAME }}
           IOS_NSE_PROFILE_NAME: ${{ secrets.IOS_NSE_PROFILE_NAME }}
+          IOS_SHARE_PROFILE_NAME: ${{ secrets.IOS_SHARE_PROFILE_NAME }}
         run: |
           set -euo pipefail
-          for name in IOS_APP_PROFILE_NAME IOS_WIDGET_PROFILE_NAME IOS_NSE_PROFILE_NAME; do
+          for name in IOS_APP_PROFILE_NAME IOS_WIDGET_PROFILE_NAME IOS_NSE_PROFILE_NAME IOS_SHARE_PROFILE_NAME; do
             if [[ -z "${!name}" ]]; then
               echo "$name secret is required."
               exit 1
@@ -469,6 +480,8 @@ jobs:
               <string>$IOS_WIDGET_PROFILE_NAME</string>
               <key>com.openchamber.app.OpenChamberNotificationService</key>
               <string>$IOS_NSE_PROFILE_NAME</string>
+              <key>com.openchamber.app.OpenChamberShare</key>
+              <string>$IOS_SHARE_PROFILE_NAME</string>
             </dict>
             <key>uploadSymbols</key>
             <true/>
@@ -482,7 +495,7 @@ jobs:
         working-directory: ${{ env.IOS_PROJECT_DIR }}
 
       - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: openchamber-ios-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
           path: ${{ runner.temp }}/OpenChamberExport/*.ipa

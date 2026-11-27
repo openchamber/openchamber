@@ -35,7 +35,7 @@ export const useMessageListHandle = (
         expandTurnActivity: (turnId: string) => boolean;
     },
 ) => {
-    const { messageIndexMap, turnIndexMap, rowIndexByKey, collapsibleTurnByMessageId, turnByAssistantMessageId } = indexes;
+    const { messageIndexMap, turnIndexMap, rowIndexByKey, foldKeysByMessageId, turnByAssistantMessageId } = indexes;
 
     const resolveScrollContainer = React.useCallback((): HTMLElement | null => {
         return listRef.current?.getScrollableNode() ?? null;
@@ -53,12 +53,13 @@ export const useMessageListHandle = (
     }, [messageIndexMap, rowIndexByKey]);
 
     const revealFoldedMessage = React.useCallback((messageId: string): boolean => {
-        const turnId = isReasoningRevealTarget(messageId)
-            ? turnByAssistantMessageId.get(messageId)
-            : collapsibleTurnByMessageId.get(messageId);
-        if (!turnId) return false;
-        return expandTurnActivity(turnId);
-    }, [collapsibleTurnByMessageId, expandTurnActivity, turnByAssistantMessageId]);
+        const keys = [...(foldKeysByMessageId.get(messageId) ?? [])];
+        const turnId = isReasoningRevealTarget(messageId) ? turnByAssistantMessageId.get(messageId) : undefined;
+        if (turnId && !keys.includes(turnId)) keys.push(turnId);
+        let revealed = false;
+        for (const key of keys) revealed = expandTurnActivity(key) || revealed;
+        return revealed;
+    }, [foldKeysByMessageId, expandTurnActivity, turnByAssistantMessageId]);
 
     const findMessageElement = React.useCallback((messageId: string): HTMLElement | null => {
         const container = resolveScrollContainer();
@@ -66,7 +67,7 @@ export const useMessageListHandle = (
             return null;
         }
         if (isReasoningRevealTarget(messageId)) {
-            const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]`);
+            const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]:has(> [aria-expanded])`);
             if (reasoning) return reasoning;
         }
         return container.querySelector(`[data-message-id="${messageId}"]:not([data-message-slice])`);
@@ -173,6 +174,7 @@ export const useMessageListHandle = (
                 if (!container) {
                     return false;
                 }
+                revealFoldedMessage(turnId);
                 const findTurnElement = () => container.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
                 const turnElement = findTurnElement();
                 if (turnElement) {

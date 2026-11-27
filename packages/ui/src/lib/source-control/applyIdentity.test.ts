@@ -96,6 +96,17 @@ describe('identityApplicability', () => {
       .toEqual({ applicable: false, reason: 'host', host: 'gitea.example.com' });
   });
 
+  test('a remote on an SSH alias belongs to the instance the server resolved it to', () => {
+    const github = { provider: 'github', instance: 'github.com', accountId: 'g' } as const;
+    const alias = { host: 'gh-work', https: false, ssh: true, sshPort: 22 };
+    expect(identityApplicability(identity({ account: github, transport: 'system' }), { ...alias, sshHostName: 'github.com' }))
+      .toEqual({ applicable: true });
+    expect(identityApplicability(identity({ account: github, transport: 'system' }), { ...alias, sshHostName: 'example.invalid' }))
+      .toEqual({ applicable: false, reason: 'host', host: 'github.com' });
+    expect(identityApplicability(identity({ account: github, transport: 'system' }), alias))
+      .toEqual({ applicable: false, reason: 'host', host: 'github.com' });
+  });
+
   test('the SSH port is part of the instance match', () => {
     const gitea = { provider: 'gitea', instance: 'https://gitea.example.com', accountId: 'a' } as const;
     const hosts = { 'https://gitea.example.com': 'ssh://giteassh.example.com:2222' };

@@ -44,6 +44,14 @@ describe('parseOpencodeToolResult', () => {
     const listed = parseOpencodeToolResult('automation_list', JSON.stringify({ now: '2026-11-19T10:00:00Z', automations: [automation, { id: 'aut_2' }] }));
     expect(listed?.tool === 'automation_list' ? listed.data.automations.map((entry) => entry.trigger.type) : undefined).toEqual(['event']);
     expect(opencodeToolVerb('opencode.automation_create')?.key).toBe('chat.toolPart.opencode.action.automationCreate');
+    // OpenCode 2.4 names them by their own namespaces, and an automation can run a shell command.
+    const shell = { ...automation, id: 'aut_3', action: { type: 'shell', command: 'git fetch' } };
+    const verb = opencodeToolVerb('automation.list');
+    expect(verb?.tool).toBe('automation_list');
+    const namespaced = verb ? parseOpencodeToolResult(verb.tool, JSON.stringify({ automations: [automation, shell] })) : null;
+    expect(namespaced?.tool === 'automation_list' ? namespaced.data.automations.map((entry) => entry.action.type) : undefined).toEqual(['code', 'shell']);
+    expect(opencodeToolVerb('opencode.session.rename')?.key).toBe(opencodeToolVerb('session_rename')?.key);
+    expect(opencodeToolVerb('automation_create')?.key).toBe('chat.toolPart.opencode.action.automationCreate');
     expect(parseOpencodeToolResult('worktree_list', JSON.stringify({ worktrees: [{ directory: '/repo', type: 'root' }] }))).not.toBeNull();
   });
 

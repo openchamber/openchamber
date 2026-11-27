@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from './cdp.mjs';
+import { createFixtureDir, serveFixture } from './fixture-page.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 let chrome;
 try {
   chrome = resolveChrome(process.env.OPENCHAMBER_TEST_CHROME);
@@ -19,12 +17,12 @@ test('chat Markdown tables expand into spare transcript width and show hidden-ed
   skip: !chrome && 'Set OPENCHAMBER_TEST_CHROME to run this browser regression',
   timeout: 120_000,
 }, async () => {
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/markdown-table-'));
+  const fixture = createFixtureDir('markdown-table');
   writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><body><div id="app"></div><script type="module" src="/fixture.tsx"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.tsx'), String.raw`
     import React from 'react';
     import { createRoot } from 'react-dom/client';
+    import { flushSync } from 'react-dom';
     import { MarkdownTable } from '@/components/chat/markdown/MarkdownTable';
     import { MarkdownPresentationContext } from '@/components/chat/markdown/MarkdownPresentationContext';
     import { ChatTranscriptContext } from '@/components/chat/column/ChatTranscriptContext';
@@ -48,7 +46,7 @@ test('chat Markdown tables expand into spare transcript width and show hidden-ed
     }
 
     function renderFixture(dir = 'ltr', width = 1150, tableDir = undefined) {
-      root.render(
+      flushSync(() => root.render(
         <I18nContext.Provider value={i18n}>
           <MarkdownPresentationContext.Provider value={presentation}>
             <div id="viewport" dir={dir} data-scrollbar="chat" style={{ width, height: 620, padding: 16, overflow: 'auto', border: '1px solid gray', boxSizing: 'border-box' }}>
@@ -71,23 +69,15 @@ test('chat Markdown tables expand into spare transcript width and show hidden-ed
             </div>
           </MarkdownPresentationContext.Provider>
         </I18nContext.Provider>
-      );
+      ));
     }
     Object.assign(window, { renderFixture });
   `);
 
-  const server = await createServer({
-    configFile: false,
-    root: fixture,
-    logLevel: 'error',
-    css: { postcss: repo },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
+  const server = await serveFixture({ root: fixture });
   let browser;
   let client;
   try {
-    await server.listen();
     const port = await reservePort();
     browser = launchChrome({ chrome, port, profileDir: path.join(fixture, 'profile'), headless: true, extraArgs: ['--disable-dev-shm-usage'] });
     const target = await createPageTarget(port);
@@ -96,7 +86,7 @@ test('chat Markdown tables expand into spare transcript width and show hidden-ed
     await client.send('Page.enable');
     await client.send('Page.bringToFront');
     await client.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
-    await client.send('Page.navigate', { url: server.resolvedUrls.local[0] });
+    await client.send('Page.navigate', { url: server.url });
 
     const evaluate = async (expression) => {
       const response = await client.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, { timeoutMs: 30_000 });

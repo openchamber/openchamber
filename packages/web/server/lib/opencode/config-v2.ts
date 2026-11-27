@@ -67,7 +67,7 @@ export function deleteSectionEntry(config: ReadableConfig, kind: SectionKind, na
   let removed = false;
   for (const key of [v2, v1]) {
     const section = config?.[key];
-    if (!isRecord(section) || section[name] === undefined) continue;
+    if (!isRecord(section) || !Object.hasOwn(section, name) || section[name] === undefined) continue;
     delete section[name];
     removed = true;
     if (Object.keys(section).length === 0) delete config[key];
@@ -722,6 +722,14 @@ export function writeCompactionSettings(config: ReadableConfig, update: Compacti
     assignOrDrop(config, 'experimental', experimental);
   }
   return JSON.stringify([config.compaction, config.experimental]) !== before;
+}
+
+export function writeMcpSkillsEnabled(config: ReadableConfig, enabled: boolean) {
+  const experimental = nestedRecord(config, 'experimental');
+  if (experimental.mcp_skills === enabled) return false;
+  experimental.mcp_skills = enabled;
+  config.experimental = experimental;
+  return true;
 }
 
 export function findWebSearchProjectOverride<Config>(layers: WebSearchConfigLayers, projectFiles: ReadonlyArray<{ path: string; config: Config }>) {

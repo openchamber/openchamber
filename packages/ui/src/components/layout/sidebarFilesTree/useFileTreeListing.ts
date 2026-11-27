@@ -8,7 +8,7 @@ import { areDirectoryNodesEqual } from '@/components/views/files/fileTreeStatus'
 import { AUTO_RELIST_MAX_ENTRIES, useFileTreeChanges, type FileTreeChangeBatch } from '@/components/views/files/useFileTreeChanges';
 import { opencodeClient } from '@/lib/opencode/client';
 import { sortNodes, type FileNode } from './fileNode';
-import { getParentPath, isAbsolutePath, normalizePath, shouldIgnoreEntryName } from './treePaths';
+import { getParentPath, getRootPrefix, isAbsolutePath, normalizePath, shouldIgnoreEntryName } from './treePaths';
 import { fileTreeCacheByRoot, fileTreeCacheKey, getOrCreateCache, touchCache } from './treeCache';
 
 export const useFileTreeListing = ({
@@ -152,7 +152,7 @@ export const useFileTreeListing = ({
       const normalizedExpanded = currentExpanded
         .map((p) => normalizePath(p))
         .filter((normalized): normalized is string =>
-          Boolean(normalized) && normalized !== root && normalized.startsWith(`${root}/`),
+          Boolean(normalized) && normalized !== root && normalized.startsWith(getRootPrefix(root)),
         );
       const pathsToRefresh = [root, ...normalizedExpanded];
 
@@ -221,7 +221,7 @@ export const useFileTreeListing = ({
       .filter((normalized): normalized is string =>
         !!normalized &&
         normalized !== root &&
-        normalized.startsWith(`${root}/`) &&
+        normalized.startsWith(getRootPrefix(root)) &&
         !loadedDirsRef.current.has(normalized) &&
           !directoryRequests.has(normalized),
       )
@@ -252,7 +252,7 @@ export const useFileTreeListing = ({
     const expanded = new Set(
       (useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths ?? []).map((path) => normalizePath(path)),
     );
-    const rootPrefix = root === '/' ? '/' : `${root}/`;
+    const rootPrefix = getRootPrefix(root);
     const isOnScreen = (dir: string): boolean => {
       for (let current = dir; current !== root; current = getParentPath(current)) {
         if (!current.startsWith(rootPrefix) || !expanded.has(current)) return false;

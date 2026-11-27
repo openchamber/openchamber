@@ -1,5 +1,6 @@
 
 const TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9_-]*';
+const SKILL_TOKEN_NAME = `${TOKEN_NAME}(?::${TOKEN_NAME}(?:\\.${TOKEN_NAME})*)?`;
 
 export type TokenPrefix = '/' | '$' | '#';
 
@@ -18,14 +19,20 @@ export interface PrefixToken {
 
 const escapeSigil = (sigil: string) => sigil.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const scanner = (spellings: readonly string[]) =>
-    new RegExp(`(^|\\s)(${spellings.map(escapeSigil).join('|')})(${TOKEN_NAME})`, 'g');
+const scanner = (spellings: readonly string[], name = TOKEN_NAME) =>
+    new RegExp(`(^|\\s)(${spellings.map(escapeSigil).join('|')})(${name})`, 'g');
 
 const SCANNERS: Record<TokenPrefix, RegExp> = {
     '/': scanner(SIGIL_SPELLINGS['/']),
-    '$': scanner(SIGIL_SPELLINGS['$']),
+    '$': scanner(SIGIL_SPELLINGS['$'], SKILL_TOKEN_NAME),
     '#': scanner(SIGIL_SPELLINGS['#']),
 };
+
+export function resolveKnownName(name: string, isKnown: (candidate: string) => boolean): string | null {
+    if (isKnown(name)) return name;
+    const colon = name.indexOf(':');
+    return colon > 0 && isKnown(name.slice(0, colon)) ? name.slice(0, colon) : null;
+}
 
 export function scanPrefixTokens(text: string, prefix: TokenPrefix): PrefixToken[] {
     if (!text || !SIGIL_SPELLINGS[prefix].some((sigil) => text.includes(sigil))) return [];
@@ -55,9 +62,12 @@ export function filterKnownTokens(
     compare: 'exact' | 'case-insensitive' = 'case-insensitive',
 ): PrefixToken[] {
     if (known.size === 0) return [];
-    return tokens.filter((token) => known.has(
-        compare === 'exact' ? token.name : token.name.toLowerCase(),
-    ));
+    const isKnown = (name: string) => known.has(compare === 'exact' ? name : name.toLowerCase());
+    return tokens.flatMap((token) => {
+        const name = resolveKnownName(token.name, isKnown);
+        if (name === null) return [];
+        return name === token.name ? [token] : [{ ...token, end: token.end - (token.name.length - name.length), name }];
+    });
 }
 
 export function collectKnownTokenNames(

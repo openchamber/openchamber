@@ -29,7 +29,7 @@ Lead ma na pasku bocznym szczyt z flagą zamiast strzałki. Strzałka wraca po n
 - **Nazywa kierunek.** Zmienia nazwę sesji według pracy, żebyś znalazł ją po temacie na pasku bocznym, w kartach i w wyszukiwaniu. Nazwa nadana przez Ciebie zostaje.
 - **Przekazuje wyniki, nie kroki.** Każda część pracy trafia do osobnej sesji razem z wynikiem, który ma osiągnąć, na przykład "znajdź i napraw limit czasu logowania", a ta sesja sama ustala kroki. Te sesje są pod leadem na pasku bocznym. Możesz je otwierać i czytać, a **Przejmij** w menu sesji robi ją Twoją, jeśli chcesz z nią porozmawiać.
 - **Sprawdza, co wraca.** Raport, który mówi tylko "znalazłem przyczynę", to nie wynik, o który prosił, więc lead odsyła pracę z powrotem zamiast przekazywać ją Tobie. Każda sesja musi pokazać dowody tego, co zrobiła, na przykład jakie sprawdzenia uruchomiła i co wykazały, a raport bez dowodów też wraca. Lead sam sprawdza coś tylko wtedy, gdy w dowodach czegoś brakuje.
-- **Sprząta.** Archiwizuje sesje, których wyniki już wykorzystał.
+- **Sprząta.** Gdy sesja pracowała w worktree, a jej praca trafiła tam, gdzie trzeba, usuwa ten worktree. Sama sesja zostaje, żeby można ją było przeczytać.
 - **Pyta tylko o to, co ważne.** Decyduje sam, chyba że odpowiedź zmienia to, co zobaczysz w projekcie, albo dwie rozsądne opcje naprawdę się różnią. Sama wielkość zmiany nie jest powodem, żeby pytać. Pytania od jego sesji trafiają do leada, a do Ciebie docierają tylko wtedy, gdy spełniają ten sam warunek.
 
 ## Podsumowanie
@@ -61,7 +61,7 @@ Lead zmienia tylko te części briefu, które się zmieniły, a OpenChamber kła
 
 ## Uśpione leady
 
-Lead może czekać godzinami, gdy jego sesje pracują. Kiedy się budzi, model zwykle musi przeczytać całą rozmowę od nowa, bo dostawcy trzymają rozmowę w pamięci podręcznej tylko przez kilka minut. Przy długiej rozmowie samo to czytanie kosztuje tyle co sporo pracy, a w subskrypcji zjada Twój limit użycia.
+Lead może czekać godzinami, gdy jego sesje pracują. Kiedy się budzi, model zwykle musi przeczytać całą rozmowę od nowa, bo dostawcy trzymają rozmowę w pamięci podręcznej tylko przez ograniczony czas, często od kilku minut do godziny. Przy długiej rozmowie samo to czytanie kosztuje tyle co sporo pracy, a w subskrypcji zjada Twój limit użycia.
 
 Dlatego gdy lead jest bezczynny dłużej, niż dostawca trzyma pamięć podręczną, a jego rozmowa jest długa, OpenChamber skraca ją, zanim lead się obudzi. Starsza część rozmowy zostaje zastąpiona krótką notatką: podsumowaniem leada i stanem jego sesji. Do napisania notatki nie jest wywoływany żaden model, więc nic to nie kosztuje. Brief i najnowsze wiadomości zostają bez zmian, a lead nadal może przeczytać całą wcześniejszą rozmowę, kiedy tylko tego potrzebuje.
 
@@ -73,7 +73,7 @@ Lead może podzielić dużą pracę na [workflow](/pl/workflows/). W ustawieniu 
 
 ## Gdzie działają leady
 
-Leady potrzebują [Narzędzia sterowania dla agentów](/pl/agent-control-tool/), które jest domyślnie włączone, oraz własnego serwera OpenCode uruchamianego przez OpenChamber. Działają w aplikacji desktopowej, w przeglądarce i na telefonie. Rozszerzenie VS Code pokazuje istniejące leady z ich oznaczeniem i podsumowaniem, ale nie może utworzyć nowego.
+Leady potrzebują [Narzędzia sterowania dla agentów](/pl/agent-control-tool/), które jest domyślnie włączone. Na serwerze OpenCode, który uruchamiasz samodzielnie, potrzebują też [zarejestrowanej wtyczki OpenChamber](/pl/opencode-server/#włączanie-narzędzi-openchamber-na-zewnętrznym-serwerze-lokalnym). Działają w aplikacji desktopowej, w przeglądarce i na telefonie. Rozszerzenie VS Code pokazuje istniejące leady z ich oznaczeniem i podsumowaniem, ale nie może utworzyć nowego.
 
 ## Powiązane
 

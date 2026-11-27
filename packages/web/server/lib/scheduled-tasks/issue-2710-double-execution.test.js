@@ -102,6 +102,7 @@ const createSharedProjectConfigRuntime = (initialTask) => {
 };
 
 const createRuntimeDeps = (projectConfigRuntime) => ({
+  isFolderUnreachable: async () => false,
   projectConfigRuntime,
   listProjects: vi.fn(async () => [{ id: 'p1', path: '/repo' }]),
   buildOpenCodeUrl: () => 'http://127.0.0.1:9999/',

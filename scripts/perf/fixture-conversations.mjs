@@ -486,14 +486,17 @@ export const OPERATOR_PROMPT = "Start a worker session of your own for the parse
 export const OPERATOR_WORKTREE_PROMPT = "Start a worker of your own in a new worktree for the lexer fix."
 export const OPERATOR_TAKEOVER_PROMPT = "Start a worker of your own in a new worktree that I may take over."
 export const OPERATOR_PHONE_PROMPT = "Start a worker of your own in a new worktree that I may take over on my phone."
-const operatorWorktreeCode = (title, worktree) => [
-  `return await tools.openchamber({ action: 'session.create', parameters: { title: '${title}', prompt: 'Fix it.', model: 'perf/think-30s', ownWork: true, worktree: '${worktree}' } })`,
+// The worker reads `notes.secret`, which the verify stand asks permission for,
+// so a worker in another directory than its agent waits on the user.
+const OPERATOR_SECRET_WORKTREE_PROMPT = "Start a worker of your own in a new worktree for the secret notes."
+const operatorWorktreeCode = (title, worktree, task = "Fix it.", model = "perf/think-30s") => [
+  `return await tools.openchamber({ action: 'session.create', parameters: { title: '${title}', prompt: '${task}', model: '${model}', ownWork: true, worktree: '${worktree}' } })`,
 ].join("\n")
 
-const operatorWorktreeTurn = (id, prompt, title, worktree) => ({
+const operatorWorktreeTurn = (id, prompt, title, worktree, task, model) => ({
   id,
   prompt,
-  steps: [{ text: "Starting a worker in its own worktree.", calls: [{ name: "execute", arguments: { code: operatorWorktreeCode(title, worktree) } }] }],
+  steps: [{ text: "Starting a worker in its own worktree.", calls: [{ name: "execute", arguments: { code: operatorWorktreeCode(title, worktree, task, model) } }] }],
   answer: "The worker runs in its own worktree.\n",
 })
 
@@ -522,7 +525,39 @@ const subagentTurn = (id, prompt, task, model) => ({
 
 const LOCALES = ["de", "fr", "pl", "uk", "ja"]
 
+// A reply many screens tall, cut into dozens of timeline rows, whose rare word
+// "quokka" sits near both ends, in the middle and twice in the last paragraphs:
+// chat search has to bring each occurrence on screen, also when the rows of two
+// neighbouring occurrences are never mounted together.
+const LONG_SEARCH_MATCHES = new Map([
+  [8, "The quokka table needs its foreign keys dropped first."],
+  [150, "After that the quokka report reads from the new table."],
+  [298, "The nightly job counts the quokka rows once more."],
+  [300, "Delete the old quokka table last."],
+])
+const LONG_SEARCH_ANSWER = Array.from({ length: 300 }, (_, index) => {
+  const step = index + 1
+  const line = `Step ${step} of the migration moves one more table to the new schema, checks the row counts on both sides and keeps the old table until the nightly backup has run twice.`
+  const match = LONG_SEARCH_MATCHES.get(step)
+  return match ? `${line} ${match}` : line
+}).join("\n\n")
+
+// Thinking before and after a long text: the second block starts in the last
+// of the message's rows.
+const THINKING_BEFORE = "The wombat index stays until the copy is done."
+const THINKING_AFTER = "Only then does the wombat index go."
+
 const VERIFY_TURNS = [
+{
+  id: "verify_long_search",
+  prompt: "Write the long migration plan.",
+  answer: `${LONG_SEARCH_ANSWER}\n`,
+},
+{
+  id: "verify_long_reasoning_search",
+  prompt: "Think the migration through first.",
+  steps: [{ reasoning: THINKING_BEFORE, text: LONG_SEARCH_ANSWER, reasoningAfter: THINKING_AFTER, calls: [] }],
+},
 {
   id: "verify_locales",
   prompt: "Add a locale file for each language we ship.",
@@ -583,6 +618,7 @@ const VERIFY_TURNS = [
   operatorWorktreeTurn("operator_worktree_1", OPERATOR_WORKTREE_PROMPT, "Lexer worker", "lexer-fix"),
   operatorWorktreeTurn("operator_takeover_1", OPERATOR_TAKEOVER_PROMPT, "Takeover worker", "takeover-fix"),
   operatorWorktreeTurn("operator_phone_1", OPERATOR_PHONE_PROMPT, "Phone worker", "phone-fix"),
+  operatorWorktreeTurn("operator_secret_worktree_1", OPERATOR_SECRET_WORKTREE_PROMPT, "Notes worker", "notes-check", `${SECRET_NOTES_PROMPT}.`, "perf/stream-20000cps"),
   // Tool rows of the chat (scripts/verify/zones/chat.json, feature `tools`):
   // one turn per kind of row, each with output a scenario can name.
   {
@@ -790,6 +826,7 @@ export const planScriptedResponse = (messages) => {
     if (toolResults <= callsBefore) {
       return {
         reasoning: step.reasoning,
+        reasoningAfter: step.reasoningAfter,
         text: `${step.text}\n\n`,
         toolCalls: step.calls.map((call, index) => ({ id: `call_${turn.id}_${stepIndex + 1}_${index + 1}`, ...call })),
       }

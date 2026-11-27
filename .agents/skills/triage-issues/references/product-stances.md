@@ -14,7 +14,8 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - Git is the only version control system. No jj, Lore or other backend (#5605).
 - No live sync with other agent apps.
 - External tools act on OpenChamber through files it watches, such as `settings.json`.
-- An optional server capability never hardcodes a nonstandard endpoint.
+- An optional server capability never hardcodes a nonstandard endpoint, unless the maintainer names the path; the speech-server voice list is the one exception (#6482).
+- A custom speech server's voices are read from `<base URL>/audio/voices` only, the path Kokoro-FastAPI, Speaches and LocalAI share; other servers keep the text field, and Custom… takes any voice. No speaker choice for now (#6482).
 
 ## Platform scope
 
@@ -35,6 +36,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - The composer is moving off CodeMirror, so nothing new builds on CodeMirror.
 - A quote is exactly what the user selected and is never widened implicitly.
 - No usage timers that resend a prompt. Quota exhaustion is handled by a fallback provider or model and by switching accounts.
+- Switching primary agents keeps each agent's own model and level by default. Keeping the model and level on screen instead is an opt-in setting (`keepModelOnAgentSwitch`); an agent that pins a model still brings it, and subagents keep their own ([#6058](https://github.com/openchamber/openchamber/issues/6058)).
 - A model that can't read images always gets images as saved files and their paths, with no setting. `savePastedImagesAsFiles` only adds the saved copy for models that read images (Discord report on browser annotation screenshots, 2026-11).
 
 ## Sessions and sidebar
@@ -47,10 +49,12 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - Cmd+P shows no session status dot; a separate overview view is the plan. No manual unread mark.
 - The agent's todo list is not editable from the UI until OpenCode has an API for the current list.
 - VS Code sessions enter In work only by hand.
+- In work lists only works that no shown section of the user's own lists (#6220); sections filtered by state and groups of projects take nothing, time filters do take. No per-section switch and no first-match order.
+- A pinned work stays out of In work unless "Also in work" on Pinned is on, off by default and one value for all devices. Done on a pinned worktree never archives it.
 - Notes and todos in project files are opt-in.
 - A session an agent creates with `ownWork` is part of that agent's work: it nests under the agent's session in any folder, takes its done state from it, and nobody talks to it (no question tool, no secret cards, no waiting pages). The user takes one over only from the session's or worktree's menu; opening or writing in it changes nothing. Done on the agent while its workers run asks once: stop them or let them finish. Without `ownWork` a dispatched session stays the user's own root.
 - The Scheduled Tasks target picker lists root sessions at rest and finds subagents only by search, each named as its parent's subagent; `ownWork` workers never appear (OPE-374, #6315).
-- A subsession in a folder outside every project (a removed worktree, a folder outside the projects) shows under its parent and opens through the parent's folder; its own folder is never registered. A root session there stays hidden.
+- A subsession in a folder outside every project (a removed worktree, a folder outside the projects) shows under its parent and opens through the parent's folder; its own folder is never registered. A root session there stays hidden, except one in a linked checkout that Git confirms belongs to a repository inside a registered folder: it shows and opens under that project in Projects, In work and search, unless the user declined its folder trust. A separate clone stays hidden ([#7343](https://github.com/openchamber/openchamber/pull/7343)).
 - The agent's sidebar row shows no running/finished count of its `ownWork` sessions: they keep the row working and sit in its subtree.
 - A lead decides what its `ownWork` sessions ask; it is never a proxy for their questions. Its digest's Needs you holds only the lead's own questions, never a count of its children's pending permissions or questions. A lead stays one session with a brief and a digest: no per-lead task tracker, groups of leads or lead workspaces.
 - Between sessions, an idle session has answered: nothing an agent asked another session for waits on that session's subagents, workflow agents or `ownWork` sessions. Signals for the user and for review keep waiting on them, because the parent wakes again on each result: the "ready" notification, the extensions' `turn-finished` event and automatic review.
@@ -68,11 +72,25 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - A tool for one user's niche, such as a worktree scratchpad, is an extension.
 - Extension contributions are declared independently of each other (#6313).
 - Quota cards for third-party services are extensions.
+- An extension's part of OpenChamber's own screens, such as its options on its Settings page, is declared by the extension (fields, switches, tabs) and drawn by the host with its own controls. No extra iframes there ([#7125](https://github.com/openchamber/openchamber/issues/7125)).
+- A host capability over providers covers all of them; the extension filters to the ones it wants. No per-provider lists in the manifest for reading or switching accounts ([#7303](https://github.com/openchamber/openchamber/issues/7303)).
+- Extensions do not write the user's model preferences, such as the order of favorites ([#6745](https://github.com/openchamber/openchamber/issues/6745)).
+- `contributes.links.urls.origin` takes a subdomain wildcard (`https://*.example.com`) that matches subdomains at any depth but not the apex, with no public-suffix check; an exact origin wins over a wildcard. One extension can then serve a service whose tenants each get their own subdomain ([#7621](https://github.com/openchamber/openchamber/pull/7621)).
 
 ## Providers and quotas
 
+- The model picker stays uncluttered: no thinking level on every row (the hovered row and the composer show it) and no account switching inside it ([#6181](https://github.com/openchamber/openchamber/issues/6181), [#7035](https://github.com/openchamber/openchamber/issues/7035)).
+- A provider-requested retry wait is respected (OpenCode caps it at 15 minutes); no setting or button to retry sooner ([#6014](https://github.com/openchamber/openchamber/issues/6014), [#5224](https://github.com/openchamber/openchamber/issues/5224)).
+- An agent wrapped as a model provider (Hermes and the like) gets no special handling of its nonstandard stream events; its integration translates them into events OpenCode understands ([#5604](https://github.com/openchamber/openchamber/issues/5604)).
+- Several accounts for search providers wait until OpenCode supports them ([#7034](https://github.com/openchamber/openchamber/issues/7034)).
 - Custom provider model discovery is a one-time prefill triggered by a button in the custom provider form, and is refused in enterprise mode (#4193).
 - OpenRouter OAuth goes directly through OpenChamber, without a wrapper service.
+- Stats shows the cost OpenCode recorded. No estimated cost for subscriptions from catalog prices: real per-request prices differ per model, so an estimate would be invented ([#7152](https://github.com/openchamber/openchamber/issues/7152)).
+- Stats periods: the fixed chips plus one custom from–to date picker. No billing-cycle presets, since every provider counts its cycle differently ([#6996](https://github.com/openchamber/openchamber/issues/6996), [#6184](https://github.com/openchamber/openchamber/issues/6184)).
+- Model prices come from models.dev. A provider's wrong or temporary price is fixed upstream with a PR to models.dev, not with provider-specific code here ([#6559](https://github.com/openchamber/openchamber/issues/6559)).
+- The Usage section in Work Status stays text-only; bars live in Settings → Usage ([#7600](https://github.com/openchamber/openchamber/issues/7600)). Session cost appears in the header next to context only when a cost is known, with no empty slot ([#5975](https://github.com/openchamber/openchamber/issues/5975)).
+- The sidebar footer stays quiet: no version or stats indicators. Stats is under Pages, the version in Settings → About, and the footer's update badge covers updates ([#6242](https://github.com/openchamber/openchamber/issues/6242)).
+- No built-in Google, Gemini or Antigravity quota. The numbers exist only behind Google's internal `cloudcode-pa` APIs, reached with the user's Antigravity or Gemini CLI sign-in, and section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms/) makes third-party software using that sign-in grounds for suspending the user's Antigravity and Gemini CLI accounts. Removed in 2026-11.
 
 ## Classification features
 

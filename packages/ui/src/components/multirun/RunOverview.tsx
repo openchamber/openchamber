@@ -9,7 +9,11 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { normalizePath } from '@/lib/pathNormalization';
 import type { Session } from '@/lib/opencode/model';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { refuseSpaceModel } from '@/components/chat/composer/input/refuseSpaceModel';
+import { modelForSpaceOffer, spaceOfferAllows, useSpaceModelOffer } from '@/lib/spaces/space-model-offer';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { useSpaceCatalogDirectory } from '@/lib/spaces/useSpaceCatalogDirectory';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -135,8 +139,13 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   const members = React.useMemo<LaneSummaryInput[]>(() => (run?.memberIds ?? []).map((sessionId) => {
     const session = sessionById.get(sessionId);
     const directory = normalizePath(session?.directory);
-    return { sessionId, session, worktreePath: directory && !projectRoots.has(directory) ? directory : null };
+    return { sessionId, session, worktreePath: directory && !projectRoots.has(directory) && !isSpaceDirectory(directory) ? directory : null };
   }), [projectRoots, run?.memberIds, sessionById]);
+  const runDirectory = members.find((member) => member.session?.directory)?.session?.directory ?? null;
+  const spaceTarget = React.useMemo(() => ({ requestId: null, directory: runDirectory }), [runDirectory]);
+  const offer = useSpaceModelOffer(spaceTarget);
+  const spaceCatalog = useSpaceCatalogDirectory(runDirectory);
+  const spaceProviders = useConfigStore((state) => selectProvidersForDirectory(state, spaceCatalog));
   const summaries = useLaneSummaries(members, activeSessionIds);
   const variantPrompts = useVariantPrompts(run, sessionById);
   const worktreeById = React.useMemo(() => new Map(members.map((member) => [member.sessionId, member.worktreePath])), [members]);
@@ -146,8 +155,10 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     const auto = run?.autoFusion;
     const providerID = auto?.providerID ?? currentProviderId;
     const modelID = auto?.modelID ?? currentModelId;
-    if (providerID && modelID) setJudge([{ providerID, modelID, variant: auto?.variant, instanceId: generateInstanceId() }]);
-  }, [currentModelId, currentProviderId, judge.length, run?.autoFusion]);
+    const usable = spaceOfferAllows(offer, providerID) ? null : modelForSpaceOffer(offer, spaceProviders);
+    if (usable) setJudge([{ providerID: usable.providerId, modelID: usable.modelId, instanceId: generateInstanceId() }]);
+    else if (providerID && modelID) setJudge([{ providerID, modelID, variant: auto?.variant, instanceId: generateInstanceId() }]);
+  }, [currentModelId, currentProviderId, judge.length, offer, run?.autoFusion, spaceProviders]);
 
   const seenFusionsRef = React.useRef<{ runKey: string; ids: ReadonlySet<string> } | null>(null);
   const fusionIds = run?.fusions.map((fusion) => fusion.sessionId).join('\n') ?? null;
@@ -252,7 +263,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
 
   const handleFuse = async () => {
     const selection = judge[0];
-    if (!selection || fuseSources.length < 2) return;
+    if (!selection || fuseSources.length < 2 || refuseSpaceModel(t, spaceTarget, selection.providerID)) return;
     setBusyAction('fuse');
     try {
       await startRunFusion({
@@ -404,6 +415,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
           onRemove={() => undefined}
           maxModels={1}
           showChips={false}
+          spaceTarget={spaceTarget}
           dropdownSide="bottom"
           portal
           addButtonClassName="h-8 min-h-8 px-2.5 typography-meta"
@@ -574,6 +586,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
                 onRemove={() => setJudge([])}
                 maxModels={1}
                 showChips={false}
+                spaceTarget={spaceTarget}
                 dropdownSide="top"
                 addButtonLabel={judge[0] ? (judge[0].displayName || judge[0].modelID) : t('multirun.fusion.model.placeholder')}
                 triggerIcon={judge[0] ? <ProviderLogo providerId={judge[0].providerID} className="me-1 size-3.5" /> : undefined}

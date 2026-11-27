@@ -17,21 +17,15 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useInputStore } from '@/sync/input-store';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { getGitCommitSummaries } from '@/lib/gitApi';
-import { loadMagicPrompts } from '@/lib/magicPrompts';
 import {
-  abortIntegrate,
   computeIntegratePlan,
-  continueIntegrate,
   integrateWorktreeCommits,
-  getIntegrateConflictDetails,
-  isCherryPickInProgress,
-  type IntegrateConflictDetails,
-  type IntegrateInProgress,
+  type IntegrateConflict,
   type IntegratePlan,
 } from '@/lib/git/integrateWorktreeCommits';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useI18n } from '@/lib/i18n';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
@@ -40,8 +34,7 @@ type IntegrateUiState =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'ready'; plan: IntegratePlan }
-  | { kind: 'running'; plan: IntegratePlan }
-  | { kind: 'conflict'; state: IntegrateInProgress; details: IntegrateConflictDetails };
+  | { kind: 'running'; plan: IntegratePlan };
 
 export const IntegrateCommitsSection: React.FC<{
   repoRoot: string;
@@ -49,6 +42,8 @@ export const IntegrateCommitsSection: React.FC<{
   worktreeMetadata: WorktreeMetadata;
   localBranches: string[];
   defaultTargetBranch: string;
+  openConflicts: readonly IntegrateConflict[];
+  onConflict: () => Promise<void>;
   refreshKey?: number;
   onRefresh?: () => void;
   showHeader?: boolean;
@@ -58,6 +53,8 @@ export const IntegrateCommitsSection: React.FC<{
   worktreeMetadata,
   localBranches,
   defaultTargetBranch,
+  openConflicts,
+  onConflict,
   refreshKey,
   onRefresh,
   showHeader = true,
@@ -95,44 +92,6 @@ export const IntegrateCommitsSection: React.FC<{
   const [showAllCommits, setShowAllCommits] = React.useState(false);
   const [commitSummaries, setCommitSummaries] = React.useState<Array<{ sha: string; short: string; subject: string }>>([]);
 
-  const conflictStorageKey = React.useMemo(() => {
-    if (!currentSessionId) return null;
-    return `openchamber.integrate.conflict:${currentSessionId}`;
-  }, [currentSessionId]);
-
-  React.useEffect(() => {
-    if (!conflictStorageKey || typeof window === 'undefined') return;
-    const raw = window.localStorage.getItem(conflictStorageKey);
-    if (!raw) return;
-    let cancelled = false;
-    try {
-      const parsed = JSON.parse(raw) as IntegrateInProgress;
-      if (!parsed?.tempWorktreePath || parsed.repoRoot !== repoRoot) {
-        window.localStorage.removeItem(conflictStorageKey);
-        return;
-      }
-      void (async () => {
-        const ok = await isCherryPickInProgress(parsed.tempWorktreePath).catch(() => false);
-        if (cancelled) return;
-        if (!ok) {
-          window.localStorage.removeItem(conflictStorageKey);
-          return;
-        }
-        const details = await getIntegrateConflictDetails(parsed.tempWorktreePath).catch(() => null);
-        if (cancelled) return;
-        if (!details) {
-          return;
-        }
-        setUi({ kind: 'conflict', state: parsed, details });
-      })();
-    } catch {
-      window.localStorage.removeItem(conflictStorageKey);
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [conflictStorageKey, repoRoot]);
-
   React.useEffect(() => {
     if (!isEligible) {
       setUi({ kind: 'idle' });
@@ -167,7 +126,7 @@ export const IntegrateCommitsSection: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [isEligible, repoRoot, sourceBranch, targetBranch, refreshKey]);
+  }, [isEligible, repoRoot, sourceBranch, targetBranch, refreshKey, openConflicts.length]);
 
   const persistTarget = React.useCallback(
     (branch: string) => {
@@ -180,86 +139,17 @@ export const IntegrateCommitsSection: React.FC<{
     [currentSessionId, worktreeMetadata]
   );
 
-  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
-
-  const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
-    const prompts = await loadMagicPrompts(payload.state.repoRoot);
-    const visibleText = prompts.render('git.integrate.cherrypick.resolve.visible', {
-      current_commit: payload.state.currentCommit,
-      target_branch: payload.state.targetBranch,
-    });
-    const instructionsText = prompts.render('git.integrate.cherrypick.resolve.instructions', {
-      repo_root: payload.state.repoRoot,
-      temp_worktree_path: payload.state.tempWorktreePath,
-      source_branch: payload.state.sourceBranch,
-      target_branch: payload.state.targetBranch,
-      current_commit: payload.state.currentCommit,
-    });
-    const payloadText = `Cherry-pick conflict context (JSON)\n${JSON.stringify({
-      repoRoot: payload.state.repoRoot,
-      tempWorktreePath: payload.state.tempWorktreePath,
-      sourceBranch: payload.state.sourceBranch,
-      targetBranch: payload.state.targetBranch,
-      currentCommit: payload.state.currentCommit,
-      remainingCommits: payload.state.remainingCommits,
-      statusPorcelain: payload.details.statusPorcelain,
-      unmergedFiles: payload.details.unmergedFiles,
-      currentPatchMeta: payload.details.currentPatchMeta,
-      currentPatch: payload.details.currentPatch,
-      diff: payload.details.diff,
-    }, null, 2)}`;
-
-    return { visibleText, instructionsText, payloadText };
-  }, []);
-
-  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
-  const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
-
-  const handleResolveWithAi = React.useCallback(async (
-    payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
-    useNewSession: boolean
-  ) => {
-    let context: Awaited<ReturnType<typeof buildConflictContext>>;
-    try {
-      context = await buildConflictContext(payload);
-    } catch (error) {
-      toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
-      return;
-    }
-
-    if (useNewSession) {
-      openNewSessionDraft({
-        directoryOverride: payload.state.tempWorktreePath,
-        initialPrompt: context.visibleText,
-        syntheticParts: [
-          { text: context.instructionsText, synthetic: true },
-          { text: context.payloadText, synthetic: true },
-        ],
-      });
-      return;
-    }
-
-    if (!currentSessionId) {
-      toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
-      return;
-    }
-
-    setPendingInputText(context.visibleText, 'replace');
-    setPendingSyntheticParts([
-      { text: context.instructionsText, synthetic: true },
-      { text: context.payloadText, synthetic: true },
-    ]);
-  }, [currentSessionId, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
-
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;
     if (ui.plan.commits.length === 0) {
       toast.message(t('gitView.integrate.noCommitsToMoveToast'));
       return;
     }
+    const isCurrent = captureRuntimeInstance();
     setUi({ kind: 'running', plan: ui.plan });
     try {
       const result = await integrateWorktreeCommits(ui.plan);
+      if (!isCurrent()) return;
       if (result.kind === 'success') {
         toast.success(t('gitView.integrate.commitsMovedToast'), {
           description: result.moved === 1
@@ -267,67 +157,27 @@ export const IntegrateCommitsSection: React.FC<{
             : t('gitView.integrate.commitsMovedDescriptionPlural', { count: result.moved, branch: ui.plan.targetBranch }),
         });
         const next = await computeIntegratePlan(ui.plan);
+        if (!isCurrent()) return;
         setUi({ kind: 'ready', plan: next });
         onRefresh?.();
         return;
       }
       if (result.kind === 'conflict') {
-        toast.error(t('gitView.integrate.cherryPickConflictToast'), { description: t('gitView.integrate.cherryPickConflictDescription') });
-        setUi({ kind: 'conflict', state: result.state, details: result.details });
-        if (conflictStorageKey && typeof window !== 'undefined') {
-          window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
-        }
+        if (result.reason === 'alreadyOpen') toast.message(t('gitView.integrate.conflict.alreadyOpen'));
+        else toast.error(t('gitView.integrate.cherryPickConflictToast'), { description: t('gitView.integrate.cherryPickConflictDescription') });
+        await onConflict();
       }
+      if (result.kind === 'busy') toast.error(t('gitView.integrate.conflict.busy'));
+      setUi({ kind: 'ready', plan: ui.plan });
     } catch (e) {
+      if (!isCurrent()) return;
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.integrate.failedToMoveToast'), { description: message });
       const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
       if (next) setUi({ kind: 'ready', plan: next });
       else setUi({ kind: 'idle' });
     }
-  }, [ui, onRefresh, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
-
-  const handleAbort = React.useCallback(async () => {
-    if (ui.kind !== 'conflict') return;
-    try {
-      await abortIntegrate(ui.state);
-      toast.message(t('gitView.integrate.cherryPickAbortedToast'));
-      if (conflictStorageKey && typeof window !== 'undefined') {
-        window.localStorage.removeItem(conflictStorageKey);
-      }
-    } finally {
-      const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
-      if (next) setUi({ kind: 'ready', plan: next });
-      else setUi({ kind: 'idle' });
-    }
-  }, [ui, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
-
-  const handleContinue = React.useCallback(async () => {
-    if (ui.kind !== 'conflict') return;
-    try {
-      const result = await continueIntegrate(ui.state);
-      if (result.kind === 'success') {
-        toast.success(t('gitView.integrate.cherryPickFinishedToast'));
-        const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
-        if (next) setUi({ kind: 'ready', plan: next });
-        else setUi({ kind: 'idle' });
-        if (conflictStorageKey && typeof window !== 'undefined') {
-          window.localStorage.removeItem(conflictStorageKey);
-        }
-        onRefresh?.();
-        return;
-      }
-      if (result.kind === 'conflict') {
-        setUi({ kind: 'conflict', state: result.state, details: result.details });
-        if (conflictStorageKey && typeof window !== 'undefined') {
-          window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
-        }
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      toast.error(t('gitView.integrate.cherryPickContinueFailedToast'), { description: message });
-    }
-  }, [ui, repoRoot, sourceBranch, targetBranch, onRefresh, conflictStorageKey, t]);
+  }, [ui, onRefresh, repoRoot, sourceBranch, targetBranch, onConflict, t]);
 
   if (!repoRoot || !sourceBranch) {
     return null;
@@ -424,7 +274,7 @@ export const IntegrateCommitsSection: React.FC<{
 
             {ui.kind === 'ready' ? (
               <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.integrateMove')}>
-                <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
+                <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0 || openConflicts.some((conflict) => conflict.state.targetBranch === targetBranch)}>
                   {t('gitView.integrate.move')}
                 </Button>
               </ButtonTooltip>
@@ -476,62 +326,6 @@ export const IntegrateCommitsSection: React.FC<{
                     {t('gitView.integrate.showingFirstCommits', { count: commitSummaries.length })}
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {ui.kind === 'conflict' && (
-            <div className="rounded-md oc-tile p-3 space-y-2">
-              <div className="typography-meta text-foreground">
-                {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
-              </div>
-              <div className="typography-micro text-muted-foreground">
-                {t('gitView.integrate.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {ui.details.unmergedFiles.slice(0, 6).map((file) => (
-                  <span key={file} className="font-mono text-xs px-2 py-0.5 rounded oc-tile-inset text-muted-foreground">
-                    {file}
-                  </span>
-                ))}
-                {ui.details.unmergedFiles.length > 6 && (
-                  <span className="text-xs text-muted-foreground">{t('gitView.integrate.moreFiles', { count: ui.details.unmergedFiles.length - 6 })}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 pt-1">
-                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.abortOperation')}>
-                  <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
-                    {t('gitView.operation.abort')}
-                  </Button>
-                </ButtonTooltip>
-                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInCurrentSession')}>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="typography-meta gap-1"
-                    disabled={!currentSessionId}
-                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
-                  >
-                    <Icon name="sparkling" className="size-3.5" />
-                    {t('gitView.integrate.currentSession')}
-                  </Button>
-                </ButtonTooltip>
-                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInNewSession')}>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    className="typography-meta gap-1"
-                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
-                  >
-                    <Icon name="sparkling" className="size-3.5" />
-                    {t('gitView.integrate.newSession')}
-                  </Button>
-                </ButtonTooltip>
-                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.continueOperation')}>
-                  <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
-                    {t('gitView.operation.continue')}
-                  </Button>
-                </ButtonTooltip>
               </div>
             </div>
           )}

@@ -41,6 +41,10 @@ Live status updates existing items, while revalidation also finds items that joi
 
 A click-opened tab can fall back until it first displays its item. Restored tabs and tabs that already loaded report later failures in place, preventing an unsolicited browser opening; unsupported links or surfaces and missing runtimes use the browser directly, as do Cmd or Ctrl clicks.
 
+### Why ask extensions' link claims before the browser and not only in messages
+
+A link the board cannot show reaches the browser only after an extension's `open` claim (`contributes.links`) had its chance through `runGuestLink`, the chat's own route, so a link an extension claims opens it the same way from a message, a reference chip, Work status's Context sources or the sidebar. Only extensions allowed in the screen's project claim, a dialog extension too, since the extension's UI is hidden in other projects; a message keeps the whole catalog. A rail panel opens beside the chat on screen, as the board's tab does, and never under the row's own directory, whose panel may not be on screen. `useOpenTrackerItem` says where the link went, so Work status on the phone stays open when the extension's panel is a tab of its own drawer. An `attach` claim keeps the browser: its composer chip would land in whichever composer is mounted, which need not be the row's session. The app's own readers still win, a Cmd or Ctrl click still opens the browser, and Shift or Alt skips the claim as it does in a message.
+
 ### Why put error boundaries inside the board and not around the whole phone page
 
 The desktop overlay contains its own recovery screen. The phone header stays outside the failing content because its close button is the way to leave the page on iOS.
@@ -51,7 +55,21 @@ Lists need totals, while individual runs, steps, and annotations are read for th
 
 ### Why commit picker selections on close and not after each click
 
-The host receives one replacement set for a group of label or reviewer choices. This keeps several clicks within a single edit.
+The host receives one replacement set for a group of label, reviewer or assignee choices. This keeps several clicks within a single edit. Only the user's own picks are applied to the set the host last answered, so a refresh landing while the picker is open is never undone; the assignee pencil stays busy until the saved set is read back. The assignee pencil appears only when the descriptor publishes `features.issueAssignees` and the detail does not answer `writeAccess: false`; an unknown write access keeps it, because only an explicit denial hides a control. A single choice (a change request's base branch) is committed as it is picked and closes the popup, since there is no set to review.
+
+The base pencil and the footer's Update branch and Rebase controls follow the same rule on their own flag: only an explicit `branchWriteAccess: false` hides them. It is separate from `writeAccess` because the roles differ: GitHub's Triage and GitLab's Planner may edit an item's labels or assignees but cannot write its branches. A base change refreshes the item's detail and the list it was read from, and a live read patches the base only when it is newer than the list read. Rebase asks for confirmation, naming the base it rewrites onto, because it rewrites history and force-pushes; Update branch writes no history and does not ask.
+
+### Why one write slot per change request and not a busy state per control
+
+The base pencil sits on the `Branch` row and Merge, Update branch and Rebase sit in the footer, in different components, so separate busy states let a merge start while a base change was still in flight. `changeRequestWrites.ts` keeps one slot per change request (by URL) that every one of them claims: a click while it is held does nothing, a confirmation holds it (`confirm`) so nothing starts behind the dialog, and each write releases it only after its refresh has read the result back, so Merge stays disabled until the new base is shown. Each write also names the base and head it showed in its target, so the host refuses a change request that was retargeted or pushed elsewhere since, even when only the base moved.
+
+### Why the close reasons need `issueCloseReasonWrite` and not `issueCloseReason`
+
+An extension or an older server can publish `issueCloseReason` while its close route drops the reason, so the issue would close with another one. Only GitHub publishes the write; everywhere else the menu keeps the single Close.
+
+### Why a denied viewer keeps Close unless the host also refuses edits
+
+Repository write access says nothing about the item's author, who may close, reopen and change the draft state of their own item. `writeAccess: false` alone hides the close reasons and the assignee editor. The menu goes away, leaving a plain state pill, only when the detail also answers `viewerCanUpdate: false` (`canChangeReferenceState`).
 
 ### Why use phone bottom sheets and not scope popups
 

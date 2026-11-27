@@ -183,7 +183,7 @@ export const registerSessionDraftRoutes = (app: Application, dependencies: Sessi
         if (!existing && store.drafts.length >= MAX_DRAFTS) {
           return res.status(409).json({ error: `At most ${MAX_DRAFTS} drafts are kept; send or discard one first` });
         }
-        const attachments: StoredAttachment[] = [];
+        const prepared: Array<{ attachment: StoredAttachment; data?: Buffer }> = [];
         let bytes = 0;
         for (const incoming of body.data.attachments ?? []) {
           const kept = existing?.attachments.find((attachment) => attachment.id === incoming.id);
@@ -191,17 +191,29 @@ export const registerSessionDraftRoutes = (app: Application, dependencies: Sessi
             const data = decodeDataUrl(incoming.dataUrl);
             if (!data) return res.status(400).json({ error: `Attachment ${incoming.filename} is not a base64 data URL` });
             bytes += data.length;
-            if (bytes > MAX_ATTACHMENT_BYTES) return res.status(413).json({ error: 'The draft\'s attachments are too large' });
-            await fsPromises.mkdir(draftFolder(draftId.data), { recursive: true });
-            await fsPromises.writeFile(attachmentPath(draftId.data, incoming.id), data);
-            attachments.push({ kind: 'data', id: incoming.id, filename: incoming.filename, mimeType: incoming.mimeType, size: data.length });
+            prepared.push({
+              attachment: { kind: 'data', id: incoming.id, filename: incoming.filename, mimeType: incoming.mimeType, size: data.length },
+              data,
+            });
           } else if (incoming.path) {
-            attachments.push({ kind: 'path', id: incoming.id, filename: incoming.filename, mimeType: incoming.mimeType, size: incoming.size, path: incoming.path });
+            prepared.push({
+              attachment: { kind: 'path', id: incoming.id, filename: incoming.filename, mimeType: incoming.mimeType, size: incoming.size, path: incoming.path },
+            });
           } else if (kept) {
             if (kept.kind === 'data') bytes += kept.size;
-            attachments.push(kept);
+            prepared.push({ attachment: kept });
           }
         }
+        if (bytes > MAX_ATTACHMENT_BYTES && prepared.some(({ data }) => data)) {
+          return res.status(413).json({ error: 'The draft\'s attachments are too large' });
+        }
+
+        for (const { attachment, data } of prepared) {
+          if (!data) continue;
+          await fsPromises.mkdir(draftFolder(draftId.data), { recursive: true });
+          await fsPromises.writeFile(attachmentPath(draftId.data, attachment.id), data);
+        }
+        const attachments = prepared.map(({ attachment }) => attachment);
         const at = now();
         const draft = {
           id: draftId.data,

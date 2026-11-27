@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { readConfigFile, readConfigLayers, writeConfig } from './config-files.js';
+import { CONFIG_READ_ONLY, readConfigFile, readConfigLayers, writeConfig } from './config-files.js';
 import { updateMcpConfig, createMcpConfig, deleteMcpConfig } from './mcp.js';
 import { encodePluginId, updatePluginEntry } from './plugins.js';
 
@@ -132,6 +132,17 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
     expect(rewritten.plugin).toEqual(['opencode-see-image']);
     expect(rewritten.provider['ollama-cloud'].name).toBe('Ollama Cloud');
     expect(rewritten.mcp.openproject.enabled).toBe(false);
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(VALID_CONFIG);
+  });
+
+  it('still writes after a read-only config left a read-only backup', () => {
+    const file = writeFixture('opencode.jsonc', VALID_CONFIG);
+    fs.writeFileSync(`${file}.openchamber.backup`, 'old', 'utf8');
+    fs.chmodSync(`${file}.openchamber.backup`, 0o444);
+
+    writeConfig({ plugin: [] }, file);
+
+    expect(readConfigFile(file).plugin).toEqual([]);
     expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(VALID_CONFIG);
   });
 
@@ -591,9 +602,39 @@ describe('writeConfig replaces the file atomically', () => {
     const file = writeFixture('opencode.jsonc', OLD_CONFIG);
     fs.chmodSync(file, 0o444);
 
-    expect(() => writeConfig({ a: 2 }, file)).toThrow('Failed to write OpenCode configuration');
+    let thrown;
+    try {
+      writeConfig({ a: 2 }, file);
+    } catch (error) {
+      thrown = error;
+    }
 
+    expect(thrown).toMatchObject({ code: CONFIG_READ_ONLY, path: file, message: `OpenCode configuration at ${file} is read-only` });
     expect(fs.readFileSync(file, 'utf8')).toBe(OLD_CONFIG);
+    expect(fs.readdirSync(FIXTURE_DIR)).toEqual(['opencode.jsonc']);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('does not call a writable config read-only when its folder refuses the write', () => {
+    const file = writeFixture('opencode.jsonc', OLD_CONFIG);
+    fs.chmodSync(FIXTURE_DIR, 0o555);
+    try {
+      expect(() => writeConfig({ a: 2 }, file)).toThrow('Failed to write OpenCode configuration');
+    } finally {
+      fs.chmodSync(FIXTURE_DIR, 0o755);
+    }
+    expect(fs.readFileSync(file, 'utf8')).toBe(OLD_CONFIG);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('writes a config made writable again despite a read-only backup of it', () => {
+    const file = writeFixture('opencode.jsonc', OLD_CONFIG);
+    const backup = `${file}.openchamber.backup`;
+    fs.writeFileSync(backup, 'stale');
+    fs.chmodSync(backup, 0o444);
+
+    writeConfig({ a: 2 }, file);
+
+    expect(readConfigFile(file)).toEqual({ a: 2 });
+    expect(fs.readFileSync(backup, 'utf8')).toBe(OLD_CONFIG);
   });
 
   it('still writes the backup of the previous content', () => {

@@ -350,7 +350,7 @@ button,
 }
 
 /* In-conversation search (chat/search): every occurrence tinted, the current
-   message's painted solid so the eye lands on it. */
+   one painted solid so the eye lands on it. */
 ::highlight(oc-chat-search) {
   background-color: color-mix(in srgb, var(--primary) 30%, transparent);
 }
@@ -1204,10 +1204,12 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* A UI block's bar grows from its start once, when it first appears. */
+/* A UI block's bar grows from its start once, when it first appears. The fill
+   is `backwards`: `both` keeps the finished animation attached, and Chromium
+   then keeps a composited layer per bar (see .oc-md-block-enter). */
 .oc-bar-grow {
   transform-origin: left center;
-  animation: oc-bar-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: oc-bar-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
 
 [dir="rtl"] .oc-bar-grow {
@@ -1262,7 +1264,7 @@ diffs-container {
 }
 
 /* Prevent scroll anchoring in stacked diff scroll container */
-[data-diff-virtual-root] {
+[data-diff-virtual-root]:not([data-diff-virtual-root='windowed']) {
   overflow-anchor: none;
 }
 
@@ -1481,19 +1483,33 @@ diffs-container {
   }
 }
 
-/* Git panel header: gives up room in steps while its row does not fit, as
-   measured by useToolbarFit in GitHeader. The repository picker shrinks
-   first; the branch picker keeps its width until that is not enough. Then
-   the sync button and an isolated space's Apply drop their words, keeping
-   their icons and names for the pointer; the counts go last. */
+/* Git panel header: the branch picker sits in the row under the toolbar and
+   truncates there. The toolbar gives up room in steps while it does not fit,
+   as measured by useToolbarFit in GitHeader: AI Review and Walkthrough drop
+   their words first, then the sync button and an isolated space's Apply drop
+   theirs, then the sync counts go. When it still does not fit, AI Review and
+   Walkthrough move into the ··· menu, then the scope's count goes, and past
+   that the scope label truncates instead of pushing the toolbar over the
+   panel's own buttons. */
 [data-git-header-branch-shrinks] .branch-selector__trigger {
   flex-shrink: 1;
 }
 
 [data-git-header-compact] .sync-actions__label,
 [data-git-header-compact] .space-apply__label,
-[data-git-header-tight] .sync-actions__text {
+[data-git-header-tight] .sync-actions__text,
+[data-git-header-scope-short] .diff-toolbar__scope-count {
   display: none;
+}
+
+[data-git-header-review-icons] .git-header__review-label,
+[data-git-header-review-menu] .git-header__review-button {
+  display: none;
+}
+
+[data-git-header-review-icons] .git-header__review-button {
+  width: 1.75rem;
+  padding-inline: 0;
 }
 
 /* Diff toolbar: labels collapse to icons only when the row does not fit, as
@@ -2506,9 +2522,11 @@ diffs-container {
 }
 
 /* A block committed mid-stream fades in where it stands. Text never moves on
-   arrival: a rise made the reply look like it slid up into place. Opacity is
-   compositor-only, so short replies pay nothing for it. Blocks committed in
-   the same tick cascade via --oc-md-enter-delay set inline by the renderer. */
+   arrival: a rise made the reply look like it slid up into place. Blocks
+   committed in the same tick cascade via --oc-md-enter-delay set inline by the
+   renderer. The fill is `backwards`, which holds opacity 0 through the delay:
+   `both` keeps the finished animation attached, and Chromium then keeps a
+   composited layer for every block of the reply for as long as it is mounted. */
 @keyframes oc-md-block-enter {
   from {
     opacity: 0;
@@ -2519,7 +2537,7 @@ diffs-container {
 }
 
 .oc-md-block-enter {
-  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
   animation-delay: var(--oc-md-enter-delay, 0ms);
 }
 
@@ -2947,6 +2965,27 @@ html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   display: none;
   width: 0;
   height: 0;
+}
+
+/* Electron can count a clipped tab's no-drag rectangle outside the scroller.
+   While the tabs overflow, the viewport is one bounded no-drag region, and
+   every gap inside the viewport drags the window again. The gap box is the
+   slot's ::after, apart from the separator's ::before, so it spans the full
+   tab height whatever the separator shows. A strip that fits keeps per-tab
+   regions, so its gaps drag through the header. */
+html.desktop-runtime .session-tabs-scroll[data-tabs-overflow] {
+  -webkit-app-region: no-drag;
+}
+html.desktop-runtime .session-tabs-scroll[data-tabs-overflow] .app-region-no-drag {
+  -webkit-app-region: initial;
+}
+html.desktop-runtime:not(.oc-dialog-open, .oc-menu-open) .session-tabs-scroll[data-tabs-overflow] > .session-tab-slot[data-gap-in-view]::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 100%;
+  width: 0.375rem;
+  -webkit-app-region: drag;
 }
 
 /* Session tab titles: fade out instead of "..." — the ellipsis reads as

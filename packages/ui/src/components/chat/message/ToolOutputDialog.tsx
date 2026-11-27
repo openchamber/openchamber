@@ -27,6 +27,7 @@ import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useDefaultDiffViewMode } from './useDefaultDiffViewMode';
+import { usePreviewDismissLayer } from '@/hooks/usePreviewDismissLayer';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { StatusImage } from '@/components/ui/status-image';
@@ -779,22 +780,7 @@ const MermaidPreviewDialog: React.FC<{
         void loadMermaidSource();
     }, [loadMermaidSource, popup.mermaid, popup.open]);
 
-    React.useEffect(() => {
-        if (!popup.open) {
-            return;
-        }
-
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onOpenChange(false);
-            }
-        };
-
-        window.addEventListener('keydown', onKeyDown);
-        return () => {
-            window.removeEventListener('keydown', onKeyDown);
-        };
-    }, [onOpenChange, popup.open]);
+    usePreviewDismissLayer(popup.open, onOpenChange);
 
     React.useEffect(() => {
         if (!popup.open || status !== 'ready') {
@@ -885,7 +871,7 @@ const MermaidPreviewDialog: React.FC<{
     }
 
     const content = (
-        <div className={cn('fixed inset-0 z-50', popup.open ? 'pointer-events-auto' : 'pointer-events-none')}>
+        <div className={cn('fixed inset-0 z-[70]', popup.open ? 'pointer-events-auto' : 'pointer-events-none')}>
             <div
                 aria-hidden="true"
                 className={cn(

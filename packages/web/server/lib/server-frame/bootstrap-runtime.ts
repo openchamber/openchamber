@@ -1,4 +1,6 @@
+import { directoryGate } from '../directory-reachability/gate.js';
 import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
+import { registerFreePortRoute } from './free-port-route.js';
 import { registerHttpResponseDiagnostics } from './core-routes.js';
 import type {
   AuthAndAccessDependencies,
@@ -183,8 +185,11 @@ export const createBootstrapRuntime = (dependencies: BootstrapDependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+    app.use('/api', directoryGate);
 
     notificationEmitRoutes.registerApiRoute(requireApiAuth);
+
+    registerFreePortRoute({ app, requireAuth: requireApiAuth });
 
     registerTtsRoutes(app, { sayTTSCapability });
 

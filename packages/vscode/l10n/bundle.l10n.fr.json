@@ -38,5 +38,9 @@
   "OpenChamber: Commit message generation already in progress": "OpenChamber : génération du message de commit déjà en cours",
   "OpenChamber: Left your commit message unchanged": "OpenChamber : votre message de commit n'a pas été modifié",
   "OpenChamber: Failed to generate commit message - {0}": "OpenChamber : impossible de générer le message de commit - {0}",
-  "Open Session": "Ouvrir la session"
+  "OpenChamber: OpenCode is paused for this folder until you trust the plugins and commands in its configuration": "OpenChamber : OpenCode est en pause pour ce dossier tant que vous n'avez pas approuvé les plugins et les commandes de sa configuration",
+  "Open Session": "Ouvrir la session",
+  "Open": "Ouvrir",
+  "Open this link in another app?": "Ouvrir ce lien dans une autre application ?",
+  "The link uses {0}:// and opens whichever app handles it.\n\n{1}": "Le lien utilise {0}:// et s’ouvre dans l’application qui le prend en charge.\n\n{1}"
 }

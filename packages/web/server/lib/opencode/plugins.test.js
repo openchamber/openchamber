@@ -295,6 +295,19 @@ describe('opencode plugins data layer', () => {
     expect(fs.readFileSync(jsoncPath, 'utf8')).toContain('// mine');
     expect(plugins.listPluginEntries(projectDir)[0]).toMatchObject({ spec: 'alpha@latest', options: { a: 1 }, sourcePath: jsoncPath });
     expect(readJson(jsonPath)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+
+    // A global entry joins the list in opencode.jsonc, the file the user keeps plugins in.
+    const pluginDir = fs.mkdtempSync(path.join(rootDir, 'plugin-'));
+    expect(plugins.addGlobalPluginEntry(pluginDir)).toEqual({ path: jsoncPath, added: true });
+    expect(fs.readFileSync(jsoncPath, 'utf8')).toContain(pluginDir);
+    expect(readJson(jsonPath)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+    expect(plugins.readGlobalPluginEntries().path).toBe(jsoncPath);
+    expect(plugins.removeGlobalPluginEntry(pluginDir)).toEqual({ path: jsoncPath, removed: true });
+
+    // A broken opencode.json is refused, never routed around into the jsonc.
+    fs.writeFileSync(jsonPath, '{ "plugins": [', 'utf8');
+    expect(thrownBy(() => plugins.addGlobalPluginEntry(pluginDir)).code).toBe('CONFIG_INVALID');
+    expect(fs.readFileSync(jsoncPath, 'utf8')).not.toContain(pluginDir);
   });
 
   test('lists entries from every folder config OpenCode finds above the project', () => {

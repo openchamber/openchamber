@@ -127,6 +127,31 @@ describe('settings helpers', () => {
     expect(ids(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sidebarSections: [builtin('projects')] })))).toEqual(['projects']);
   });
 
+  it('keeps the session cost amounts with yellow below red', () => {
+    const helpers = createTestHelpers();
+    const amounts = (settings) => [settings.sessionCostWarnThreshold, settings.sessionCostCriticalThreshold];
+    expect(amounts(helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 20, sessionCostCriticalThreshold: 20 }))).toEqual([undefined, undefined]);
+
+    let stored = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 30, sessionCostCriticalThreshold: 60 }));
+    expect(amounts(stored)).toEqual([30, 60]);
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 70 }));
+    expect(amounts(stored)).toEqual([30, 60]);
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 50 }));
+    expect(amounts(stored)).toEqual([50, 60]);
+    // Nothing stored: red stays at the default 20, so yellow 25 is refused.
+    expect(amounts(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sessionCostWarnThreshold: 25 })))).toEqual([undefined, undefined]);
+    expect(amounts(helpers.formatSettingsResponse({ sessionCostWarnThreshold: 40, sessionCostCriticalThreshold: 10 }))).toEqual([undefined, undefined]);
+  });
+
+  it('keeps the lead kind filter on a saved custom sidebar section', () => {
+    const helpers = createTestHelpers();
+    const saved = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({
+      sidebarSections: [{ kind: 'custom', id: 'leads', name: 'Leads', filter: { kinds: ['lead', 'bogus'] } }],
+    }));
+    const section = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(saved))).sidebarSections.find((entry) => entry.id === 'leads');
+    expect(section?.filter?.kinds).toEqual(['lead']);
+  });
+
   it('round-trips section order and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const changes = helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: ['mcp', 'session', 'mcp', null, ''] });
@@ -217,15 +242,15 @@ describe('settings helpers', () => {
       execFileSync('tar', ['-xzf', join(packDir, tarballName), '-C', extractDir], {
         stdio: 'pipe',
       });
-      // An install resolves the package's declared dependencies (zod and the
-      // rest) from node_modules; only relative imports must stay inside it.
-      // Mirror the workspace layout: package-local modules first, then the
-      // hoisted root ones.
+      // An install resolves the package's declared dependencies from
+      // node_modules; only relative imports must stay inside it. Resolution
+      // goes through the tarball's bundled copies in package/node_modules, then
+      // the workspace's own modules, then the hoisted root ones.
       const linkModules = (from, to) => {
         if (existsSync(from)) symlinkSync(from, to, 'dir');
       };
-      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'package', 'node_modules'));
-      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(extractDir, 'node_modules'));
+      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'node_modules'));
+      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(tempRoot, 'node_modules'));
 
       const extractedModule = await import(
         pathToFileURL(join(extractDir, 'package', 'build', 'server', 'lib', 'settings', 'settings-helpers.js')).href
@@ -1001,12 +1026,12 @@ describe('settings registry gate', () => {
     lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode', useGlobalOpenCodeService: true,
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
-    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarShowSubagentSessions: true, sidebarWorktreeNameByBranch: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
     agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentTerminalToolEnabled: true, agentActionsToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, agentWorkflowAutoApprove: true, agentWorkflowAutoApproveLeads: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionIncludeInWork: true, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, worktreeArchiveOnDoneEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'], terminalCloseOnExit: false, terminalOpenOnProjectAction: false,
-    openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttPrompt: 'Español e inglés.\nOpenChamber', sttCorrectTranscript: true,
+    openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttKeyProvider: 'gateway', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttPrompt: 'Español e inglés.\nOpenChamber', sttCorrectTranscript: true,
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
@@ -1017,14 +1042,14 @@ describe('settings registry gate', () => {
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
-    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
+    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true, showLiveActivityPreview: false,
     selectionApprovalText: 'Agreed.',
-    codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
-    timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
+    codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, keepEarlierReplies: true, toolJsonViewMode: 'raw',
+    timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true, referencePreviewNewestFirst: true, referencePreviewCollapseDescription: false,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, agentBrowserSharesLogins: true, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
-    largeTextPasteBehavior: 'attach', documentAttachBehavior: 'save', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
+    largeTextPasteBehavior: 'attach', documentAttachBehavior: 'save', savePastedImagesAsFiles: true, keepModelOnAgentSwitch: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, chatFontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', uiFontWeight: 'balanced', padding: 100, cornerRadius: 8,
     shortcutOverrides: { 'chat.send': 'mod+enter' },
@@ -1032,7 +1057,8 @@ describe('settings registry gate', () => {
     walkthroughModelOverride: 'anthropic/claude', walkthroughModelVariant: 'high', zenModel: 'zen/model', fallbackModel: 'openai/gpt', fallbackVariant: 'high', accountSwitchProviders: ['anthropic'],
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, lastUsedEfforts: { 'anthropic/claude': 'high', 'openai/gpt-5': null }, providerOrder: ['anthropic'],
-    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionWorkIncludesPinned: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionCostAlertsEnabled: true, sessionCostWarnThreshold: 2.5, sessionCostCriticalThreshold: 10,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnPullRequests: true, notifyOnError: true, notifyOnQuestion: true,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,

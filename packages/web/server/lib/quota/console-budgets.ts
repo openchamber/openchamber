@@ -69,12 +69,14 @@ const toBudget = (budget: z.infer<typeof budgetSchema>): ConsoleBudget => ({
   inputPriceAtLeast: budget.inputPriceAtLeast ?? null,
 });
 
-export const withConsoleBudgets = <Result extends { ok: boolean; configured: boolean; usage?: object | null }>(result: Result, consoleBudgets: ConsoleBudgetsRead | null) => {
+export const withConsoleBudgets = <Result extends { ok: boolean; configured: boolean; usage?: object | null; error?: string }>(result: Result, consoleBudgets: ConsoleBudgetsRead | null) => {
   if (!consoleBudgets) return result;
   const { goSubscribed, ...shown } = consoleBudgets;
   if (result.ok) return { ...result, usage: { ...(result.usage ?? { windows: {} }), consoleBudgets: shown } };
   if (goSubscribed) return result;
-  return { ...result, ok: true, configured: true, usage: { windows: {}, consoleBudgets: shown } };
+  const sample = { ...result, ok: true, configured: true, usage: { windows: {}, consoleBudgets: shown } };
+  if (!result.configured) delete sample.error;
+  return sample;
 };
 
 export const readConsoleBudgets = async (readLimits = readOpenCodeUsageLimits): Promise<ConsoleBudgetsRead | null> => {

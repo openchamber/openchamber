@@ -1,6 +1,6 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import { OpenChamberControlError } from './error.js';
-import { isListedAsChild, listedSession } from './listed-session.js';
+import { isLead, isListedAsChild, listedSession } from './listed-session.js';
 import { isOperatorChildSession, sessionParentId } from '../session-lineage.js';
 import type { SessionInfo, SessionListInput } from '@opencode/client';
 import type { ControlClient } from './opencode-client.js';
@@ -24,7 +24,7 @@ export const positiveInteger = <Fallback extends number | null>(value: ControlIn
 interface SessionListingDependencies {
   assertSingleScope: (input: ControlInput) => void;
   resolveReadDirectory: (input: ControlInput, contextDirectory: ControlInput['directory']) => Promise<string | null | undefined>;
-  isSessionWorkEnabled: () => Promise<boolean>;
+  readSessionWorkSettings: () => Promise<{ enabled: boolean; pinnedInWork: boolean }>;
   getClient: (directory?: string | null) => Promise<ControlClient>;
   activeSessions: (client: ControlClient) => Promise<Statuses>;
   asPublicStatus: (statuses: Statuses, sessionID: string | undefined) => Promise<PublicSessionStatus>;
@@ -38,7 +38,7 @@ interface SessionListingDependencies {
 export const createSessionListing = ({
   assertSingleScope,
   resolveReadDirectory,
-  isSessionWorkEnabled,
+  readSessionWorkSettings,
   getClient,
   activeSessions,
   asPublicStatus,
@@ -55,15 +55,16 @@ export const createSessionListing = ({
     const inWork = input.inWork === true;
     const busy = input.busy === true;
     const mine = input.mine === true;
+    const leads = input.leads === true;
     const owner = asNonEmptyString(contextSessionId);
     if (mine && !owner) throw new OpenChamberControlError('mine lists the sessions the calling session created, so it needs a calling session', 400);
     const terms = (asNonEmptyString(input.query) ?? '').toLowerCase().split(/\s+/).filter(Boolean);
     const scoped = Boolean(asNonEmptyString(input.projectId) || asNonEmptyString(input.directory));
-    const filtered = inWork || busy || mine;
+    const filtered = inWork || busy || leads || mine;
     const everywhere = filtered && !scoped;
     const directory = everywhere ? null : await resolveReadDirectory(input, contextDirectory);
     const limit = positiveInteger(input.limit, filtered ? null : 10, 'limit');
-    const workEnabled = await isSessionWorkEnabled();
+    const { enabled: workEnabled, pinnedInWork } = await readSessionWorkSettings();
     if (inWork && !workEnabled) throw new OpenChamberControlError('In work is turned off in Settings', 409);
 
     const client = await getClient(directory ?? '');
@@ -99,11 +100,12 @@ export const createSessionListing = ({
         if (running) runningSeen += 1;
         if (input.all !== true && record?.time?.archived) continue;
         if (busy && !running) continue;
+        if (leads && !isLead(record)) continue;
         if (terms.length > 0) {
           const title = (asNonEmptyString(record?.title) ?? '').toLowerCase();
           if (!terms.every((term) => title.includes(term))) continue;
         }
-        const session = listedSession(record, workEnabled ? workMembership : null);
+        const session = listedSession(record, workEnabled ? { membership: workMembership, pinnedInWork } : null);
         if (inWork && !session.inWork) continue;
         collected.push(session);
         if (full()) break;

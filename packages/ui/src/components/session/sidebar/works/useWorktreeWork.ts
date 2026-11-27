@@ -8,7 +8,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import { useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { markSessionRead } from '@/sync/notification-store';
@@ -73,7 +73,9 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const refs = useGroupRefs(group, sessions, true);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const pinned = worktree?.pinnedAt !== undefined;
-  const inWork = sessionWorkEnabled && !pinned && isWorkInWork(sessions);
+  const pinnedInWork = useSessionDisplayStore((state) => state.pinnedInWork);
+  const canBeInWork = sessionWorkEnabled && (!pinned || pinnedInWork);
+  const inWork = canBeInWork && isWorkInWork(sessions);
   const current = useSessionUIStore((state): string | null => {
     if (state.currentSessionId) return sessions.some((session) => session.id === state.currentSessionId) ? CURRENT_SESSION : null;
     if (!state.newSessionDraft.open) return null;
@@ -84,8 +86,8 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const openDraftHasRow = useSessionDraftsStore((state) => (
     Boolean(current) && current !== CURRENT_SESSION && state.drafts.some((draft) => draft.id === current)
   ));
-  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
-  const isCurrent = current !== null && !runOverviewOpen;
+  const chatCovered = useUIStore(isChatCoveredByPage);
+  const isCurrent = current !== null && !chatCovered;
   const selected = isCurrent && (collapsed || (current !== CURRENT_SESSION && !openDraftHasRow));
   const [finishing, setFinishing] = React.useState(false);
 
@@ -164,10 +166,10 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
       setFinishing(false);
     }
   };
-  const workAction = sessionWorkEnabled && !pinned && (inWork || sessions.length > 0);
+  const workAction = canBeInWork && (inWork || sessions.length > 0);
   const toggleWork = (): void => {
     if (inWork) {
-      void finish(archiveOnDone);
+      void finish(archiveOnDone && !pinned);
       return;
     }
     const session = sessionToOpen;

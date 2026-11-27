@@ -16,6 +16,7 @@ const windowSchema = z.object({
     z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative().nullable(), limit: z.number().finite().positive().nullable() }),
   ]).optional(),
   creditsUsed: z.number().finite().nonnegative().optional(),
+  credits: z.object({ used: z.number().finite().nonnegative(), limit: z.number().finite().positive(), remaining: z.number().finite().nonnegative().optional() }).optional(),
   giftReset: z.object({ recordId: z.number(), expireAt: z.number(), grantType: z.string().optional() }).nullable().optional(),
 });
 const windowsSchema = z.record(z.string(), windowSchema);

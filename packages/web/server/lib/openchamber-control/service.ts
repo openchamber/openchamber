@@ -4,6 +4,7 @@ import path from 'node:path';
 import nodeFsPromises from 'node:fs/promises';
 import { OpenCode } from '@opencode/client';
 import { OpenChamberControlError, asControlError, controlErrorFields } from './error.js';
+import { assertSessionActionExistingBranch } from './existing-branch.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
@@ -14,8 +15,10 @@ import { createSecretRequests } from './secret-request.js';
 import { createUsageReadAction } from './usage-read.js';
 import { createTerminalReadAction } from './terminal-read.js';
 import { runWaitAction } from './waits.js';
+import { readLocationCatalog } from '../opencode/location-plugins.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
+import { readWorkSettings } from '../session-work/settings.js';
 import { createWorkMembership } from '../session-work/membership.js';
 import { createSessionListing, positiveInteger } from './session-listing.js';
 import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
@@ -45,6 +48,9 @@ import type { BrowserControlParameters } from '../browser-control/broker.js';
 import type { createAgentMemoryActions } from '../agent-memory/actions.js';
 import type { createWorkflowRuntime } from '../workflows/runtime.js';
 import type { createLeadActions } from '../session-lead/actions.js';
+import type { SessionFoldersStore } from '../session-folders/store.js';
+import { createSessionFolderActions, type FolderRef, type SessionFolderActionsDependencies } from './session-folders.js';
+import { buildScheduledTask, patchScheduledTask, type ControlTask } from './schedule-input.js';
 
 interface ControlSettings {
   projects?: unknown;
@@ -55,6 +61,7 @@ interface ControlSettings {
   recentModels?: unknown;
   hiddenModels?: unknown;
   sessionWorkEnabled?: unknown;
+  sessionWorkIncludesPinned?: unknown;
   agentImageToolEnabled?: unknown;
   agentImageModel?: unknown;
   agentUsageToolEnabled?: unknown;
@@ -115,6 +122,8 @@ export interface ControlDependencies {
   sleep?: (duration: number) => Promise<void>;
   now?: () => number;
   isHiddenSession?: (id: string | null, record?: ListedSessionRecord) => boolean;
+  sessionFoldersStore?: SessionFoldersStore | null;
+  resolveWorktreeRoot?: SessionFolderActionsDependencies['resolveWorktreeRoot'];
 }
 
 const hasText = (value: unknown): value is string => Boolean(asNonEmptyString(value));
@@ -123,33 +132,6 @@ const isIntegerNumber = (value: unknown): value is number => Number.isInteger(va
 const isText = (value: unknown): value is string => typeof value === 'string';
 type Mutable<Value> = { -readonly [Key in keyof Value]: Value[Key] };
 type ControlSession = SessionInfo & { directory?: string; time: SessionInfo['time'] & { archived?: number } };
-interface TaskExecution {
-  prompt: string;
-  providerID?: string;
-  modelID?: string;
-  agent?: string;
-  variant?: string;
-  useDefaults?: boolean;
-  goalEnabled?: boolean;
-  goalTokenBudget?: number;
-}
-type TaskSchedule =
-  | { kind: 'daily'; times: string[]; timezone?: string }
-  | { kind: 'weekly'; times: string[]; weekdays: number[]; timezone?: string }
-  | { kind: 'once'; date: string; time: string; timezone?: string }
-  | { kind: 'cron'; cron: string | null; timezone?: string };
-interface ControlTask {
-  id?: string;
-  loopFile?: string;
-  name: string;
-  enabled: boolean;
-  schedule: TaskSchedule;
-  execution: TaskExecution;
-  targetSessionId?: unknown;
-  runInWorktree?: unknown;
-  cleanupWorktree?: unknown;
-  baseBranch?: string | null;
-}
 interface SessionPayload {
   directory?: string;
   projectId?: string;
@@ -160,7 +142,7 @@ interface SessionPayload {
   variant?: string;
   goal?: boolean;
   goalTokenBudget?: unknown;
-  worktree?: { name?: string; branchName?: string; startRef?: string };
+  worktree?: { name?: string; branchName?: string; startRef?: string; existingBranch?: string };
   setUpstream?: boolean;
   messageId?: string;
   pullRequest?: unknown;
@@ -172,6 +154,8 @@ export interface SessionActionResult {
   projectId?: string;
   title?: string;
   worktree?: object;
+  folder?: FolderRef;
+  folderError?: string;
   promptDispatched: boolean;
   baselineAssistantMessageId?: string;
   baselineIdleRecordId?: string | null;
@@ -205,193 +189,6 @@ const normalizeWaitTimeoutMs = (value: ControlInput['timeout']) => {
     throw new OpenChamberControlError(`timeout must be from 1 to ${MAX_WAIT_TIMEOUT_SECONDS} seconds`, 400);
   }
   return seconds * 1000;
-};
-
-const parseModel = (value: ControlInput['model']) => {
-  const model = asNonEmptyString(value);
-  if (!model) throw new OpenChamberControlError('model is required', 400);
-  const slashIndex = model.indexOf('/');
-  if (slashIndex <= 0 || slashIndex === model.length - 1) {
-    throw new OpenChamberControlError('model must be in provider/model format', 400);
-  }
-  return { providerID: model.slice(0, slashIndex), modelID: model.slice(slashIndex + 1) };
-};
-
-const parseWeekdays = (value: ControlInput['weekly']) => {
-  const raw = asNonEmptyString(value);
-  if (!raw) throw new OpenChamberControlError('weekly is required', 400);
-  const weekdays = raw.split(',').map((entry) => Number.parseInt(entry.trim(), 10));
-  if (weekdays.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 6)) {
-    throw new OpenChamberControlError('weekly must contain weekdays from 0 to 6', 400);
-  }
-  return Array.from(new Set(weekdays)).sort((a, b) => a - b);
-};
-
-const buildSchedule = (input: ControlInput): TaskSchedule => {
-  const daily = asNonEmptyString(input.daily);
-  const weekly = asNonEmptyString(input.weekly);
-  const once = asNonEmptyString(input.once);
-  const cron = asNonEmptyString(input.cron);
-  const selectors = [daily, weekly, once, cron].filter(Boolean);
-  if (selectors.length !== 1) {
-    throw new OpenChamberControlError('Provide exactly one of daily, weekly, once, or cron', 400);
-  }
-  const timezone = asNonEmptyString(input.timezone);
-  if (daily) {
-    const schedule: TaskSchedule = { kind: 'daily', times: [daily] };
-    if (timezone) schedule.timezone = timezone;
-    return schedule;
-  }
-  if (weekly) {
-    const time = asNonEmptyString(input.time);
-    if (!time) throw new OpenChamberControlError('time is required with weekly', 400);
-    const schedule: TaskSchedule = { kind: 'weekly', weekdays: parseWeekdays(weekly), times: [time] };
-    if (timezone) schedule.timezone = timezone;
-    return schedule;
-  }
-  if (once) {
-    const time = asNonEmptyString(input.time);
-    if (!time) throw new OpenChamberControlError('time is required with once', 400);
-    const schedule: TaskSchedule = { kind: 'once', date: once, time };
-    if (timezone) schedule.timezone = timezone;
-    return schedule;
-  }
-  const schedule: TaskSchedule = { kind: 'cron', cron };
-  if (timezone) schedule.timezone = timezone;
-  return schedule;
-};
-
-const assertWorktreeIsolation = (input: ControlInput, targetSessionId: ControlInput['targetSessionId']) => {
-  for (const field of ['runInWorktree', 'cleanupWorktree'] as const) {
-    if (input[field] !== undefined && !isBoolean(input[field])) {
-      throw new OpenChamberControlError(`${field} must be a boolean`, 400);
-    }
-  }
-  const { baseBranch } = input;
-  if (baseBranch !== undefined && baseBranch !== null && baseBranch !== '' && !asNonEmptyString(baseBranch)) {
-    throw new OpenChamberControlError('baseBranch must be a branch name, or empty to clear it', 400);
-  }
-  const isolationNamed = (['runInWorktree', 'baseBranch', 'cleanupWorktree'] as const).some((field) => input[field] !== undefined);
-  if (isolationNamed && asNonEmptyString(targetSessionId)) {
-    throw new OpenChamberControlError('runInWorktree, baseBranch and cleanupWorktree are not compatible with an existing session', 400);
-  }
-};
-
-const buildScheduledTask = (input: ControlInput) => {
-  const name = asNonEmptyString(input.name);
-  const prompt = asNonEmptyString(input.prompt);
-  if (!name) throw new OpenChamberControlError('name is required', 400);
-  if (!prompt) throw new OpenChamberControlError('prompt is required', 400);
-  const targetSessionId = asNonEmptyString(input.targetSessionId);
-  const model = targetSessionId && input.model === undefined ? { useDefaults: !asNonEmptyString(input.agent) } : parseModel(input.model);
-  const goalTokenBudget = input.goalTokenBudget;
-  if (goalTokenBudget !== undefined && input.goal !== true) {
-    throw new OpenChamberControlError('goalTokenBudget requires goal', 400);
-  }
-  if (goalTokenBudget !== undefined && (!isSafeInteger(goalTokenBudget) || goalTokenBudget < 1000 || goalTokenBudget > 100_000_000)) {
-    throw new OpenChamberControlError('goalTokenBudget must be from 1000 to 100000000', 400);
-  }
-  assertWorktreeIsolation(input, targetSessionId);
-  const baseBranch = asNonEmptyString(input.baseBranch);
-  const task: ControlTask = {
-    name,
-    enabled: input.disabled !== true,
-    schedule: buildSchedule(input),
-    execution: {
-      prompt,
-      ...model,
-    },
-  };
-  if (hasText(input.agent)) task.execution.agent = input.agent.trim();
-  if (hasText(input.variant)) task.execution.variant = input.variant.trim();
-  if (input.goal === true) task.execution.goalEnabled = true;
-  if (goalTokenBudget !== undefined) task.execution.goalTokenBudget = goalTokenBudget;
-  if (input.targetSessionId !== undefined) task.targetSessionId = targetSessionId ?? input.targetSessionId;
-  if (input.runInWorktree === true) task.runInWorktree = true;
-  if (input.cleanupWorktree === false) task.cleanupWorktree = false;
-  if (baseBranch) task.baseBranch = baseBranch;
-  return task;
-};
-
-const patchScheduledTask = (existing: ControlTask & { id: string }, input: ControlInput) => {
-  if (existing.loopFile) {
-    throw new OpenChamberControlError(`This task comes from ${existing.loopFile}; change that file instead`, 409);
-  }
-  const execution = { ...existing.execution };
-  if (input.prompt !== undefined) {
-    const prompt = asNonEmptyString(input.prompt);
-    if (!prompt) throw new OpenChamberControlError('prompt cannot be empty', 400);
-    execution.prompt = prompt;
-  }
-  if (input.model !== undefined) {
-    Object.assign(execution, parseModel(input.model));
-    delete execution.variant;
-    delete execution.useDefaults;
-  }
-  for (const field of ['variant', 'agent'] as const) {
-    if (input[field] === undefined) continue;
-    const value = asNonEmptyString(input[field]);
-    if (value) execution[field] = value;
-    else delete execution[field];
-    if (field === 'agent' && value && (input.targetSessionId || existing.targetSessionId)) delete execution.useDefaults;
-  }
-  if (isBoolean(input.goal)) {
-    if (input.goal) execution.goalEnabled = true;
-    else {
-      delete execution.goalEnabled;
-      delete execution.goalTokenBudget;
-    }
-  }
-  if (input.goalTokenBudget !== undefined) {
-    if (!execution.goalEnabled) throw new OpenChamberControlError('goalTokenBudget requires goal', 400);
-    if (!isSafeInteger(input.goalTokenBudget) || input.goalTokenBudget < 1000 || input.goalTokenBudget > 100_000_000) {
-      throw new OpenChamberControlError('goalTokenBudget must be from 1000 to 100000000', 400);
-    }
-    execution.goalTokenBudget = input.goalTokenBudget;
-  }
-  let name: string | null = existing.name;
-  if (input.name !== undefined) {
-    name = asNonEmptyString(input.name);
-    if (!name) throw new OpenChamberControlError('name cannot be empty', 400);
-  }
-  const selectors = (['daily', 'weekly', 'once', 'cron'] as const).filter((key) => input[key] !== undefined);
-  if (selectors.length > 1 || (selectors.length === 1 && !asNonEmptyString(input[selectors[0] ?? 'daily']))) {
-    throw new OpenChamberControlError('Provide exactly one nonempty daily, weekly, once, or cron selector', 400);
-  }
-  const timezone = asNonEmptyString(input.timezone);
-  let schedule = selectors.length === 1
-    ? buildSchedule(input)
-    : (timezone ? { ...existing.schedule, timezone } : existing.schedule);
-  if (input.time !== undefined) {
-    const time = asNonEmptyString(input.time);
-    if (!time || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
-      throw new OpenChamberControlError('time must be HH:mm', 400);
-    }
-    if (schedule.kind === 'once') {
-      schedule = { ...schedule, time };
-    } else if (schedule.kind === 'weekly' && schedule.times.length === 1) {
-      schedule = { ...schedule, times: [time] };
-    } else {
-      throw new OpenChamberControlError('time requires a once or single-time weekly schedule; provide an explicit schedule to replace other schedules', 400);
-    }
-  }
-
-  assertWorktreeIsolation(
-    input,
-    input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
-  );
-  const patch: ControlTask = {
-    id: existing.id,
-    targetSessionId: input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
-    name,
-    enabled: isBoolean(input.disabled) ? !input.disabled : existing.enabled,
-    schedule,
-    execution,
-  };
-  if (input.runInWorktree !== undefined) patch.runInWorktree = input.runInWorktree;
-  if (input.cleanupWorktree !== undefined) patch.cleanupWorktree = input.cleanupWorktree;
-  if (input.baseBranch !== undefined) patch.baseBranch = asNonEmptyString(input.baseBranch);
-  return patch;
 };
 
 export const createOpenChamberControlService = (dependencies: ControlDependencies) => {
@@ -441,6 +238,8 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
     isHiddenSession = () => false,
+    sessionFoldersStore = null,
+    resolveWorktreeRoot,
   } = dependencies;
 
   const wait = (duration: number, signal?: AbortSignal) => {
@@ -570,10 +369,9 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
 
   const searchModels = async (input: ControlInput, contextDirectory: ControlInput['directory']) => {
     const client = await getClient(asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory) || '');
-    const [settings, catalog, providerList] = await Promise.all([
+    const [settings, [catalog, providerList]] = await Promise.all([
       readSettingsFromDiskMigrated(),
-      client.model.list(),
-      client.provider.list(),
+      readLocationCatalog(client),
     ]);
     const providerNames = new Map(providerList.data.map((provider) => [provider.id, provider.name]));
     const refKey = (ref: ControlSettings['recentModels']) => {
@@ -668,15 +466,12 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
   };
 
   const workMembership = createWorkMembership({ chatRoots });
-  const isSessionWorkEnabled = async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.sessionWorkEnabled !== false;
-  };
+  const readSessionWorkSettings = async () => readWorkSettings(await readSettingsFromDiskMigrated().catch(() => null));
 
   const { listSessions, archiveOwnSession } = createSessionListing({
     assertSingleScope,
     resolveReadDirectory,
-    isSessionWorkEnabled,
+    readSessionWorkSettings,
     getClient,
     activeSessions,
     asPublicStatus,
@@ -689,7 +484,8 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
 
   const setWorkState = async (input: ControlInput, contextSessionId: string | undefined, state: 'open' | 'done') => {
     if (!updateSessionMetadata) throw new OpenChamberControlError('Changing In work is not available on this server', 503);
-    if (!(await isSessionWorkEnabled())) throw new OpenChamberControlError('In work is turned off in Settings', 409);
+    const { enabled, pinnedInWork } = await readSessionWorkSettings();
+    if (!enabled) throw new OpenChamberControlError('In work is turned off in Settings', 409);
     const sessionID = asNonEmptyString(input.sessionId) || asNonEmptyString(contextSessionId);
     if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
     const session = await withArchiveEntry(await assertSessionExists(await getClient(), sessionID));
@@ -700,10 +496,10 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       throw new OpenChamberControlError(`${sessionID} is archived; In work shows no archived sessions`, 409);
     }
     const directory = asNonEmptyString(session?.location?.directory) || '';
-    if (state === 'open' && (isPinnedMetadata(session?.metadata) || (directory && await isWorktreePinned(directory)))) {
-      throw new OpenChamberControlError(`${sessionID} is pinned, or its worktree is; a pinned session is never in work`, 409);
+    if (state === 'open' && !pinnedInWork && (isPinnedMetadata(session?.metadata) || (directory && await isWorktreePinned(directory)))) {
+      throw new OpenChamberControlError(`${sessionID} is pinned, or its worktree is; pinned sessions are kept out of In work by the user's sidebar setting`, 409);
     }
-    const { changed } = await updateSessionMetadata(sessionID, (metadata) => userStatePatch(metadata, { state, now: now() }), { directory });
+    const { changed } = await updateSessionMetadata(sessionID, (metadata) => userStatePatch(metadata, { state, now: now(), pinnedInWork }), { directory });
     return { sessionId: sessionID, directory, title: asNonEmptyString(session?.title), inWork: state === 'open', changed };
   };
 
@@ -785,6 +581,22 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       return null;
     }
   };
+
+  const sessionFolderActions = sessionFoldersStore
+    ? createSessionFolderActions({
+        store: sessionFoldersStore,
+        resolveProjectPath: async (directory) => (sessionService?.projectPathFor instanceof Function ? sessionService.projectPathFor(directory) : directory),
+        resolveProjectById: async (projectId) => {
+          const match = (await projects()).find((entry) => entry.id === projectId);
+          if (!match) throw new OpenChamberControlError(`Project not found: ${projectId}`, 404);
+          return match.path;
+        },
+        resolveSessionDirectory,
+        chatsRoot: chatsScope?.root ?? null,
+        chatRoots,
+        resolveWorktreeRoot,
+      })
+    : null;
 
   const sessionClient = async (sessionID: string) => {
     const directory = await resolveSessionDirectory(sessionID);
@@ -904,6 +716,10 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     if (input.pullRequest !== undefined && action !== 'session.create') {
       throw new OpenChamberControlError('pullRequest applies only to session.create', 400);
     }
+    if (input.folder !== undefined && action !== 'session.create') {
+      throw new OpenChamberControlError('folder applies only to session.create, session.moveToWorktree, and folder.move', 400);
+    }
+    assertSessionActionExistingBranch(action, input);
     const sessionID = asNonEmptyString(input.sessionId);
     const parentSessionID = asNonEmptyString(contextSessionId);
     const ownWork = input.ownWork === true;
@@ -927,31 +743,33 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     if (hasText(input.variant)) payload.variant = input.variant.trim();
     if (input.goal === true) payload.goal = true;
     if (input.goalTokenBudget !== undefined) payload.goalTokenBudget = input.goalTokenBudget;
-    if (hasText(input.worktree)) {
-      payload.worktree = { name: input.worktree.trim() };
-      if (hasText(input.branch)) payload.worktree.branchName = input.branch.trim();
-      if (hasText(input.startRef)) payload.worktree.startRef = input.startRef.trim();
+    if (hasText(input.worktree) || input.pullRequest !== undefined || hasText(input.existingBranch)) {
+      const worktree: NonNullable<SessionPayload['worktree']> = {};
+      if (hasText(input.worktree)) worktree.name = input.worktree.trim();
+      if (hasText(input.branch)) worktree.branchName = input.branch.trim();
+      if (hasText(input.startRef)) worktree.startRef = input.startRef.trim();
+      if (hasText(input.existingBranch)) worktree.existingBranch = input.existingBranch.trim();
+      payload.worktree = worktree;
     }
     if (isBoolean(input.setUpstream)) payload.setUpstream = input.setUpstream;
     if (hasText(input.messageId)) payload.messageId = input.messageId.trim();
-    if (input.pullRequest !== undefined) {
-      payload.pullRequest = input.pullRequest;
-      if (!payload.worktree) {
-        payload.worktree = {};
-        if (hasText(input.branch)) payload.worktree.branchName = input.branch.trim();
-        if (hasText(input.startRef)) payload.worktree.startRef = input.startRef.trim();
-      }
-    }
+    if (input.pullRequest !== undefined) payload.pullRequest = input.pullRequest;
     if (parentSessionID && !(action === 'session.send' && sessionID === parentSessionID)) {
       payload.promptedBySessionId = parentSessionID;
     }
     const startedAt = now();
     let result: SessionActionResult;
     if (action === 'session.create') {
+      if (input.folder !== undefined && !sessionFolderActions) {
+        throw new OpenChamberControlError('Sidebar folders are not available on this server', 503);
+      }
       const createOptions: SessionCreateOptions = {};
       if (startedByExtension) createOptions.startedByExtension = startedByExtension;
       if (ownWork) createOptions.operatorParentId = parentSessionID;
-      result = await sessionService.create(payload, ...(Object.keys(createOptions).length > 0 ? [createOptions] : []));
+      const runCreate = () => sessionService.create(payload, ...(Object.keys(createOptions).length > 0 ? [createOptions] : []));
+      result = sessionFolderActions
+        ? await sessionFolderActions.createWithFolder({ input, contextDirectory, contextSessionId: parentSessionID || undefined, ownWork, create: runCreate })
+        : await runCreate();
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {
@@ -1360,6 +1178,9 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
         const explicitSessionID = asNonEmptyString(input.sessionId);
         const sessionID = explicitSessionID || asNonEmptyString(options.contextSessionId);
         if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
+        if (input.folder !== undefined && !sessionFolderActions) {
+          throw new OpenChamberControlError('Sidebar folders are not available on this server', 503);
+        }
         const directory = (await resolveSessionDirectory(sessionID)) || asNonEmptyString(contextDirectory);
         const worktree: MoveWorktree = { name: asNonEmptyString(input.worktree)?.trim() };
         const branch = asNonEmptyString(input.branch);
@@ -1371,12 +1192,28 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
         const payload: MovePayload = { worktree };
         if (directory) payload.directory = directory;
         if (input.carry !== undefined) payload.carry = input.carry;
-        const moved = await sessionService.moveToWorktree(sessionID, payload);
-        if (workNamer && !existingBranch && moved?.worktree?.path) {
-          await workNamer.carryToWorktree({ sessionId: sessionID, worktree: moved.worktree.path })
-            .catch((error) => console.warn('Failed to carry the task name into the new worktree:', error instanceof Error ? error.message : String(error)));
-        }
-        return moved;
+        const runMove = async () => {
+          const moved = await sessionService.moveToWorktree(sessionID, payload);
+          if (workNamer && !existingBranch && moved?.worktree?.path) {
+            await workNamer.carryToWorktree({ sessionId: sessionID, worktree: moved.worktree.path })
+              .catch((error) => console.warn('Failed to carry the task name into the new worktree:', error instanceof Error ? error.message : String(error)));
+          }
+          return moved;
+        };
+        return sessionFolderActions
+          ? sessionFolderActions.moveWithFolder({
+              input,
+              sessionId: sessionID,
+              callerSessionId: asNonEmptyString(options.contextSessionId) || undefined,
+              directory,
+              contextDirectory,
+              move: runMove,
+            })
+          : runMove();
+      }
+      if (action === 'folder.list' || action === 'folder.create' || action === 'folder.move') {
+        if (!sessionFolderActions) throw new OpenChamberControlError('Sidebar folders are not available on this server', 503);
+        return sessionFolderActions.execute(action, input, contextDirectory, options.contextSessionId);
       }
       if (action === 'session.markDone' || action === 'session.track') {
         return setWorkState(input, options.contextSessionId, action === 'session.track' ? 'open' : 'done');

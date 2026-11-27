@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -28,6 +28,8 @@ const host: DesktopHost = {
   apiUrl: 'http://192.0.2.10:3000', clientToken: 'paired-token',
   relay: { serverId: 'server-1', relayUrl: 'wss://relay.example/ws', hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'x' } },
 };
+const plainHost: DesktopHost = { id: 'plain', label: 'Plain server', url: 'http://192.0.2.20:3000', apiUrl: 'http://192.0.2.20:3000' };
+let plainStatus: HostProbeResult['status'] = 'unreachable';
 let releaseBackground!: () => void;
 const background = new Promise<void>((resolve) => { releaseBackground = resolve; });
 const directOptions: unknown[] = [];
@@ -40,9 +42,10 @@ mock.module('@/lib/desktop', () => ({ ...desktop, isDesktopShell: () => true, is
 const hosts = await import('@/lib/desktopHosts');
 mock.module('@/lib/desktopHosts', () => ({
   ...hosts,
-  desktopHostsGet: async () => ({ hosts: [host], defaultHostId: 'local', localOrigin: 'http://localhost' }),
+  desktopHostsGet: async () => ({ hosts: [host, plainHost], defaultHostId: 'local', localOrigin: 'http://localhost' }),
   desktopLocalClientTokenGet: async () => 'local-token',
   desktopHostProbe: async (url: string, options: unknown): Promise<HostProbeResult> => {
+    if (url === plainHost.apiUrl) return { status: plainStatus, latencyMs: 1 };
     if (url !== host.apiUrl) return { status: 'ok', latencyMs: 1 };
     directOptions.push(options);
     if (++directCalls === 1) await background;
@@ -61,8 +64,10 @@ mock.module('@/lib/desktopRelayRestore', () => ({ scheduleDesktopHostCandidateRe
 const { I18nProvider } = await import('@/lib/i18n');
 const { DesktopHostSwitcherDialog } = await import('./DesktopHostSwitcher');
 const { isDesktopHostStatusPending } = await import('@/lib/desktopHostStatus');
-afterEach(async () => {
+afterEach(() => {
   releaseBackground();
+});
+afterAll(async () => {
   await dom.happyDOM.close();
 });
 
@@ -84,6 +89,34 @@ test('selecting a learned relay host during its background probe checks identity
     expect(relayCalls).toBe(1);
     expect(switches).toHaveLength(1);
     expect(switches[0]?.relay).toEqual(host.relay);
+  } finally {
+    await act(async () => mounted.unmount());
+  }
+});
+
+test('a failed switch check keeps its dialog open, and Retry switches once the host answers again', async () => {
+  // Issue 7710: the instance was restarting. The check used to end in a one-shot toast.
+  const container = document.createElement('div');
+  document.body.append(container);
+  const mounted = createRoot(container);
+  const button = (label: string) => [...document.body.querySelectorAll<HTMLElement>('button')]
+    .find((element) => element.textContent?.includes(label) || element.getAttribute('aria-label')?.includes(label));
+  try {
+    plainStatus = 'unreachable';
+    await act(async () => {
+      mounted.render(<I18nProvider><DesktopHostSwitcherDialog open embedded onOpenChange={() => undefined} /></I18nProvider>);
+    });
+    await act(async () => button('Switch to Plain server')!.click());
+
+    expect(document.body.textContent).toContain('Instance "Plain server" is unreachable');
+    expect(button('Retry')).toBeDefined();
+    expect(switches.some((entry) => entry.apiBaseUrl === plainHost.apiUrl)).toBe(false);
+
+    plainStatus = 'ok';
+    await act(async () => button('Retry')!.click());
+
+    expect(switches.some((entry) => entry.apiBaseUrl === plainHost.apiUrl)).toBe(true);
+    expect(button('Retry')).toBeUndefined();
   } finally {
     await act(async () => mounted.unmount());
   }

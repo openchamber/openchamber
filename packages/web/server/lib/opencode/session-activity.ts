@@ -26,6 +26,7 @@ export interface RunningSessionJob {
   kind: string;
   sessionID: string;
   command: string | undefined;
+  childSessionID?: string | undefined;
   startedAt: number;
 }
 
@@ -51,6 +52,7 @@ const backgroundJobsSchema = z.array(z.object({
   sessionID: z.string(),
   status: z.string(),
   command: z.string().optional(),
+  childSessionID: z.string().optional(),
   time: z.object({ started: z.number() }),
 }));
 
@@ -137,9 +139,8 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     });
   };
 
-  const fetchRunningBackgroundJobs = async (sessionId: string): Promise<RunningSessionJob[] | null | undefined> => {
+  const fetchRunningBackgroundJobsByQuery = async (search: URLSearchParams): Promise<RunningSessionJob[] | null | undefined> => {
     const base = buildOpenCodeUrl('/api/experimental/job', '');
-    const search = new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' });
     const response = await fetchImpl(`${base}?${search}`, {
       method: 'GET',
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
@@ -155,8 +156,14 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return parsed.data
       .filter((job) => job.status === 'running')
       .filter((job) => job.kind !== 'image' || now - job.time.started <= IMAGE_JOB_LIFETIME_MS)
-      .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, startedAt: job.time.started }));
+      .map((job) => ({ kind: job.kind, sessionID: job.sessionID, command: job.command, childSessionID: job.childSessionID, startedAt: job.time.started }));
   };
+
+  const fetchRunningBackgroundJobs = (sessionId: string): Promise<RunningSessionJob[] | null | undefined> =>
+    fetchRunningBackgroundJobsByQuery(new URLSearchParams({ sessionID: sessionId, descendants: 'true', status: 'running' }));
+
+  const fetchAllRunningBackgroundJobs = (): Promise<RunningSessionJob[] | null | undefined> =>
+    fetchRunningBackgroundJobsByQuery(new URLSearchParams({ status: 'running' }));
 
   return {
     fetchActiveSessionStatuses,
@@ -164,5 +171,6 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     hasWorkingDescendants: (sessionId: string, statuses: NonNullable<Awaited<ReturnType<typeof fetchActiveSessionStatuses>>>) => hasWorkingWithinDepth(sessionId, statuses, MAX_SUBAGENT_DEPTH),
     fetchRunningShells,
     fetchRunningBackgroundJobs,
+    fetchAllRunningBackgroundJobs,
   };
 };

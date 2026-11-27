@@ -13,7 +13,7 @@ Wähle aus, wie Antworten gesprochen werden:
 
 - **Browser** nutzt die Stimmen, die deinem Browser zur Verfügung stehen. Installiere unter Linux Desktop `speech-dispatcher`, die Client-Bibliothek `libspeechd` und eine Sprachengine wie `espeak-ng`. Aktiviere den speech-dispatcher-Dienst, falls deine Distribution ihn nicht automatisch startet, und starte OpenChamber neu.
 - **OpenAI** — die Stimmen von OpenAI; füge deinen API-Schlüssel ein und wähle eine Stimme
-- **OpenAI-kompatibel** — jeder Dienst, der das OpenAI-Format unterstützt; gib seine URL und, falls nötig, einen API-Schlüssel an
+- **OpenAI-kompatibel** — jeder Dienst, der das OpenAI-Format unterstützt; gib seine URL und, falls nötig, einen API-Schlüssel an. Listet der Dienst seine Stimmen auf, ist **Stimme** eine Auswahlliste, die mit **Eigene…** für jeden anderen Stimmennamen endet; sonst gib den Namen ein
 - **macOS say** — der eingebaute `say`-Befehl, auf Macs mit dieser Funktion
 
 Sobald es aktiviert ist, erscheint bei Nachrichten eine Abspieltaste, mit der du sie vorlesen lassen kannst.
@@ -38,6 +38,8 @@ Die Whisper- und Qwen3-ASR-Modelle erkennen die Sprache selbst und können bei e
 Schalte **Falsch verstandene Wörter korrigieren** ein, damit dein Small Model (Einstellungen → Sessions → Small Model) den Text überarbeitet, nachdem du aufhörst. Es ersetzt Wörter, die das Sprachmodell falsch verstanden hat, und entfernt Füllwörter wie "äh". Der Text geht dann an den Anbieter des Small Model und erscheint ein bis zwei Sekunden später. Ohne Small Model wird der Text so eingefügt, wie er erkannt wurde.
 
 API-Schlüssel für diese Dienste speichert der OpenChamber-Server, nicht dein Browser. Gib einen Schlüssel ein und drücke Enter, um ihn zu speichern; danach zeigt das Feld, dass ein Schlüssel gespeichert ist, und das Kreuz entfernt ihn.
+
+**API-Schlüssel eines OpenCode-Anbieters** steht unter dem Feld für den API-Schlüssel. Damit nutzt der Dienst den Schlüssel eines Anbieters, den du in OpenCode schon eingerichtet hast, sodass du ihn nicht noch einmal eingibst. OpenChamber wählt nur dann selbst einen Anbieter aus, wenn genau ein Anbieter mit Schlüssel dieselbe Adresse (Schema, Host und Port) wie der Dienst hat; haben zwei oder keiner diese Adresse, wird nichts gewählt. Die Auswahl sendet noch keinen Schlüssel. Wähle einen Anbieter oder **Keiner**, um selbst zu entscheiden. Ein Schlüssel, den du im Feld für den API-Schlüssel eingegeben hast, wird zuerst verwendet. Der OpenChamber-Server liest den Schlüssel des Anbieters erst bei Bedarf und sendet ihn nie an den Browser. Er sendet den Schlüssel an einen Server erst, wenn du für diesen Anbieter und diese Adresse **Schlüssel senden** gedrückt hast, auch wenn es die Adresse ist, die OpenCode für den Anbieter verwendet. Eine Freigabe gilt für den Schlüssel, den der Anbieter in diesem Moment hat: Wechselst du das Konto oder ändert sich der Schlüssel, auch unter demselben Namen, drückst du erneut **Schlüssel senden**.
 
 ## Hinweis für Telefone
 

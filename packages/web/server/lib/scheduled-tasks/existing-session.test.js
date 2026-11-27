@@ -198,6 +198,7 @@ describe('existing session scheduling', () => {
       await scheduler.start();
       first = scheduler.runNow('project-1', task.id);
       await entered;
+      expect(scheduler.getStatus().runningScheduledTasksCount).toBe(1);
       vi.spyOn(projectConfigRuntime, 'updateScheduledTaskState')
         .mockRejectedValueOnce(new Error('disk write failed'))
         .mockRejectedValueOnce(new Error('project lock timeout'));

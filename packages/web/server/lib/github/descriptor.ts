@@ -1,3 +1,5 @@
+import { isGitHubEnterpriseCloudHost } from './api-host.js';
+
 const INSTANCE_ERROR = 'GitHub instance must be an HTTPS origin';
 
 function normalizeGitHubInstance(raw: string | undefined) {
@@ -54,6 +56,7 @@ export const githubDescriptor = Object.freeze({
     labels: true,
     reviewers: true,
     reviewThreads: Object.freeze({ start: false, reply: true, resolve: true }),
+    reviewDismiss: 'others',
     reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: true,
     stacks: true,
@@ -66,7 +69,7 @@ export const githubDescriptor = Object.freeze({
   authMethods: Object.freeze({ device: true, pat: true, cli: Object.freeze({ tool: 'gh' }) }),
   transport: Object.freeze({
     httpsUsername: Object.freeze({ kind: 'fixed', value: 'x-access-token' }),
-    managedHttpsInstances: 'default-only',
+    managedHttpsInstances: (instance: string) => instance === 'github.com' || isGitHubEnterpriseCloudHost(instance),
     appendDotGitToHttpsClone: false,
   }),
   urls: Object.freeze({
@@ -118,7 +121,7 @@ export const githubDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,
       startThread: false, authorCanReview: false, projectUploads: true, absoluteProjectUploads: true, issueCloseReason: true,
-      issueEdit: true, changeRequestEdit: true, commentEdit: true,
+      issueAssignees: true, issueCloseReasonWrite: true, issueEdit: true, baseChange: true, updateBranch: true, rebase: true, changeRequestEdit: true, commentEdit: true,
       advancedSearch: true,
       reviewDrafts: true, reviewDraftFileComments: true,
       changeRequestTemplates: Object.freeze([]),

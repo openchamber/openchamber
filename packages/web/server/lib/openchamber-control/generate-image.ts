@@ -2,6 +2,7 @@
 import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { z } from 'zod';
 
@@ -21,12 +22,14 @@ export interface ImageGenerationDependencies {
   readSettings: () => Promise<ImageSettings | null>;
   fsPromises: typeof fs;
   now?: () => Date;
+  catalogRetryDelaysMs?: readonly number[];
 }
 
 export interface GeneratedImages {
   model: string;
   images: { path: string; mime: string }[];
   cost?: number;
+  tokens?: { input?: number; output?: number };
 }
 
 export const GENERATED_IMAGE_DIRECTORY = path.join(os.tmpdir(), 'opencode', 'generated-images');
@@ -36,6 +39,8 @@ const MAX_SOURCE_IMAGES = 8;
 const MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_COUNT = 4;
 const GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
+// external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/server/src/handlers/generate.ts Generation runs in OpenCode's global config location, which answers before its plugins load since 2.4.0, so a cold one does not know the model yet.
+const CATALOG_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000];
 
 const countSchema = z.union([z.number(), z.string().regex(/^\d+$/).transform(Number)])
   .pipe(z.number().int().min(1).max(MAX_COUNT));
@@ -44,6 +49,9 @@ const sourcesSchema = z.union([z.string().transform((source) => [source]), z.arr
 
 const isAspect = (value: string): value is `${number}:${number}` => /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(value);
 const isFiniteCost = (value: unknown): value is number => Number.isFinite(value);
+const tokenCount = z.number().int().nonnegative().optional().catch(undefined);
+const tokensSchema = z.object({ input: tokenCount, output: tokenCount })
+  .refine((usage) => usage.input !== undefined || usage.output !== undefined);
 
 interface ImageExtensions {
   readonly [mime: string]: string;
@@ -135,7 +143,9 @@ const parseModel = (value: ImageSettings['agentImageModel']) => {
   return { providerID: text.slice(0, separator), id: text.slice(separator + 1) };
 };
 
-export const createImageGenerationAction = ({ getClient, readSettings, fsPromises, now = () => new Date() }: ImageGenerationDependencies) => (
+export const createImageGenerationAction = ({
+  getClient, readSettings, fsPromises, now = () => new Date(), catalogRetryDelaysMs = CATALOG_RETRY_DELAYS_MS,
+}: ImageGenerationDependencies) => (
   async (input: ControlInput, { directory, signal }: ActionContext = {}) => {
     const settings = await readSettings().catch(() => null);
     if (settings?.agentImageToolEnabled !== true) {
@@ -181,13 +191,19 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
     if (count > 1) request.n = count;
     if (aspect) request.aspect = aspect;
     if (resolution) request.resolution = resolution;
+    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
     let result;
-    try {
-      result = await client.experimental.generate.image(request, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
-    } catch (error) {
-      if (deadline.aborted) throw new OpenChamberControlError(`${modelName} did not finish within 5 minutes`, 504);
-      if (signal?.aborted) throw error;
-      throw toControlError(error, modelName);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        result = await client.experimental.generate.image(request, { signal: requestSignal });
+        break;
+      } catch (error) {
+        if (deadline.aborted) throw new OpenChamberControlError(`${modelName} did not finish within 5 minutes`, 504);
+        if (signal?.aborted) throw error;
+        const retry = controlErrorFields(error)?._tag === 'ModelNotFoundError' ? catalogRetryDelaysMs[attempt] : undefined;
+        if (retry === undefined) throw toControlError(error, modelName);
+        await delay(retry, undefined, { signal: requestSignal });
+      }
     }
 
     const generated = Array.isArray(result?.images) ? result.images : [];
@@ -202,6 +218,12 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
     }
     const output: GeneratedImages = { model: modelName, images: saved };
     if (isFiniteCost(result.cost)) output.cost = result.cost;
+    const tokens = tokensSchema.safeParse(result.tokens);
+    if (tokens.success) {
+      output.tokens = {};
+      if (tokens.data.input !== undefined) output.tokens.input = tokens.data.input;
+      if (tokens.data.output !== undefined) output.tokens.output = tokens.data.output;
+    }
     return output;
   }
 );

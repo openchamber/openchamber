@@ -61,7 +61,8 @@ describe('extension files by grant', () => {
 
     const html = await request(app).get(`/api/guest-files/${grant}/index.html`).set('Host', 'oc.example.com').expect(200);
     expect(html.headers['content-security-policy']).toMatch(/^sandbox allow-scripts; default-src 'none';/);
-    expect(html.headers['content-security-policy']).toContain(`connect-src oc.example.com/api/guest-files/${grant}/`);
+    expect(html.headers['content-security-policy']).toContain(`connect-src http://oc.example.com/api/guest-files/${grant}/`);
+    expect(html.headers['content-security-policy']).toContain(`script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' 'self' http://oc.example.com/api/guest-files/${grant}/ data: blob:`);
     expect(html.headers['access-control-allow-origin']).toBe('null');
     // Nothing is appended: relative URLs resolve under the grant on their own.
     expect(html.text).toContain('src="main.js"');

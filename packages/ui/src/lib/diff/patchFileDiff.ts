@@ -27,12 +27,19 @@ export const haveMatchingPatchVersions = (displayPatch: string, actionPatch: str
   return displayHeader !== null && displayHeader === patchVersionHeader(actionPatch);
 };
 
+interface FileDiffFromPatchOptions {
+  contextLines?: number;
+  complete?: boolean;
+}
+
 export const fileDiffFromPatch = (
   file: string,
   patch: string,
-  contextLines = DEFAULT_PATCH_CONTEXT_LINES
+  options: FileDiffFromPatchOptions = {},
 ): FileDiffMetadata => {
-  const key = `${file}\0${contextLines}\0${patch}`;
+  const contextLines = options.contextLines ?? DEFAULT_PATCH_CONTEXT_LINES;
+  const complete = options.complete === true;
+  const key = `${file}\0${contextLines}\0${complete ? '1' : '0'}\0${patch}`;
   const cached = patchFileDiffCache.get(key);
   if (cached) {
     patchFileDiffCache.delete(key);
@@ -40,7 +47,7 @@ export const fileDiffFromPatch = (
     return cached;
   }
 
-  const completeContents = completePatchContents(patch);
+  const completeContents = complete ? completePatchContents(patch) : undefined;
   const value = completeContents
     ? (processFile(trimPatchContext(patch, contextLines), {
       oldFile: { name: file, contents: completeContents.before },

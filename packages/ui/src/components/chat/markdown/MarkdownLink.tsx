@@ -2,7 +2,7 @@ import React from 'react';
 import type { ExtraProps } from 'streamdown';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
+import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl, isMailtoUrl, openMailtoUrl } from '@/lib/url';
 import { parseSessionLink } from '@/lib/sessionLinks';
 import { parseExtensionInstallLink } from '@/lib/guests/install-link';
 import { requestGuestInstall } from '@/lib/guests/install-request';
@@ -28,8 +28,9 @@ import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-con
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
 import { claimGuestIdentifier, claimGuestUrl } from '@/lib/guests/links';
 import { guestPanelOpensHere } from '@/lib/guests/phone';
+import { useGuestScopeStore } from '@/lib/guests/folders';
 import { useGuestsStore } from '@/lib/guests/store';
-import { isBuiltInLink, runGuestLink } from './guestLinkClick';
+import { guestPanelHiddenHere, isBuiltInLink, runGuestLink } from './guestLinkClick';
 
 function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'path'): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
@@ -126,9 +127,12 @@ function GuestIdentifierLink({ identifier, className, children }: { identifier: 
   const claim = guestLinks ? claimGuestIdentifier(guestLinks, identifier) : null;
   const guest = useGuestsStore((state) => (claim ? state.guests.find((entry) => entry.id === claim.guestId) : undefined));
   const name = guest?.name;
+  const scopePaths = useGuestScopeStore((state) => state.paths);
   const openChatLink = useOpenChatLink(directory);
   if (!claim || !guest || !name) return <>{children}</>;
-  const pageUrl = claim.action === 'open' && !guestPanelOpensHere(guest) ? claim.url : undefined;
+  const pageUrl = claim.action === 'open' && (!guestPanelOpensHere(guest) || guestPanelHiddenHere(guest, scopePaths) !== null)
+    ? claim.url
+    : undefined;
   const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
     if ('key' in event && event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
@@ -195,6 +199,7 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const path = useConfirmedInlineFile(probe, probeHref ? 'href' : 'path');
   const textFile = Boolean(path && !probeHref);
   const external = isExternalHttpUrl(href);
+  const desktopMailto = isMailtoUrl(href) && isDesktopShell();
   const reference = node?.properties.dataOcReference !== undefined;
   const favicon = external && !path && !reference ? getExternalFaviconUrl(href) : null;
   const showPreview = presentation.loopbackPreview && isLoopbackHttpUrl(href) && directory
@@ -232,7 +237,13 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
     }
     if (href.startsWith('#') && !media?.documentAssets) {
       event.preventDefault();
-      const id = decodeURIComponent(href.slice(1));
+      const fragment = href.slice(1);
+      let id: string;
+      try {
+        id = decodeURIComponent(fragment);
+      } catch {
+        id = fragment;
+      }
       const root = event.currentTarget.closest('[data-markdown-content]');
       const target = root ? Array.from(root.querySelectorAll<HTMLElement>('[id]')).find((element) => element.id === id) : null;
       target?.scrollIntoView({ block: 'nearest' });
@@ -242,6 +253,12 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       && runGuestLink(guestClaim, 'link', directory, t)) {
       event.preventDefault();
       event.stopPropagation();
+      return;
+    }
+    if (desktopMailto) {
+      event.preventDefault();
+      event.stopPropagation();
+      void openMailtoUrl(href);
       return;
     }
     if (external && !presentation.disableLinkSafety && !modified(event)) {
@@ -310,6 +327,13 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
         data-openchamber-file-path={path ?? undefined}
         onClick={handleClick}
         onAuxClick={(event) => {
+          if (desktopMailto) {
+            if (event.button === 1) {
+              event.preventDefault();
+              void openMailtoUrl(href);
+            }
+            return;
+          }
           if (!app) return;
           event.preventDefault();
           if (event.button === 1) void openAppLinkWithConfirmation(href);

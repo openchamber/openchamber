@@ -279,6 +279,23 @@ describe('apns runtime relay mode (default)', () => {
     expect(plain).toMatchObject({ title: 'Agent response is ready', body: 'Fix the login bug' });
   });
 
+  it('seals the link a tap follows with the text, and the relay never sees it', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const pushKey = crypto.randomBytes(32).toString('base64');
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenSealed', undefined, 'ios', 'production', pushKey);
+    await runtime.addOrUpdateApnsToken('s2', 'tokenPlain', undefined, 'ios', 'production');
+    fetchMock.mockClear();
+    const url = 'openchamber://tracker-item?url=https%3A%2F%2Fgithub.com%2Facme%2Fsecret%2Fpull%2F7';
+    await runtime.sendApnsToAllUiSessions({ title: 'Pull request update', body: '', sealed: { title: 'Merged', body: 'acme/secret#7', url } });
+    const sends = fetchMock.mock.calls.filter(isSend).map(([, init]) => JSON.parse(init.body));
+    const sealed = sends.find((send) => send.tokens.includes('tokenSealed'));
+    expect(openPushContent(pushKey, sealed.data.enc)).toEqual({ title: 'Merged', body: 'acme/secret#7', url });
+    expect(JSON.stringify(sends)).not.toContain('secret');
+  });
+
   describe('when the relay cannot be reached', () => {
     const refused = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
     const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');

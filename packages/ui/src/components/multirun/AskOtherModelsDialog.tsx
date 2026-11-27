@@ -43,6 +43,8 @@ export function AskOtherModelsDialog({
     return () => { cancelled = true; };
   }, [open, session.directory, session.id, turnUserMessageId]);
 
+  const spaceTarget = React.useMemo(() => ({ requestId: null, directory: session.directory ?? null }), [session.directory]);
+
   const handleStart = async () => {
     setIsStarting(true);
     try {
@@ -78,6 +80,7 @@ export function AskOtherModelsDialog({
             onRemove={(index) => setModels((current) => current.filter((_, i) => i !== index))}
             onUpdate={(index, model) => setModels((current) => current.map((entry, i) => (i === index ? model : entry)))}
             dropdownSide="bottom"
+            spaceTarget={spaceTarget}
           />
         ) : null}
         <DialogFooter>

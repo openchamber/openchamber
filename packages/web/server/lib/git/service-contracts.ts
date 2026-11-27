@@ -117,12 +117,18 @@ export interface ChangeRequestLocalBranch {
   tip: string;
   backupBranch: string | null;
 }
+export interface PlannedRemote {
+  name: string;
+  url: string;
+}
 export interface WorktreeServerOptions extends BootstrapOptions {
   contributorSource?: ContributorSource | null;
   contributorProvenance?: {
     compareAndSwap(directory: string, revision: number, record: ContributorProvenanceInput): Promise<{ revision: number }>;
+    read?(directory: string): Promise<{ revision: number; provenance: Omit<ContributorProvenanceInput, 'sourceSha'> & { sourceSha: unknown } | null }>;
   } | undefined;
   changeRequestLocalBranch?: ChangeRequestLocalBranch;
+  disposeInstance?: WorktreeRemovalInput['disposeInstance'];
   hydrateCheckout?: ((input: { directory: string; parentRemoteName: string }) => Promise<CheckoutHydration | null | undefined>) | undefined;
 }
 export interface WorktreeCandidate {
@@ -161,6 +167,7 @@ export interface UpstreamConfiguration {
   ensureRemoteUrl: string;
 }
 export interface WorktreeBootstrapTask extends WorktreeServerOptions {
+  resumed?: boolean;
   directory: string;
   projectDirectory: string;
   primaryWorktree: string;
@@ -194,11 +201,10 @@ export interface IntegratePlanInput {
   targetBranch?: unknown;
   commits?: unknown;
 }
-export interface IntegrateStateInput extends IntegratePlanInput {
+export interface IntegrateStateInput {
+  repoRoot?: unknown;
   tempWorktreePath?: unknown;
-  cleanTargetWorktrees?: unknown;
-  remainingCommits?: unknown;
-  currentCommit?: unknown;
+  revision?: unknown;
 }
 export interface DiffOptions {
   path?: string | undefined;

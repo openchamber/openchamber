@@ -29,6 +29,9 @@ import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { glueChipPunctuation, withAttachmentChips, type InlineTextNode } from './attachmentCitationChips';
 import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartContent';
+import { isSkillFilePath } from '../../work-status/loadedSkills';
+import { resolveKnownName } from '../../composer/language/prefixTokens';
+import { openSkillSettings } from '@/components/sections/skills/openSkillSettings';
 import { extractTerminalContexts } from '@/lib/messages/terminalContext';
 import { readContextPart } from '@/lib/messages/contextParts';
 import UserContextPart from './UserContextPart';
@@ -121,17 +124,21 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     ), [attachmentFilenames, isOpenableAttachment, themeVariant]);
     const openAttachment = useOpenAttachment(onShowPopup);
 
-    const openCitedAttachment = React.useCallback((chip: HTMLElement) => {
+    const openCitedAttachment = React.useCallback((chip: HTMLElement, event: React.MouseEvent | React.KeyboardEvent) => {
         const target = resolveAttachmentOpenTarget(
             findAttachmentPart(chip.getAttribute('data-attachment-open'), attachmentFiles),
             attachmentFiles,
         );
-        if (target) openAttachment(target);
+        if (target) openAttachment(target, event);
     }, [attachmentFiles, openAttachment]);
 
     const openSkill = React.useCallback((name: string) => {
         const skill = skillByName.get(name);
-        if (!skill?.path) return;
+        if (!skill) return;
+        if (!isSkillFilePath(skill.path)) {
+            openSkillSettings(skill.name);
+            return;
+        }
         openContextFile(effectiveDirectory || getDirectoryForFilePath('', skill.path) || '/', skill.path);
     }, [effectiveDirectory, openContextFile, skillByName]);
 
@@ -202,7 +209,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
             event.preventDefault();
             event.stopPropagation();
             if (textRef.current && hasTextSelectionInside(textRef.current)) return;
-            openCitedAttachment(citationChip);
+            openCitedAttachment(citationChip, event);
             return;
         }
 
@@ -236,7 +243,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
         if (!event.target.hasAttribute('data-attachment-open')) return;
         event.preventDefault();
         event.stopPropagation();
-        openCitedAttachment(event.target);
+        openCitedAttachment(event.target, event);
     }, [openCitedAttachment]);
 
     const processedMarkdownContent = React.useMemo(() => {
@@ -258,9 +265,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
 
         while ((match = SKILL_TOKEN_PATTERN.exec(textContent)) !== null) {
             const prefix = match[1] || '';
-            const skillName = match[2];
+            const skillName = resolveKnownName(match[2], (name) => skillByName.has(name));
             const slashIndex = match.index + prefix.length;
-            if (!skillByName.has(skillName)) continue;
+            if (!skillName) continue;
 
             if (match.index > cursor) nodes.push(textContent.slice(cursor, match.index));
             if (prefix) nodes.push(prefix);

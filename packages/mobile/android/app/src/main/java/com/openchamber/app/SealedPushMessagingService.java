@@ -39,7 +39,7 @@ public class SealedPushMessagingService extends MessagingService {
     private static final String CHANNEL_ID = "openchamber_sealed_push";
     // A notification's tag is its collapse key, which the relay cuts to 64 characters.
     private static final int MAX_TAG_LENGTH = 64;
-    private static final String NOTIFICATION_ID_EXTRA = "openchamber.nid";
+    static final String NOTIFICATION_ID_EXTRA = "openchamber.nid";
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
@@ -55,20 +55,25 @@ public class SealedPushMessagingService extends MessagingService {
 
         String title = data.containsKey("title") ? data.get("title") : "OpenChamber";
         String body = "";
+        String url = null;
         String opened = PushSealKey.open(this, sealed);
         if (opened != null) {
             try {
                 JSONObject content = new JSONObject(opened);
                 title = content.optString("title", title);
                 body = content.optString("body", "");
+                // The app's own link a tap follows, such as the pull request a notification
+                // names. It travels sealed because it names a repository.
+                String link = content.optString("url", "");
+                if (link.startsWith("openchamber://")) url = link;
             } catch (Exception error) {
                 // Keep the generic title.
             }
         }
-        show(remoteMessage, data, title, body);
+        show(remoteMessage, data, title, body, url);
     }
 
-    private void show(RemoteMessage remoteMessage, Map<String, String> data, String title, String body) {
+    private void show(RemoteMessage remoteMessage, Map<String, String> data, String title, String body, String url) {
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager == null) return;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHANNEL_ID) == null) {
@@ -84,8 +89,9 @@ public class SealedPushMessagingService extends MessagingService {
         String messageId = remoteMessage.getMessageId() != null ? remoteMessage.getMessageId() : String.valueOf(System.currentTimeMillis());
         intent.putExtra("google.message_id", messageId);
         for (Map.Entry<String, String> entry : data.entrySet()) {
-            if (!"enc".equals(entry.getKey())) intent.putExtra(entry.getKey(), entry.getValue());
+            if (!"enc".equals(entry.getKey()) && !"url".equals(entry.getKey())) intent.putExtra(entry.getKey(), entry.getValue());
         }
+        if (url != null) intent.putExtra("url", url);
         int requestCode = messageId.hashCode();
         PendingIntent pendingIntent = PendingIntent.getActivity(
             this,
@@ -103,12 +109,18 @@ public class SealedPushMessagingService extends MessagingService {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent);
+        Bundle extras = new Bundle();
         String notificationId = data.get("nid");
-        if (notificationId != null) {
-            Bundle extras = new Bundle();
-            extras.putString(NOTIFICATION_ID_EXTRA, notificationId);
-            builder.addExtras(extras);
+        if (notificationId != null) extras.putString(NOTIFICATION_ID_EXTRA, notificationId);
+        // The tap intent's extras do not reach the notification itself, and the
+        // web layer reads these to remove a session's banners once the user
+        // opens it on the server that sent them (getDeliveredNotifications
+        // exposes notification extras; PushBannersPlugin removes them).
+        for (String key : new String[] { "sessionId", "serverId" }) {
+            String value = data.get(key);
+            if (value != null) extras.putString(key, value);
         }
+        if (!extras.isEmpty()) builder.addExtras(extras);
         String badge = data.get("badge");
         if (badge != null) {
             try {
@@ -121,10 +133,16 @@ public class SealedPushMessagingService extends MessagingService {
         // One notification per tag, as on iOS: a newer push about the same thing
         // replaces the older one instead of stacking under it.
         String tag = remoteMessage.getCollapseKey();
-        try {
-            NotificationManagerCompat.from(this).notify(tag, tag != null ? 0 : requestCode, builder.build());
-        } catch (SecurityException error) {
-            // Notification permission withdrawn; nothing to show.
+        int slotId = tag != null ? 0 : requestCode;
+        // PushBannersPlugin removes a banner the user opened only while the slot
+        // still holds that push; see SeenBanners for why this holds its lock.
+        synchronized (SeenBanners.LOCK) {
+            SeenBanners.notePosted(tag, slotId, notificationId);
+            try {
+                NotificationManagerCompat.from(this).notify(tag, slotId, builder.build());
+            } catch (SecurityException error) {
+                // Notification permission withdrawn; nothing to show.
+            }
         }
     }
 

@@ -42,16 +42,38 @@ interface BridgeResponse {
   data?: unknown;
   error?: string;
   code?: string;
+  status?: number;
+  directory?: string;
 }
 
 export class BridgeRequestError extends Error {
   readonly code: string | undefined;
+  readonly status: number | undefined;
+  readonly directory: string | undefined;
 
-  constructor(message: string, code: string | undefined) {
+  constructor(message: string, code: string | undefined, status?: number, directory?: string) {
     super(message);
     this.name = 'BridgeRequestError';
     this.code = code;
+    this.status = status !== undefined && Number.isInteger(status) && status >= 400 && status <= 599 ? status : undefined;
+    this.directory = directory || undefined;
   }
+}
+
+interface BridgeErrorBody {
+  error: string;
+  code?: string;
+  directory?: string;
+}
+
+export function bridgeRequestErrorResponse(error: BridgeRequestError): Response {
+  const body: BridgeErrorBody = { error: error.message };
+  if (error.code) body.code = error.code;
+  if (error.directory) body.directory = error.directory;
+  return new Response(JSON.stringify(body), {
+    status: error.status ?? 500,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 const pendingRequests = new Map<string, {
@@ -84,7 +106,12 @@ window.addEventListener('message', (event: MessageEvent<BridgeResponse>) => {
     if (response.success) {
       pending.resolve(response.data);
     } else {
-      pending.reject(new BridgeRequestError(response.error || 'Unknown error', response.code));
+      pending.reject(new BridgeRequestError(
+        response.error || 'Unknown error',
+        response.code,
+        response.status,
+        response.directory,
+      ));
     }
   }
 });
@@ -223,7 +250,7 @@ export async function executeVSCodeCommand(command: string, args?: unknown[]): P
 }
 
 export async function openVSCodeExternalUrl(url: string): Promise<void> {
-  await sendBridgeMessage('vscode:openExternalUrl', { url });
+  await sendBridgeMessageWithOptions('vscode:openExternalUrl', { url }, { timeoutMs: 0 });
 }
 
 type CommandHandler = (payload: unknown) => void;

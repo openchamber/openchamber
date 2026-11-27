@@ -67,7 +67,7 @@ import { listSessionPage } from "./session-page-listing"
 import { enqueueSessionMaterialization } from "./session-materialization-recovery"
 import { statusPollingDirectories, resyncDirectorySessionStatuses, needsSnapshotAfterStatusPoll, getActiveSessionCandidateIds, getLiveSessionCandidateIds } from "./session-status-recovery"
 import { isDirectoryExternallyViewed, isSessionCacheViewed } from "./viewed-sessions"
-import { resyncDirectoryAfterReconnect, reconcileActivityAfterGap } from "./session-reconnect-recovery"
+import { recoverDirectoriesAfterGap, resyncDirectoryAfterReconnect } from "./session-reconnect-recovery"
 import { resyncBlockingRequestsForActiveDirectory } from "./blocking-request-recovery"
 import { dormantLocations, wakeDormantLocations } from "./dormant-locations"
 import { isUiFocused } from "./surface-notifications"
@@ -540,11 +540,10 @@ export function SyncProvider(props: {
     const resyncAfterStreamGap = (reason: SessionMaterializationReason) => {
       messageLoader.markHistoryStale()
       const gapEndedAt = Date.now()
-      for (const dir of childStores.children.keys()) {
+      recoverDirectoriesAfterGap(childStores, (dir) => {
         triggerDirectoryResync(dir, reason)
         childDiscoveryDueAtByDirectoryRef.current.set(dir, gapEndedAt)
-      }
-      void reconcileActivityAfterGap(childStores)
+      })
       notifyStreamGap(runtimeKey)
     }
     const pipeline = createEventPipeline({
@@ -627,8 +626,7 @@ export function SyncProvider(props: {
           return
         }
         if (replayed) {
-          for (const dir of childStores.children.keys()) triggerDirectoryResync(dir, "stream-replayed")
-          void reconcileActivityAfterGap(childStores)
+          recoverDirectoriesAfterGap(childStores, (dir) => triggerDirectoryResync(dir, "stream-replayed"))
           return
         }
         resyncAfterStreamGap("stream-reconnect")
@@ -959,5 +957,5 @@ export { handleEvent } from "./sync-event-dispatch"
 export { interruptedTurnToolParts, markRecordedInterruptedTurn } from "./interrupted-turn-recovery"
 export { useDirectoryStore, useSessionMessageLoader, useSessionMessageLoadState, useDirectorySync, useSyncDirectory, useChildStoreManager } from "./directory-sync-hooks"
 export { useSessionMessages, useSessionMessagesSelector, useSessionMessagesResolved, useSessionPartsForMessages, useSessionRenderable, useUserMessageHistory } from "./session-message-hooks"
-export { useSessionStatus, useSessionStatusSnapshotReady, useSessionPermissions, useSessionBlockingRequests, collectComposerForms, useScopedBlockingPermissions, useScopedBlockingForms, useRecoveredQuestions } from "./session-request-hooks"
+export { useSessionStatus, useSessionStatusSnapshotReady, useSessionPermissions, useSessionBlockingRequests, findBlockingRequestTarget, openBlockingRequestTarget, collectComposerForms, useScopedBlockingPermissions, useScopedBlockingForms, useRecoveredQuestions } from "./session-request-hooks"
 export { buildSessionMessageRecordsSnapshot, readSessionMessageRecordsSnapshot, useSessionMessageRecords } from "./session-message-records"

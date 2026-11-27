@@ -33,7 +33,30 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
+            <!-- The openchamber:// scheme is how launcher quick actions and other apps reach
+                 this app. Capacitor's App plugin turns these VIEW intents into appUrlOpen;
+                 without this filter the app receives no deep link at all. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="openchamber" />
+            </intent-filter>
+
+            <!-- The shortcut service reads this from the launcher activity, not from the
+                 application: the same metadata one level up is ignored and the menu stays empty. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- The Dictate quick action's only way in. Unexported, so another app cannot start it;
+             the launcher starts shortcuts as this app, which may. MainActivity starts the
+             microphone only for an intent addressed to this alias (DictateShortcut.java). -->
+        <activity-alias
+            android:name=".DictateShortcut"
+            android:targetActivity=".MainActivity"
+            android:exported="false" />
 
         <!-- Not a toggle: the tile starts a session, like the iOS Control Center control. -->
         <service

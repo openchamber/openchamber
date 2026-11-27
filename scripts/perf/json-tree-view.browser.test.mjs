@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { createServer } from 'vite';
 
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from './cdp.mjs';
+import { createFixtureDir, serveFixture } from './fixture-page.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 let chrome;
 try {
   chrome = resolveChrome(process.env.OPENCHAMBER_TEST_CHROME);
@@ -18,12 +16,12 @@ try {
 
 // Real CSS layout catches the unbounded viewport that happy-dom cannot measure.
 test('JSON tree stays bounded and its tail remains reachable', { skip: !chrome && 'Set OPENCHAMBER_TEST_CHROME to run the browser regression', timeout: 120_000 }, async (t) => {
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/json-tree-'));
+  const fixture = createFixtureDir('json-tree-view');
   writeFileSync(path.join(fixture, 'index.html'), '<!doctype html><html><body><div id="host" style="height:520px;width:320px;overflow:auto"></div><script type="module" src="/fixture.tsx"></script></body></html>');
   writeFileSync(path.join(fixture, 'fixture.tsx'), `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
+    import { flushSync } from 'react-dom';
     import { JsonTreeView } from '@/components/ui/JsonTreeView';
     import { I18nContext } from '@/lib/i18n/react-context';
     import { dict } from '@/lib/i18n/messages/en';
@@ -36,36 +34,24 @@ test('JSON tree stays bounded and its tail remains reachable', { skip: !chrome &
     function renderFixture(count, maxHeight = '100%', fill = true) {
       host.style.height = fill ? '520px' : 'auto';
       const data = Array.from({ length: count }, (_, i) => 'item-' + i + ' ' + 'x'.repeat(90));
-      root.render(<I18nContext.Provider value={i18n}><JsonTreeView key={++revision} className={fill ? 'h-full' : undefined} jsonString={JSON.stringify(data)} maxHeight={maxHeight} /></I18nContext.Provider>);
+      flushSync(() => root.render(<I18nContext.Provider value={i18n}><JsonTreeView key={++revision} className={fill ? 'h-full' : undefined} jsonString={JSON.stringify(data)} maxHeight={maxHeight} /></I18nContext.Provider>));
     }
     Object.assign(window, { renderFixture });
   `);
 
-  const server = await createServer({
-    configFile: false,
-    root: fixture,
-    logLevel: 'error',
-    css: { postcss: repo },
-    resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
+  const server = await serveFixture({ root: fixture });
   let browser;
   let client;
   try {
-    await server.listen();
     const port = await reservePort();
     browser = launchChrome({ chrome, port, profileDir: path.join(fixture, 'profile'), headless: true, extraArgs: ['--no-sandbox', '--disable-dev-shm-usage'] });
     const target = await createPageTarget(port);
     client = new CdpClient(target.webSocketDebuggerUrl);
     await client.connect();
     await client.send('Page.enable');
-    let navigations = 0;
-    client.on('Page.frameNavigated', ({ frame }) => {
-      if (!frame.parentId) navigations += 1;
-    });
     await client.send('Page.bringToFront');
     await client.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    await client.send('Page.navigate', { url: server.resolvedUrls.local[0] });
+    await client.send('Page.navigate', { url: server.url });
 
     const evaluate = async (expression) => {
       const result = await client.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, { timeoutMs: 20_000 });
@@ -81,30 +67,7 @@ test('JSON tree stays bounded and its tail remains reachable', { skip: !chrome &
       };
       check();
     })`);
-    // A reload can land while the page is being waited on; wait again then.
-    const waitForFixture = async () => {
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          return await fixtureReady();
-        } catch (error) {
-          if (attempt >= 5 || !/navigated|destroyed/i.test(String(error?.message))) throw error;
-          await wait(500);
-        }
-      }
-    };
-    await waitForFixture();
-    // The first render pulls in modules the dev server had not seen yet, and
-    // Vite's dependency optimizer may reload the page once for them, taking
-    // `renderFixture` away mid-test. Render once and wait until a render
-    // passes without a reload before measuring anything.
-    for (let attempt = 0; ; attempt += 1) {
-      const before = navigations;
-      await evaluate('window.renderFixture(300)').catch(() => {});
-      await wait(1_500);
-      if (navigations === before) break;
-      assert.ok(attempt < 3, 'the fixture page kept reloading');
-      await waitForFixture();
-    }
+    await fixtureReady();
 
     const settle = () => evaluate(`new Promise(resolve => {
       let frames = 0;
@@ -171,6 +134,8 @@ test('JSON tree stays bounded and its tail remains reachable', { skip: !chrome &
       assert.ok(resized.rows < 200);
       assert.equal(await evaluate(`document.activeElement.textContent.includes('Expand All')`), true);
       await assertTail(26_000);
+      // The list counts as scrolling for 150 ms, and hiding it then leaves its rows alone.
+      await wait(300);
       await evaluate(`document.getElementById('host').style.display = 'none'`);
       await settle();
       await evaluate(`document.getElementById('host').style.display = ''`);

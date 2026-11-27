@@ -15,13 +15,13 @@ import {
     replaceRepositoryWorktrees,
     worktreeMapsEqual,
 } from '@/lib/worktrees/worktreeManager';
+import { findIntegrateCheckout } from '@/lib/worktrees/integrateCheckouts';
 import { normalizePath } from '../attachments/filePaths';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { getGitStatus } from '@/lib/gitApi';
 import { draftSpaceTarget, isSpaceCreationRequest, spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
-import { useComposerFollowsSpace } from '@/lib/spaces/useComposerFollowsSpace';
 import { spacesOfProject, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -290,7 +290,6 @@ export function useDraftTarget(enabled: boolean) {
             ?? selectedDraftProjectPath,
         [draftSpaceDirectory, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, selectedDraftProjectPath],
     );
-    useComposerFollowsSpace(enabled && isSpaceDirectory(selectedDraftDirectory) ? selectedDraftDirectory : null);
 
     const selectedDraftDirectoryBootstrapPending = useWorktreeBootstrapPending(selectedDraftDirectory);
     const draftDirectoryNeedsFreshStatusRef = React.useRef<string | null>(null);
@@ -360,7 +359,7 @@ export function useDraftTarget(enabled: boolean) {
         if (baseItems.some((option) => option.value === selectedDraftDirectory)) {
             return baseItems;
         }
-        if (!shouldKeepMissingSelectedDraftDirectory) {
+        if (!shouldKeepMissingSelectedDraftDirectory || findIntegrateCheckout(selectedDraftDirectory)) {
             return baseItems;
         }
         return [

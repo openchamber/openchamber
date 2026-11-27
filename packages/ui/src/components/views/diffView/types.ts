@@ -28,6 +28,7 @@ export type DiffScope = 'all' | PendingDiffScope;
 export type ComparisonDiffResult =
     | { status: 'loading' }
     | { status: 'ready'; data: DiffData }
+    | { status: 'large'; patch: string; changedLines: number; contextMode?: DiffContextMode; versions?: { original: string; modified: string } }
     | { status: 'error'; message: string };
 export interface DiffFindReveal {
     key: string;

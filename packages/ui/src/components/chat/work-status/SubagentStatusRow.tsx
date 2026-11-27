@@ -18,7 +18,7 @@ const RunningDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
 
 const RowDetail: React.FC<{ row: SubagentRow; directory: string | null; showActivity: boolean }> = ({ row, directory, showActivity }) => {
   const { t } = useI18n();
-  if (row.busy && !row.blocked && !row.asked) {
+  if (row.busy && !row.waitingOnBackground && !row.blocked && !row.asked) {
     return (
       <span dir="auto" className="oc-ui-start-align block truncate">
         <SubagentActivityText childId={row.child.id} directory={row.child.directory || directory} identity={row.identity} alertsOnly={!showActivity} />

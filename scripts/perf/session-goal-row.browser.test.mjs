@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from './cdp.mjs';
+import { createFixtureDir, serveFixture } from './fixture-page.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const LOCALES = ['en', 'ar', 'de', 'es', 'fr', 'he', 'ja', 'ko', 'nl', 'pl', 'pt-BR', 'tr', 'uk', 'zh-CN', 'zh-TW'];
@@ -42,12 +43,13 @@ const WIDE_WIDTH = 768;
  */
 
 async function createGoalRowFixture() {
-  mkdirSync(path.join(repo, 'tmp'), { recursive: true });
-  const fixture = mkdtempSync(path.join(repo, 'tmp/session-goal-row-'));
+  const fixture = createFixtureDir('session-goal-row');
   // Served from the fixture itself: a linked worktree resolves pdfjs-dist into
   // another checkout, outside the server's allowed paths, and a Windows path
   // does not form a URL.
-  for (const font of TEST_FONTS) copyFileSync(font.file, path.join(fixture, path.basename(font.file)));
+  const publicDir = path.join(fixture, 'public');
+  mkdirSync(publicDir);
+  for (const font of TEST_FONTS) copyFileSync(font.file, path.join(publicDir, path.basename(font.file)));
   const fontStyle = `<style>${TEST_FONTS.map((font) => `@font-face{font-family:"${font.family}";font-weight:400;src:url("/${path.basename(font.file)}") format("truetype")}`).join('')}</style>`;
   writeFileSync(path.join(fixture, 'index.html'), `<!doctype html><html class="mobile-pointer"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${fontStyle}</head><body><div id="root" style="margin:0 12px"></div><script type="module" src="/fixture.tsx"></script></body></html>`);
   writeFileSync(path.join(fixture, 'goal-stub.ts'), `
@@ -118,37 +120,11 @@ async function createGoalRowFixture() {
     };
   `);
   const stub = path.join(fixture, 'goal-stub.ts');
-  const { createServer } = await import('vite');
-  const server = await createServer({
-    configFile: false, root: fixture, logLevel: 'error',
-    // Concurrent browser suites must not invalidate each other's optimized deps.
-    cacheDir: path.join(fixture, '.vite'),
-    css: { postcss: repo },
-    resolve: {
-      alias: [
-        { find: /^@\/hooks\/useSessionGoal$/, replacement: stub },
-        { find: /^@\/sync\/sync-context$/, replacement: stub },
-        { find: /^@\/lib\/sessionGoalActions$/, replacement: stub },
-        { find: '@openchamber/sdk', replacement: path.join(repo, 'packages/sdk/src/index.ts') },
-        { find: '@', replacement: path.join(repo, 'packages/ui/src') },
-      ],
-    },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
-  });
-  try {
-    await server.listen();
-  } catch (error) {
-    await server.close();
-    rmSync(fixture, { recursive: true, force: true });
-    throw error;
-  }
-  return {
-    url: server.resolvedUrls.local[0], fixture,
-    async close() {
-      await server.close();
-      rmSync(fixture, { recursive: true, force: true });
-    },
-  };
+  return { fixture, ...await serveFixture({ root: fixture, aliases: [
+    { find: /^@\/hooks\/useSessionGoal$/, replacement: stub },
+    { find: /^@\/sync\/sync-context$/, replacement: stub },
+    { find: /^@\/lib\/sessionGoalActions$/, replacement: stub },
+  ] }) };
 }
 
 async function assertHintFits(client, url) {

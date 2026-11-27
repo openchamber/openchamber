@@ -9,6 +9,7 @@ import {
 import {
   findWebSearchProjectOverride,
   writeCompactionSettings,
+  writeMcpSkillsEnabled,
   writeWarmingDuration,
   writeWarmingEnabled,
   writeWebSearchSelection,
@@ -44,6 +45,14 @@ export function setCompactionSettings(update: CompactionUpdate) {
   const layers = readConfigLayers(null);
   const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
   const changed = writeCompactionSettings(target.config, update);
+  if (changed) writeConfig(target.config, target.path);
+  return { path: target.path, changed };
+}
+
+export function setMcpSkillsEnabled(enabled: boolean) {
+  const layers = readConfigLayers(null);
+  const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
+  const changed = writeMcpSkillsEnabled(target.config, enabled);
   if (changed) writeConfig(target.config, target.path);
   return { path: target.path, changed };
 }

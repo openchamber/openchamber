@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { ReferencePreview } from '@/components/references/ReferencePreview';
 import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
-import { canChangeDiscussionState, DEFAULT_REPOSITORY_FILTER, type ReferencePickerItem } from '@/components/references/referencePickerItems';
+import { canChangeReferenceState, DEFAULT_REPOSITORY_FILTER, type ReferencePickerItem } from '@/components/references/referencePickerItems';
 import {
     forgetRepositoryPullStatus,
     useRepositoryPullStatuses,
@@ -14,7 +14,7 @@ import {
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewerPicker } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { SourceBoardTrackerStatus } from '@/components/sourceBoard/SourceBoardTrackerStatus';
 import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl, useShowTrackerItem, wasTrackerItemRequested } from '@/components/sourceBoard/openTrackerItem';
@@ -221,21 +221,23 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 includeDiff={false}
                 onIncludeDiffChange={() => undefined}
                 now={now}
-                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={() => void refreshItem()} worktreeAvailable={false} stack={stack} />}
+                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={refreshItem} worktreeAvailable={false} stack={stack} branchWriteAccess={detail.status === 'ready' ? detail.value.branchWriteAccess : undefined} />}
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
                 onRefresh={context ? refreshFromHost : undefined}
                 onSaveText={saveText}
                 threadActions={threadActions}
                 commentActions={commentActions}
-                stateMenu={reference.state !== 'merged' && writeContext
-                    && (reference.kind !== 'discussion' || canChangeDiscussionState(reference, detail.status === 'ready' ? detail.value.discussion : undefined)) ? (
-                    <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} />
+                stateMenu={writeContext && canChangeReferenceState(reference, detail.status === 'ready' ? detail.value : null) ? (
+                    <SourceBoardStateMenuItems item={item} context={writeContext} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} onChanged={() => void refreshItem()} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={writeContext ? <SourceBoardLabels reference={reference} context={writeContext} onChanged={refreshItem} /> : undefined}
+                assigneesControl={reference.kind === 'issue' && reference.linked !== true && writeContext ? (
+                    <SourceBoardAssignees issue={reference} detail={detail} writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined} context={writeContext} onChanged={refreshItem} />
+                ) : undefined}
                 reviewersControl={pull && writeContext ? (
-                    <SourceBoardReviewers pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
+                    <SourceBoardReviewerPicker pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}
                 reply={writeContext && (detail.status !== 'ready' || detail.value.discussion?.canComment !== false)
                     ? <SourceBoardReply reference={reference} context={writeContext} onRefresh={refreshItem} />
@@ -248,6 +250,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                         context={context}
                         projectOwnsDirectory={() => !foreign}
                         currentDirectory={panelDirectory}
+                        writeAccess={detail.status === 'ready' ? detail.value.writeAccess : undefined}
                     />
                 ) : null}
             />
@@ -274,7 +277,7 @@ const TrackerWorkItem: React.FC<{
 }> = ({ url, provider, identifier, visible, onUnavailable, onShown }) => {
     const { t } = useI18n();
     const source = useTrackerSourceStatus(provider);
-    const { detail, refresh, followed } = useTrackerItemDetail(source === 'ready' ? { provider, id: identifier } : null, true);
+    const { detail, refresh, refreshFromHost, followed } = useTrackerItemDetail(source === 'ready' ? { provider, id: identifier, identifier } : null, true);
     useTrackedItems(visible ? followed : NO_FOLLOWED);
     const showTrackerItem = useShowTrackerItem();
     const now = useMinuteTickerNow(true);
@@ -311,6 +314,7 @@ const TrackerWorkItem: React.FC<{
             footer={<SourceBoardActions item={item} project={null} context={null} onStartWorktree={() => undefined} onChanged={() => void refresh()} worktreeAvailable={false} />}
             trackerStateControl={<SourceBoardTrackerStatus item={detail.value} onChanged={() => void refresh()} />}
             onOpenTrackerItem={(child) => { showTrackerItem(child.url, null); }}
+            onRefresh={refreshFromHost}
         />
     );
 };

@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 
 import type { ChangeRequestReview } from './useChangeRequestReview';
 
-const CARD_CLASS = 'w-full max-w-[min(100%,calc(var(--oc-editor-width,var(--oc-context-panel-width,100vw))-var(--oc-editor-gutter-width,0px)))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] font-sans shadow-none';
+const CARD_CLASS = 'w-full max-w-[min(100%,calc(var(--oc-editor-width,100vw)-var(--oc-editor-gutter-width,0px)))] overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] font-sans shadow-none';
 const HEADER_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
 
 export const ReviewAvatar: React.FC<{ person: ReviewPerson | null }> = ({ person }) => {
@@ -94,26 +94,30 @@ export const ReviewDraftCard: React.FC<{
                 <ReviewAvatar person={comment.author} />
                 <span className="text-xs font-medium text-foreground">{t('review.card.you')}</span>
                 <span className="me-auto rounded-full bg-[var(--status-warning-background)] px-1.5 text-xs text-[var(--status-warning)]">{t('review.card.pending')}</span>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <span className="inline-flex shrink-0">
-                            <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => setEditing(true)} aria-label={t('inlineComment.actions.editComment')}>
-                                <Icon name="pencil" className="h-3 w-3" />
-                            </button>
-                        </span>
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{t('inlineComment.actions.editComment')}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <span className="inline-flex shrink-0">
-                            <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => void remove()} aria-label={t('inlineComment.actions.deleteComment')}>
-                                {busy ? <Spinner className="size-3" /> : <Icon name="close" className="h-3 w-3" />}
-                            </button>
-                        </span>
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
-                </Tooltip>
+                {review.canWrite ? (
+                    <>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex shrink-0">
+                                    <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => setEditing(true)} aria-label={t('inlineComment.actions.editComment')}>
+                                        <Icon name="pencil" className="h-3 w-3" />
+                                    </button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{t('inlineComment.actions.editComment')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex shrink-0">
+                                    <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => void remove()} aria-label={t('inlineComment.actions.deleteComment')}>
+                                        {busy ? <Spinner className="size-3" /> : <Icon name="close" className="h-3 w-3" />}
+                                    </button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
+                        </Tooltip>
+                    </>
+                ) : null}
             </div>
             <div className="px-3 pb-2 pt-1 text-sm leading-relaxed text-foreground">
                 <ReviewCommentBody body={comment.body} excerpt={excerpt} />
@@ -172,15 +176,21 @@ export const ReviewThreadCard: React.FC<{
                 <span className="shrink-0">{t('review.card.resolved')}</span>
                 <span className="min-w-0 flex-1 truncate">{first.author?.login ?? '—'}: {first.body}</span>
                 {replies.length > 0 ? <span className="shrink-0">{t(replies.length === 1 ? 'review.card.replies.one' : 'review.card.replies.other', { count: replies.length })}</span> : null}
+                {thread.outdated ? (
+                    <span className="inline-flex shrink-0 items-center rounded-full border border-edge px-1.5 typography-micro text-muted-foreground">
+                        {t('review.card.outdated')}
+                    </span>
+                ) : null}
                 <Icon name="arrow-right-s" className="size-3.5 shrink-0 rtl:rotate-180" />
             </button>
         );
     }
 
     const sendReply = async () => {
-        if (!text.trim() || busy) return;
+        const reply = review.reply;
+        if (!text.trim() || busy || !reply) return;
         setBusy('reply');
-        const sent = await review.reply(thread.id, text);
+        const sent = await reply(thread.id, text);
         setBusy(null);
         if (sent) {
             setText('');
@@ -188,9 +198,10 @@ export const ReviewThreadCard: React.FC<{
         }
     };
     const toggleResolved = async () => {
-        if (busy) return;
+        const settle = review.setResolved;
+        if (busy || !settle) return;
         setBusy('resolve');
-        await review.setResolved(thread.id, !thread.resolved);
+        await settle(thread.id, !thread.resolved);
         setBusy(null);
     };
 
@@ -198,6 +209,11 @@ export const ReviewThreadCard: React.FC<{
         <div className={CARD_CLASS} style={style} data-comment-card="true">
             <div className="flex items-center gap-1.5 px-3 pt-2">
                 <CommentByline person={first.author} createdAt={first.createdAt} now={now} />
+                {thread.outdated ? (
+                    <span className="ms-auto inline-flex shrink-0 items-center rounded-full border border-edge px-1.5 typography-micro text-muted-foreground">
+                        {t('review.card.outdated')}
+                    </span>
+                ) : null}
             </div>
             <div className="px-3 pb-2 pt-1 text-sm leading-relaxed text-foreground">
                 <ReviewCommentBody body={first.body} excerpt={excerpt} />
@@ -243,7 +259,7 @@ export const ReviewThreadCard: React.FC<{
                 </div>
             ) : (
                 <div className="flex items-center gap-1 border-t border-[var(--interactive-border)] px-1.5 py-1">
-                    {thread.canReply ? (
+                    {thread.canReply && review.reply ? (
                         <button type="button" className="min-w-0 flex-1 truncate px-1.5 text-start text-sm text-muted-foreground hover:text-foreground" onClick={() => setReplying(true)}>
                             {t('references.picker.thread.replyPlaceholder')}
                         </button>
@@ -257,7 +273,7 @@ export const ReviewThreadCard: React.FC<{
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>{t('contextTooltips.diff.attachThread')}</TooltipContent>
                     </Tooltip>
-                    {thread.canResolve ? (
+                    {thread.canResolve && review.setResolved ? (
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <span className="inline-flex">

@@ -20,15 +20,17 @@ import { formatCompactNumber } from '@/lib/numberFormat';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
-import { getIntegrationClient, loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
+import { loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { listCanonicalProviders, listConnectableProviders } from './connectableProviders';
 import { fetchProviderSource, type ProviderSources } from './providerSource';
+import { ProviderPageActions } from './ProviderPageActions';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
   providerHasCredentials,
   providerHoldsStoredLogin,
   shouldShowApiKeyAuth,
+  providerPageSections,
   shouldShowModelsSection,
   usesMachineCredentials,
   findIntegrationForProvider,
@@ -53,13 +55,14 @@ import { ProviderLogoImageControl } from './ProviderLogoImageControl';
 import { providerLogoUploadSupported, removeProviderLogo, uploadProviderLogo } from '@/lib/customProviderLogos';
 
 import { ProviderAuthMethodCards } from './ProviderAuthMethodCards';
+import { ProviderAuthMethodsLoading } from './ProviderAuthMethodsLoading';
 import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
 import {
   buildIntegrationKeyRequest,
   buildProviderUpsertRequest,
-  storeKeyAfterConfigWrite,
   CUSTOM_PROVIDER_ID,
   isConfigDefinedCustomProvider,
+  isCustomOpenAICompatibleProvider,
   providerToEditFormState,
   resolveProviderConfigScope,
   type CustomProviderFormState,
@@ -68,6 +71,7 @@ import {
   type ProviderConfigScope,
   type StoredProviderSource,
 } from './custom-provider-form';
+import { connectProviderKey, removeProviderCredentials, storeCustomProviderKey } from './provider-key-writes';
 
 const formatTokens = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -78,10 +82,6 @@ const formatTokens = (value?: number | null) => {
   }
   const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-};
-
-const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<void> => {
-  await getIntegrationClient().integration.connect.key(request);
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
@@ -133,7 +133,8 @@ export const ProvidersPage: React.FC = () => {
     void loadProviders({ directory: settingsDirectory, source: 'settings:providers' });
   }, [catalogReloadRevision, loadProviders, settingsDirectory]);
 
-  const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog());
+  const [catalog, setCatalog] = React.useState<IntegrationCatalog | null>(() => peekIntegrationCatalog(settingsDirectory));
+  const connectIntegrationKey = (request: IntegrationKeyRequest) => connectProviderKey(settingsDirectory, request);
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
   const storedLoginIds = settingsOnlyProviders
@@ -174,6 +175,7 @@ export const ProvidersPage: React.FC = () => {
   const [candidateProviderId, setCandidateProviderId] = React.useState('');
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [storedProviderConfigs, setStoredProviderConfigs] = React.useState<Record<string, StoredProviderSource | null>>({});
+  const [sourcesFailedFor, setSourcesFailedFor] = React.useState<string | null>(null);
   const [providerSourcesRevision, setProviderSourcesRevision] = React.useState(0);
   const [integrationsRevision, setIntegrationsRevision] = React.useState(0);
   const backgroundIntegrationsReadRef = React.useRef(false);
@@ -199,7 +201,7 @@ export const ProvidersPage: React.FC = () => {
 
     const loadIntegrations = async () => {
       try {
-        const next = await loadIntegrationCatalog();
+        const next = await loadIntegrationCatalog(settingsDirectory);
         if (!isMounted) return;
         setCatalog(next);
         setIntegrationsLoadFailed(false);
@@ -217,14 +219,14 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [integrationsRevision, t]);
+  }, [integrationsRevision, settingsDirectory, t]);
 
   React.useEffect(
     () => subscribeCredentialChanges(() => {
       backgroundIntegrationsReadRef.current = true;
       setIntegrationsRevision((revision) => revision + 1);
-    }),
-    [],
+    }, settingsDirectory),
+    [settingsDirectory],
   );
 
   const connectedProviderIds = React.useMemo(
@@ -279,31 +281,26 @@ export const ProvidersPage: React.FC = () => {
     }
 
     let cancelled = false;
-
     const loadSources = async () => {
       try {
         const source = await fetchProviderSource(selectedProviderId, settingsDirectory, t('settings.providers.page.toast.providerSourcesLoadFailed'));
         if (!cancelled && source) {
-          setProviderSources((prev) => ({
-            ...prev,
-            [selectedProviderId]: source.sources,
-          }));
-          setStoredProviderConfigs((prev) => ({
-            ...prev,
-            [selectedProviderId]: source.stored,
-          }));
+          setProviderSources((prev) => ({ ...prev, [selectedProviderId]: source.sources }));
+          setStoredProviderConfigs((prev) => ({ ...prev, [selectedProviderId]: source.stored }));
         }
+        if (!cancelled) setSourcesFailedFor(source ? null : selectedProviderId);
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load provider sources:', error);
+          setSourcesFailedFor(selectedProviderId);
         }
       }
     };
 
     loadSources();
-
     return () => {
       cancelled = true;
+      setSourcesFailedFor(null);
     };
   }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t]);
 
@@ -382,7 +379,7 @@ export const ProvidersPage: React.FC = () => {
       }
       if (keyRequest) {
         try {
-          await storeKeyAfterConfigWrite(() => getIntegrationClient().integration.connect.key(keyRequest));
+          await storeCustomProviderKey(settingsDirectory, keyRequest);
         } catch (error) {
           setCustomAuthFailureHint(t('settings.providers.page.custom.authFailure.keyAfterConfig'));
           throw error;
@@ -425,13 +422,7 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const credentials = getCredentialConnections(
-        findIntegrationForProvider(integrations ?? [], providerId),
-      );
-      const sdk = opencodeClient.getSdkClient();
-      for (const credential of credentials) {
-        await sdk.credential.remove({ credentialID: credential.id });
-      }
+      await removeProviderCredentials(integrations, providerId);
 
       toast.success(t('settings.providers.page.toast.providerDisconnected'));
       refreshProviderSources();
@@ -455,6 +446,13 @@ export const ProvidersPage: React.FC = () => {
     setCustomAuthFailureHint(null);
     setLastCustomPersistId(null);
     setCandidateProviderId('');
+  };
+
+  const handleRemoveSettled = (removed: boolean) => {
+    if (removed) setSelectedProvider('');
+    refreshProviderSources();
+    refreshIntegrations();
+    void loadProviders({ directory: settingsDirectory, source: 'settings:providers', fresh: true });
   };
 
   const runAccountAction = async (
@@ -602,6 +600,7 @@ export const ProvidersPage: React.FC = () => {
                         )}
                         credentials={[]}
                         canAdd
+                        directory={settingsDirectory}
                         connectKey={connectIntegrationKey}
                         onKeySaved={() => markAuthWriteSucceeded(candidateProviderId)}
                         onSignedIn={() => handleOAuthConnected(candidateProviderId)}
@@ -639,16 +638,19 @@ export const ProvidersPage: React.FC = () => {
   const showApiKeyAuth = shouldShowApiKeyAuth(selectedIntegration);
   const integrationsLoaded = integrations !== null;
   const sourcesLoaded = Boolean(selectedSources);
-  const isEditableCustomProvider = sourcesLoaded
-    && isConfigDefinedCustomProvider(selectedProvider, selectedSources);
+  const isEditableCustomProvider = isConfigDefinedCustomProvider(selectedProvider, selectedSources);
   const hasCredentials = providerHasCredentials({
     connections: getProviderConnections(integrations ?? [], selectedProvider.id),
     optionsApiKey: readProviderApiKeySetting(selectedProvider),
     machineCredentials: usesMachineCredentials(selectedProvider),
   });
-  const showModelsSection = shouldShowModelsSection({
-    modelCount: providerModels.length,
-    integrationsLoaded,
+  const sections = providerPageSections({
+    canBeConfigDefined: isCustomOpenAICompatibleProvider(selectedProvider), isEditableCustomProvider,
+    sources: sourcesLoaded ? 'loaded' : sourcesFailedFor === selectedProvider.id ? 'failed' : 'loading',
+    canUploadLogo: providerLogoUploadSupported(), locked: enterpriseLocked,
+  });
+  const showModelsSection = sections.models && shouldShowModelsSection({
+    modelCount: providerModels.length, integrationsLoaded,
     hasCredentials,
     isEditableCustomProvider,
   });
@@ -695,9 +697,7 @@ export const ProvidersPage: React.FC = () => {
   );
 
   const modelCountAccessory = (
-    <span className="typography-micro text-muted-foreground font-normal">
-      ({providerModels.length})
-    </span>
+    <span className="typography-micro text-muted-foreground font-normal">({providerModels.length})</span>
   );
 
   const filteredModels = rankByQuery(providerModels, modelQuery, (model) => [
@@ -746,38 +746,24 @@ export const ProvidersPage: React.FC = () => {
         title={t('settings.providers.accounts.title')}
         info={t('settings.providers.accounts.info')}
         headerAction={(
-          <div className="flex items-center gap-1">
-            {isEditableCustomProvider && !enterpriseLocked ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                onClick={() => {
-                  setCustomAuthFailureHint(null);
-                  setEditingCustomFormInitial(providerToEditFormState(
-                    selectedProvider,
-                    storedProviderConfigs[selectedProvider.id] ?? null,
-                    customProviderIcons[selectedProvider.id],
-                  ));
-                  setEditingCustomScope(resolveProviderConfigScope(selectedSources));
-                  setEditingCustomProviderId(selectedProvider.id);
-                }}
-              >
-                {t('settings.providers.page.actions.edit')}
-              </Button>
-            ) : null}
-            {disabledProviders !== null ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                title={t('settings.providers.disabled.disableHint')}
-                onClick={() => void handleProviderDisabled(selectedProvider.id, true)}
-              >
-                {t('settings.providers.disabled.disable')}
-              </Button>
-            ) : null}
-          </div>
+          <ProviderPageActions
+            providerId={selectedProvider.id}
+            providerName={selectedProvider.name || selectedProvider.id}
+            removableFrom={selectedSources && configSources.length > 0 && !enterpriseLocked ? selectedSources : null}
+            directory={settingsDirectory}
+            onEdit={isEditableCustomProvider && !enterpriseLocked ? () => {
+              setCustomAuthFailureHint(null);
+              setEditingCustomFormInitial(providerToEditFormState(
+                selectedProvider,
+                storedProviderConfigs[selectedProvider.id] ?? null,
+                customProviderIcons[selectedProvider.id],
+              ));
+              setEditingCustomScope(resolveProviderConfigScope(selectedSources));
+              setEditingCustomProviderId(selectedProvider.id);
+            } : null}
+            onDisable={disabledProviders !== null ? () => void handleProviderDisabled(selectedProvider.id, true) : null}
+            onRemoveSettled={handleRemoveSettled}
+          />
         )}
         settingsItem="providers.auth"
         contentClassName="space-y-4"
@@ -797,7 +783,7 @@ export const ProvidersPage: React.FC = () => {
         ) : null}
 
         {authLoading ? (
-          <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
+          <ProviderAuthMethodsLoading integrationId={selectedProvider.id} canAdd={!enterpriseLocked} />
         ) : (
           <ProviderAuthMethodCards
             key={selectedProvider.id}
@@ -818,6 +804,7 @@ export const ProvidersPage: React.FC = () => {
             }}
             inUseWithoutCredential={inUseWithoutCredential}
             canAdd={!enterpriseLocked}
+            directory={settingsDirectory}
             connectKey={connectIntegrationKey}
             onKeySaved={() => markAuthWriteSucceeded(selectedProvider.id)}
             onSignedIn={() => handleOAuthConnected(selectedProvider.id)}
@@ -833,7 +820,7 @@ export const ProvidersPage: React.FC = () => {
         ) : null}
       </SettingsSection>
 
-      {providerLogoUploadSupported() && sourcesLoaded && (!isEditableCustomProvider || enterpriseLocked) ? (
+      {sections.logo ? (
         <SettingsSection
           title={t('settings.providers.page.logo.title')}
           info={t('settings.providers.page.logo.info')}
@@ -850,7 +837,7 @@ export const ProvidersPage: React.FC = () => {
         </SettingsSection>
       ) : null}
 
-      {providerModels.length === 0 ? (
+      {sections.models && providerModels.length === 0 ? (
         <SettingsSection
           title={t('settings.providers.page.models.title')}
           titleAccessory={modelCountAccessory}

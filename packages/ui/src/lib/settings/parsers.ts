@@ -75,6 +75,8 @@ export const parseIntegerAtLeast = (min: number): SettingsParser<number> => from
 
 export const parsePositiveInteger = fromSchema(finiteNumber.positive().transform(Math.floor));
 
+export const parsePositiveNumber = fromSchema(finiteNumber.positive());
+
 export const parseNullableFiniteNumber = fromSchema(z.union([z.null(), finiteNumber]));
 
 export const parseNullableTrimmedPath = fromSchema(
@@ -407,12 +409,19 @@ export const parseChatWidth: SettingsParser<'default' | 'wider' | 'full'> = (val
   return legacy.data ? 'full' : 'default';
 };
 
-const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'text', 'summary']));
+const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'text', 'grouped', 'summary'])
+  .transform((mode) => (mode === 'text' ? 'grouped' : mode)));
 
-export const parseActivityRenderMode: SettingsParser<'collapsed' | 'text' | 'summary'> = (value, raw) => {
+export const parseActivityRenderMode: SettingsParser<'collapsed' | 'grouped' | 'summary'> = (value, raw) => {
   if (raw.chatRenderMode === 'sorted') return 'collapsed';
   const direct = activityRenderModeSchema.safeParse(value);
   return direct.success ? direct.data : undefined;
+};
+
+export const parseKeepEarlierReplies: SettingsParser<boolean> = (value, raw) => {
+  const direct = z.boolean().safeParse(value);
+  if (direct.success) return direct.data;
+  return raw.activityRenderMode === 'text' && raw.chatRenderMode !== 'sorted' ? true : undefined;
 };
 
 export const parseSttProvider = fromSchema(

@@ -31,7 +31,7 @@ export function useWorkStatusAccounts(enabled: boolean, providers: string) {
   React.useEffect(() => {
     if (!enabled) return;
     load(false);
-    const unsubscribe = subscribeCredentialChanges(() => load(false));
+    const unsubscribe = subscribeCredentialChanges(() => load(false), null);
     return () => {
       unsubscribe();
       pending.current?.abort();

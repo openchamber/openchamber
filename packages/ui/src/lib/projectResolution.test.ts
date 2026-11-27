@@ -1,5 +1,9 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
+import { buildKnownSessionDirectories } from '@/components/session/sidebar/list/sessionListDirectories';
+import { findIntegrateCheckout, publishIntegrateCheckouts } from './worktrees/integrateCheckouts';
 import { resolveProjectForSessionDirectory } from './projectResolution';
+import { getSafeStorage } from '@/stores/utils/safeStorage';
 import { useSpacesStore } from './spaces/spaces-store';
 
 const projects = [
@@ -56,5 +60,64 @@ describe('resolveProjectForSessionDirectory', () => {
     } finally {
       useSpacesStore.setState(initial, true);
     }
+  });
+});
+
+describe('a checkout integration opened', () => {
+  const home = { id: 'home', path: '/Users/elfy' };
+  const app = { id: 'app', path: '/Users/elfy/app' };
+  const checkout = '/Users/elfy/.config/openchamber/tmp/oc-integrate-x';
+
+  afterEach(() => {
+    for (const projectPath of [app.path, '/Users/elfy/app/packages/ui']) publishIntegrateCheckouts(projectPath, app.path, []);
+  });
+
+  test('is remembered for the next load of this server only', () => {
+    publishIntegrateCheckouts(app.path, app.path, [checkout]);
+    const stored = JSON.parse(getSafeStorage().getItem('oc.integrateCheckouts.v1') ?? '{}');
+    expect(Object.values(stored)).toEqual([{ [app.path]: { repositoryRoot: app.path, paths: [checkout] } }]);
+    expect(findIntegrateCheckout(`${checkout}/src`)?.path).toBe(checkout);
+    publishIntegrateCheckouts(app.path, app.path, []);
+    expect(getSafeStorage().getItem('oc.integrateCheckouts.v1')).toBe('{}');
+  });
+
+  test('belongs to its repository\'s project and is not a listed worktree', () => {
+    publishIntegrateCheckouts(app.path, app.path, [checkout]);
+
+    expect(resolveProjectForSessionDirectory([home, app], new Map(), `${checkout}/src`)).toEqual(app);
+    expect(buildKnownSessionDirectories([home, app], new Map()).has(checkout)).toBe(true);
+    const ownership = createSessionOwnershipIndex(
+      [{ id: 'resolver', directory: checkout, projectID: 'x', title: '', time: { created: 1, updated: 1 }, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }],
+      [home, app].map(({ id, path }) => ({ id, normalizedPath: path })), new Map(), false,
+    );
+    expect(ownership.bySessionId.get('resolver')).toMatchObject({ projectId: 'app', scopeDirectory: app.path, kind: 'project' });
+
+    publishIntegrateCheckouts(app.path, app.path, []);
+    expect(resolveProjectForSessionDirectory([home, app], new Map(), checkout)).toEqual(home);
+  });
+
+  test('is forgotten for every project of the repository once one listing leaves it out', () => {
+    publishIntegrateCheckouts('/Users/elfy/app/packages/ui', app.path, [checkout]);
+    publishIntegrateCheckouts(app.path, app.path, [checkout]);
+    publishIntegrateCheckouts(app.path, app.path, []);
+    expect(findIntegrateCheckout(checkout)).toBeNull();
+  });
+
+  test('keeps what another window stored for another project', () => {
+    publishIntegrateCheckouts(app.path, app.path, [checkout]);
+    const key = 'oc.integrateCheckouts.v1';
+    const stored = JSON.parse(getSafeStorage().getItem(key) ?? '{}');
+    const other = { repositoryRoot: '/Users/elfy/other', paths: ['/tmp/oc-integrate-y'] };
+    for (const runtime of Object.keys(stored)) stored[runtime]['/Users/elfy/other'] = other;
+    getSafeStorage().setItem(key, JSON.stringify(stored));
+    publishIntegrateCheckouts(app.path, app.path, []);
+    expect(Object.values(JSON.parse(getSafeStorage().getItem(key) ?? '{}'))).toEqual([{ '/Users/elfy/other': other }]);
+    getSafeStorage().removeItem(key);
+  });
+
+  test('belongs to a project opened on a folder of the repository', () => {
+    const folder = { id: 'folder', path: '/Users/elfy/app/packages/ui' };
+    publishIntegrateCheckouts(folder.path, app.path, [checkout]);
+    expect(resolveProjectForSessionDirectory([folder], new Map(), checkout)).toEqual(folder);
   });
 });

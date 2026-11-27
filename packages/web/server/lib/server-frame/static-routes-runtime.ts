@@ -1,12 +1,18 @@
 import { registerPwaManifestRoute } from '../appearance/pwa-manifest-routes.js';
 import type { PwaManifestDependencies } from '../appearance/pwa-manifest-routes.js';
-import type { Application, ExpressFactory } from '../shared/http-contracts.js';
-import { isString } from '../shared/object-guards.js';
+import type { Application, ExpressFactory, Response } from '../shared/http-contracts.js';
+import { isRecord, isString } from '../shared/object-guards.js';
 import { webPackagePaths } from '../web-package-paths.js';
 
+const ANY_ROUTE = /^\/.*$/;
+const ROOT_DOCUMENT_NAME = /^(?!\.)[^/\\:\0]+\.html$/i;
+const NOT_A_DOCUMENT_CODES = new Set(['ENOENT', 'ENOTDIR', 'EISDIR', 'ENAMETOOLONG']);
+
+const isNotADocument = (cause: unknown) => isRecord(cause) && isString(cause.code) && NOT_A_DOCUMENT_CODES.has(cause.code);
+
 export interface StaticRoutesDependencies extends PwaManifestDependencies {
-  fs: Pick<typeof import('node:fs'), 'existsSync'>;
-  path: Pick<typeof import('node:path'), 'resolve' | 'join' | 'sep'>;
+  fs: Pick<typeof import('node:fs'), 'existsSync' | 'promises'>;
+  path: Pick<typeof import('node:path'), 'resolve' | 'join' | 'sep' | 'dirname' | 'basename'>;
   process: Pick<NodeJS.Process, 'platform' | 'env'>;
   express: Pick<ExpressFactory, 'static'>;
 }
@@ -40,7 +46,40 @@ export const createStaticRoutesRuntime = (dependencies: StaticRoutesDependencies
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
       const hashedAssetsPrefix = path.join(distPath, 'assets') + path.sep;
+
+      const sendHtmlDocument = async (res: Response, fileName: string) => {
+        let body: Buffer;
+        try {
+          body = await fs.promises.readFile(path.join(distPath, fileName));
+        } catch (error) {
+          if (isNotADocument(error)) return false;
+          throw error;
+        }
+        res.set('Cache-Control', 'no-cache');
+        res.type('html').send(body);
+        return true;
+      };
+
+      const resolveRootDocumentName = (requestPath: string) => {
+        let decoded: string;
+        try {
+          decoded = decodeURIComponent(requestPath);
+        } catch {
+          return null;
+        }
+        if (decoded.includes('\0')) return null;
+        const filePath = path.join(distPath, decoded);
+        const name = path.basename(filePath);
+        return path.dirname(filePath) === distPath && ROOT_DOCUMENT_NAME.test(name) ? name : null;
+      };
+
+      app.get(ANY_ROUTE, async (req, res, next) => {
+        const name = resolveRootDocumentName(req.path);
+        if (!name || !await sendHtmlDocument(res, name)) next();
+      });
+
       app.use(express.static(distPath, {
+        index: false,
         setHeaders(res, filePath) {
           if (filePath.endsWith(`${path.sep}sw.js`)) {
             res.setHeader('Cache-Control', 'no-store');
@@ -63,8 +102,8 @@ export const createStaticRoutesRuntime = (dependencies: StaticRoutesDependencies
         isRequestAuthorized,
       });
 
-      app.get(/^(?!\/api|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
+      app.get(/^(?!\/api|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, async (_req, res, next) => {
+        if (!await sendHtmlDocument(res, 'index.html')) next();
       });
       return;
     }

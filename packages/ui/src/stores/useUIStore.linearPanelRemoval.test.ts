@@ -30,6 +30,6 @@ describe('Linear rail panel removal', () => {
     await useUIStore.persist.rehydrate();
     const state = Object.keys(useUIStore.getState());
     expect(state.filter((key) => key.startsWith('linearIssueList'))).toEqual([]);
-    expect(useUIStore.getState().contextPanelByDirectory['/repo']?.tabs.map((tab) => tab.mode)).toEqual(['diff']);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo']?.tabs.map((tab) => tab.mode)).toEqual(['git']);
   });
 });

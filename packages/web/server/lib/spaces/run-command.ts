@@ -318,6 +318,12 @@ export async function killProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>,
 
 const STREAM_STDERR_BYTES = 4 * 1024;
 
+export interface CommandStreamOptions {
+  env?: NodeJS.ProcessEnv;
+  exitGraceMs?: number;
+  onExit?: (exit: { clean: boolean }) => void;
+}
+
 export class CommandStream extends Duplex {
   #child: ChildProcessWithoutNullStreams;
   #file: string;
@@ -326,14 +332,16 @@ export class CommandStream extends Duplex {
   #stderrBytes = 0;
   #receivedBytes = 0;
   #closed = false;
+  #exitGraceMs: number;
   #timer: ReturnType<typeof setTimeout> | null = null;
   timeout: number;
 
-  constructor(child: ChildProcessWithoutNullStreams, file: string, args: string[]) {
+  constructor(child: ChildProcessWithoutNullStreams, file: string, args: string[], { exitGraceMs = 0, onExit }: CommandStreamOptions = {}) {
     super({ allowHalfOpen: false });
     this.#child = child;
     this.#file = file;
     this.#args = args;
+    this.#exitGraceMs = exitGraceMs;
     this.timeout = 0;
     this.on('error', () => {});
 
@@ -356,6 +364,7 @@ export class CommandStream extends Duplex {
     });
     child.on('close', (code, signal) => {
       this.#closed = true;
+      onExit?.({ clean: code === 0 });
       if (this.destroyed) return;
       if (code === 0 && this.#receivedBytes > 0) {
         this.push(null);
@@ -399,14 +408,27 @@ export class CommandStream extends Duplex {
     this.#child.stdin.end(callback);
   }
 
-  override _destroy(error: Error | null, callback: (error: Error | null) => void) {
-    if (this.#timer) clearTimeout(this.#timer);
-    this.#timer = null;
-    this.#child.stdout.removeAllListeners('data');
+  #kill() {
+    if (this.#closed) return;
     try {
       this.#child.kill('SIGKILL');
     } catch {
       void 0;
+    }
+  }
+
+  override _destroy(error: Error | null, callback: (error: Error | null) => void) {
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#child.stdout.removeAllListeners('data');
+    if (this.#exitGraceMs === 0 || this.#closed) {
+      this.#kill();
+    } else {
+      this.#child.stdout.resume();
+      this.#child.stdin.end();
+      const timer = setTimeout(() => this.#kill(), this.#exitGraceMs);
+      timer.unref();
+      this.#child.once('close', () => clearTimeout(timer));
     }
     callback(error);
   }
@@ -435,12 +457,12 @@ export class CommandStream extends Duplex {
   unref() { return this; }
 }
 
-export function openCommandStream(file: string, args: string[]) {
+export function openCommandStream(file: string, args: string[], options: CommandStreamOptions = {}) {
   let child;
   try {
-    child = spawn(file, args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawn(file, args, { shell: false, windowsHide: true, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (error) {
     throw new SpaceError('command_spawn_failed', `Could not start ${file}: ${errorField(error, 'message')}`, { errno: errorField(error, 'code') ?? null });
   }
-  return new CommandStream(child, file, args);
+  return new CommandStream(child, file, args, options);
 }

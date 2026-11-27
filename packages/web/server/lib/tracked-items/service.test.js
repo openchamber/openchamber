@@ -123,9 +123,36 @@ describe('tracked items service', () => {
     expect(heard).toEqual(['pending', 'success']);
     expect(sent).toEqual([]);
 
+    // A restarted wait can have an older baseline than the tracked-items cache.
+    // It must see a fresh answer even when GitHub confirms that cache exactly.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(heard).toEqual(['pending', 'success', 'success']);
+    expect(sent).toEqual([]);
+
     service.setServerInterest('pr-watch', new Map());
     await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(calls.github).toHaveLength(2);
+    expect(calls.github).toHaveLength(3);
+  });
+
+  it('asks for the merge queue removal only of the pull requests a PR wait follows', async () => {
+    const { service, calls } = setup();
+    service.setInterest('c1', itemsOf(githubPull(1)));
+    service.setServerInterest('merge-follow', itemsOf(githubPull(2)));
+    service.setServerInterest('pr-watch', itemsOf(githubPull(5)), { queueRemovals: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(calls.github).toHaveLength(1);
+    expect(calls.github[0].pulls.toSorted((left, right) => left.number - right.number)).toEqual([
+      { owner: 'acme', repo: 'app', number: 1 },
+      { owner: 'acme', repo: 'app', number: 2 },
+      { owner: 'acme', repo: 'app', number: 5, queueRemoval: true },
+    ]);
+
+    service.setServerInterest('pr-watch', new Map());
+    service.setInterest('c1', itemsOf(githubPull(1), githubPull(5)));
+    service.refresh([githubPull(5)]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.github.at(-1).pulls).toEqual([{ owner: 'acme', repo: 'app', number: 5 }]);
   });
 
   it('keeps the last known state through a failed read and backs off before asking again', async () => {

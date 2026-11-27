@@ -1,10 +1,12 @@
 import { asNonEmptyString } from '../shared/guards.js';
+import type { SessionDirectoryCanonicalizer } from '../opencode/directory-canonicalization.js';
 import express from 'express';
 import { z } from 'zod';
 import path from 'node:path';
 import {
   createWorktree as createWorktreeDefault,
   getBranches as getBranchesDefault,
+  isExistingBranchAvailableLocally as isExistingBranchAvailableLocallyDefault,
   getPathsWithoutChanges as getPathsWithoutChangesDefault,
   getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
   listStashes as listStashesDefault,
@@ -22,30 +24,30 @@ import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { CHATS_SCOPE_PUBLIC_ID, readChatsDefaults } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
-import { OpenChamberControlError, asControlError, controlErrorFields } from '../openchamber-control/error.js';
-import type { ControlErrorDetails } from '../openchamber-control/error.js';
+import { OpenChamberControlError, asControlError, controlErrorFields, type ControlErrorDetails } from '../openchamber-control/error.js';
 import { readObjective, writeObjective } from '../session-goal/objectives.js';
 import { worktreeSetupOf } from '../projects/worktree-setup.js';
 import { createArchiveStore } from './archive-store.js';
 import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
 import { applyForkInheritance, listForkMessages } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
-import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { createSessionMetadataStore, createOpenCodeSessionMetadata, type SessionMetadata, type MetadataDecider } from './session-metadata-store.js';
 import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
+import { mayBeReloading, readCatalogListing } from './catalog-reload.js';
+import { findCatalogModel, isMissingFromCatalog, isModelHidden, requireListedDefault, resolveFallbackModel } from './catalog-models.js';
+import type { ModelSelection } from './catalog-models.js';
 import { fetchSelectionInputs } from './selection-inputs.js';
 import { EMPTY_SESSION_AUTO_ERROR, assertEmptySessionModel, resolveRequestedModel, splitModel } from './requested-model.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
-import { createSessionWorktreeMover } from './worktree-move.js';
+import { createSessionWorktreeMover, type SessionMoveWorktree } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
 import { listArchivedSubsessions } from './archived-subsessions.js';
-import { createStartDirectoryResolver } from './worktree-start-directory.js';
+import { createStartDirectoryResolver, type StartDirectoryResult } from './worktree-start-directory.js';
+import { assertExistingBranchAvailable, resolvePullRequestInput, resolveWorktreeInput, worktreeFields } from './worktree-input.js';
 import { hasMessage } from './contracts.js';
 import type { AgentInfo, ModelInfo, SessionPromptInput, SessionForkInput, SessionSwitchModelInput } from '@opencode/client';
 import type { SessionClient } from './opencode-client-contract.js';
-import type { SessionMetadata, MetadataDecider } from './session-metadata-store.js';
-import type { SessionMoveWorktree } from './worktree-move.js';
-import type { StartDirectoryResult } from './worktree-start-directory.js';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
 import type { WorktreeSetup, WorktreeSetupInput, DirectoryValidation } from '../projects/contracts.js';
 import type { createChatsScope } from '../scheduled-tasks/chats-scope.js';
@@ -80,13 +82,6 @@ export interface SessionPayload {
   carry?: unknown;
 }
 
-interface WorktreeFields {
-  name?: unknown;
-  branchName?: unknown;
-  startRef?: unknown;
-  existingBranch?: unknown;
-}
-
 interface SessionSettings {
   projects?: unknown;
   defaultAgent?: unknown;
@@ -105,6 +100,7 @@ type BootstrapStore = ReturnType<typeof createWorktreeBootstrapStore>;
 type Message = Awaited<ReturnType<SessionClient['message']['list']>>['data'][number];
 
 export interface SessionServiceDependencies {
+  getSessionDirectoryCanonicalizer?: SessionDirectoryCanonicalizer | null;
   chatsScope?: ReturnType<typeof createChatsScope> | null;
   readSettingsFromDiskMigrated: () => Promise<SessionSettings | null>;
   sanitizeProjects: (projects: SessionSettings['projects']) => SessionProject[];
@@ -132,6 +128,7 @@ export interface SessionServiceDependencies {
   waitForActiveWorktreeBootstrap?: typeof waitForActiveWorktreeBootstrapDefault;
   removeWorktree?: typeof removeWorktreeDefault;
   getBranches?: typeof getBranchesDefault;
+  isExistingBranchAvailableLocally?: typeof isExistingBranchAvailableLocallyDefault;
   stashPush?: typeof stashPushDefault;
   getPathsWithoutChanges?: typeof getPathsWithoutChangesDefault;
   stashApply?: typeof stashApplyDefault;
@@ -161,7 +158,6 @@ export interface SessionCreatedEvent {
   createdAt: number;
 }
 
-interface ModelSelection { providerID: string; modelID: string }
 interface Selection {
   model: ModelSelection | null;
   agent: string | null | undefined;
@@ -225,11 +221,8 @@ interface CreateOptions {
   operatorParentId?: string | null;
 }
 interface ProjectFields { id?: unknown; path?: unknown; defaultAgent?: unknown; defaultModel?: unknown; defaultVariant?: unknown }
-interface ModelFields { providerID?: unknown; modelID?: unknown }
-interface PullRequestInput { number: number; name?: string; branchName?: string }
 interface ServiceErrorBody extends Pick<ControlErrorDetails, 'partial' | 'partialAction' | 'sessionId' | 'directory'> { error: string }
 interface SetupInput { startCommand?: string; createCommand?: string }
-interface WorktreeInput extends SetupInput { mode: 'new'; name: string; branchName?: string; startRef?: string; setUpstream?: boolean }
 type PromptInput = { -readonly [Key in keyof SessionPromptInput]: SessionPromptInput[Key] };
 type ForkInput = { -readonly [Key in keyof SessionForkInput]: SessionForkInput[Key] };
 type SwitchModel = { -readonly [Key in keyof SessionSwitchModelInput['model']]: SessionSwitchModelInput['model'][Key] };
@@ -237,16 +230,12 @@ type SwitchModel = { -readonly [Key in keyof SessionSwitchModelInput['model']]: 
 const isPayload = (value: unknown): value is SessionPayload => value !== null && typeof value === 'object';
 const hasPayloadFields = (value: unknown): value is SessionPayload => value !== null && value !== undefined;
 const payloadFields = ({ body }: Pick<Request, 'body'>): SessionPayload | null | undefined => hasPayloadFields(body) ? body : body === null ? null : undefined;
-const hasWorktreeFields = (value: unknown): value is WorktreeFields => value !== null && value !== undefined;
-const worktreeFields = ({ worktree }: Pick<SessionPayload, 'worktree'>) => hasWorktreeFields(worktree) ? worktree : undefined;
 const isSafeInteger = (value: unknown): value is number => Number.isSafeInteger(value);
-const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isText = (value: unknown): value is string => typeof value === 'string';
 const isGoalError = (value: unknown): value is { goalConfigured?: unknown } => !!value && typeof value === 'object';
 const isList = (value: unknown): value is unknown[] => Array.isArray(value);
 const asList = <T>(value: readonly T[] | null | undefined): readonly T[] => Array.isArray(value) ? value : [];
 const hasProjectFields = (value: unknown): value is ProjectFields => value !== null && value !== undefined;
-const hasModelFields = (value: unknown): value is ModelFields => value !== null && value !== undefined;
 const hasEffortEntries = (value: unknown): value is Record<string, unknown> => value !== null && value !== undefined;
 const hasText = (value: unknown): value is string => Boolean(asNonEmptyString(value));
 const requiredDataDir = (value: string | null) => {
@@ -254,8 +243,6 @@ const requiredDataDir = (value: string | null) => {
   return value;
 };
 
-const FALLBACK_PROVIDER_ID = 'opencode';
-const FALLBACK_MODEL_ID = 'big-pickle';
 const MIN_GOAL_TOKEN_BUDGET = 1_000;
 const MAX_GOAL_TOKEN_BUDGET = 100_000_000;
 
@@ -281,19 +268,6 @@ const resolveGoalInput = (payload: SessionPayload, prompt: string | null): GoalI
 };
 
 const isPrimaryAgentMode = (mode: AgentInfo['mode']) => !mode || mode === 'primary' || mode === 'all';
-
-const findCatalogModel = (models: readonly ModelInfo[], providerID: string, ref: string) => {
-  const ofProvider = models.filter((model) => model?.providerID === providerID);
-  return ofProvider.find((model) => model?.id === ref)
-    || ofProvider.find((model) => model?.modelID === ref)
-    || null;
-};
-
-const isMissingFromCatalog = (models: readonly ModelInfo[], model: ModelSelection) => {
-  if (models.length === 0 || isAutoModel(model)) return false;
-  const entry = findCatalogModel(models, model.providerID, model.modelID);
-  return !entry || entry.enabled === false;
-};
 
 const resolveVariant = (models: readonly ModelInfo[], providerID: string, modelID: string, variant: string | null | undefined) => {
   const normalized = asNonEmptyString(variant);
@@ -359,23 +333,6 @@ const resolveSelectionVariant = ({
   return undefined;
 };
 
-const isModelHidden = (hiddenModels: readonly unknown[], providerID: string, modelID: string) => hiddenModels.some(
-  (hidden) => hasModelFields(hidden) && hidden.providerID === providerID && hidden.modelID === modelID,
-);
-
-const resolveFallbackModel = (models: readonly ModelInfo[], hiddenModels: readonly unknown[]) => {
-  const isVisible = (providerID: string, modelID: string) => !isModelHidden(hiddenModels, providerID, modelID);
-  const candidates = models.filter(
-    (entry) => asNonEmptyString(entry?.providerID) && asNonEmptyString(entry?.id),
-  );
-  const bigPickle = findCatalogModel(candidates, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID);
-  const pick = (bigPickle && isVisible(bigPickle.providerID, bigPickle.id) ? bigPickle : null)
-    || candidates.find((entry) => isVisible(entry.providerID, entry.id))
-    || bigPickle
-    || candidates[0];
-  return pick ? { providerID: pick.providerID, modelID: pick.id } : null;
-};
-
 const resolveProjectDefaults = (settings: SessionSettings | null, directory: string, projectId: string | undefined) => {
   if (projectId === CHATS_SCOPE_PUBLIC_ID) return readChatsDefaults(settings);
   const projects: readonly unknown[] = Array.isArray(settings?.projects) ? settings.projects : [];
@@ -423,7 +380,8 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
   let variant: string | undefined;
   const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
   const settingsDefaultModel = splitModel(asNonEmptyString(settings?.defaultModel));
-  const runnable = (candidate: ModelSelection | null): candidate is ModelSelection => !!candidate && !isMissingFromCatalog(models, candidate);
+  const runnable = (candidate: ModelSelection | null): candidate is ModelSelection => !!candidate
+    && (!isMissingFromCatalog(models, candidate) || mayBeReloading(models, candidate.providerID));
   if (runnable(projectDefaultModel)) {
     model = projectDefaultModel;
     variant = resolveVariant(models, model.providerID, model.modelID, projectDefaults?.defaultVariant);
@@ -454,7 +412,11 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
     model = lastSelectedModel;
   }
 
-  if (!model) model = resolveFallbackModel(models, hiddenModels);
+  const named = [projectDefaultModel, settingsDefaultModel,
+    hasText(agentModel?.providerID) && hasText(agentModel?.id) ? { providerID: agentModel.providerID, modelID: agentModel.id } : null,
+    opencodeDefaultModel && { providerID: opencodeDefaultModel.providerID, modelID: opencodeDefaultModel.modelID },
+    lastSelectedModel && !isAutoModel(lastSelectedModel) && !isModelHidden(hiddenModels, lastSelectedModel.providerID, lastSelectedModel.modelID) ? lastSelectedModel : null];
+  if (!model) model = named.find((candidate) => !!candidate) ?? resolveFallbackModel(models, hiddenModels);
 
   return {
     agent: resolvedAgent?.id,
@@ -616,38 +578,9 @@ const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
 const WORKTREE_SETUP_TIMEOUT_MS = 3 * 60_000;
 const NO_WORKTREE_SETUP: Readonly<WorktreeSetup> = Object.freeze({ startCommand: '', createCommand: '', untrustedSkipped: [] });
 
-const resolvePullRequestInput = (payload: SessionPayload) => {
-  if (payload?.pullRequest === undefined) return null;
-  if (!isSafeInteger(payload.pullRequest) || payload.pullRequest < 1) {
-    throw new OpenChamberControlError('pullRequest must be a pull or merge request number, such as 42', 400);
-  }
-  if (worktreeFields(payload)?.startRef !== undefined || payload.setUpstream !== undefined) {
-    throw new OpenChamberControlError('pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream', 400);
-  }
-  const input: PullRequestInput = { number: payload.pullRequest };
-  const name = asNonEmptyString(worktreeFields(payload)?.name);
-  if (name) input.name = name;
-  const branchName = asNonEmptyString(worktreeFields(payload)?.branchName);
-  if (branchName) input.branchName = branchName;
-  return input;
-};
-
-const isWorktreeFields = (value: unknown): value is WorktreeFields => !!value && typeof value === 'object';
-const resolveWorktreeInput = (payload: SessionPayload) => {
-  if (!isWorktreeFields(payload?.worktree)) return null;
-  const name = asNonEmptyString(payload.worktree.name);
-  if (!name) return null;
-  const branchName = asNonEmptyString(payload.worktree.branchName);
-  const startRef = asNonEmptyString(payload.worktree.startRef);
-  const input: WorktreeInput = { mode: 'new', name };
-  if (branchName) input.branchName = branchName;
-  if (startRef) input.startRef = startRef;
-  if (isBoolean(payload.setUpstream)) input.setUpstream = payload.setUpstream;
-  return input;
-};
-
 export const createOpenChamberSessionService = (dependencies: SessionServiceDependencies) => {
   const {
+    getSessionDirectoryCanonicalizer = null,
     chatsScope = null,
     readSettingsFromDiskMigrated,
     sanitizeProjects,
@@ -675,6 +608,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     waitForActiveWorktreeBootstrap = waitForActiveWorktreeBootstrapDefault,
     removeWorktree = removeWorktreeDefault,
     getBranches = getBranchesDefault,
+    isExistingBranchAvailableLocally = isExistingBranchAvailableLocallyDefault,
     stashPush = stashPushDefault,
     getPathsWithoutChanges = getPathsWithoutChangesDefault,
     stashApply = stashApplyDefault,
@@ -720,7 +654,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     announce: broadcastArchived,
   });
 
-  const resolveStartDirectory = createStartDirectoryResolver({ resolveWorktreeTopLevel, validateWorktreeDirectory });
+  const resolveStartDirectory = createStartDirectoryResolver({ resolveWorktreeTopLevel, validateWorktreeDirectory, getSessionDirectoryCanonicalizer });
 
   const toPathKey = (value: string | undefined) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
   const holdsPath = (outer: string, inner: string) => inner === outer || inner.startsWith(`${outer}/`);
@@ -829,10 +763,9 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
 
   const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant, requireModelMatch = false }: SelectionRequest & { directory: string; requireModelMatch?: boolean }) => {
     if (!requestedModel && !requestedAgent && !requestedVariant) return requestedModel;
-    const { models, agents, notReadyReason } = await fetchSelectionInputs({
-      client: clientFor(directory),
-      readSettingsFromDiskMigrated,
-    });
+    const client = clientFor(directory);
+    const { models: listed, agents, notReadyReason } = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+    const models = requestedModel ? await readCatalogListing(client, listed, (known) => Boolean(findCatalogModel(known, requestedModel.providerID, requestedModel.modelID))) : listed;
 
     if (requestedAgent && agents && agents.length > 0) {
       const agent = agents.find((entry) => entry?.id === requestedAgent) || null;
@@ -919,13 +852,23 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         const autoAvailable = isAutoModel(splitModel(asNonEmptyString(inputs.settings?.lastSelectedModel)))
           && isAutoReady !== null
           && await isAutoReady().catch(() => false);
-        const defaults = resolveDefaultSelection({
+        const { agents, config } = inputs;
+        const resolveWith = (models: readonly ModelInfo[]) => resolveDefaultSelection({
           ...inputs,
-          agents: inputs.agents,
+          agents,
+          config,
+          models,
           projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
           autoAvailable,
           requireDefaultAgent: !agent,
         });
+        const lists = (known: readonly ModelInfo[]) => {
+          const named = resolveWith(known).model;
+          return !named || !isMissingFromCatalog(known, named);
+        };
+        if (!model) inputs.models = [...await readCatalogListing(client, inputs.models, lists)];
+        const defaults = resolveWith(inputs.models);
+        if (!model && defaults.model) requireListedDefault(inputs.models, defaults.model);
         if (!model) {
           model = defaults.model;
           if (variant == null) variant = defaults.variant;
@@ -1231,6 +1174,9 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
         parentDirectory: resolvedDirectory.directory,
         parentRemoteName,
       });
+      if (worktreeInput.existingBranch) {
+        await assertExistingBranchAvailable(isExistingBranchAvailableLocally, resolvedDirectory.directory, worktreeInput.existingBranch);
+      }
       worktree = await createWorktree(resolvedDirectory.directory, { ...worktreeInput, ...setupInput }, {
         bootstrapStore: worktreeBootstrapStore,
         hydrateCheckout,

@@ -6,8 +6,6 @@ type BuiltInQuotaProviderId =
   | 'cline-pass'
   | 'github-copilot'
   | 'github-copilot-addon'
-  | 'google'
-  | 'antigravity'
   | 'kimi-for-coding'
   | 'nano-gpt'
   | 'openrouter'
@@ -54,6 +52,7 @@ export interface UsageWindow {
   valueLabel?: string | null;
   value?: UsageWindowValue;
   creditsUsed?: number;
+  credits?: { used: number; limit: number; remaining?: number };
   giftReset?: UsageWindowGiftReset | null;
 }
 

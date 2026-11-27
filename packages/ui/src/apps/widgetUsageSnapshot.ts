@@ -45,7 +45,7 @@ const quotaLabel = (key: string): string => (key.includes(' · ') ? key : format
 
 const quota = (id: QuotaProviderId, key: string, window: UsageWindow, mode: 'used' | 'remaining', format: WidgetFormat): WidgetQuota => {
   const percent = mode === 'remaining' ? window.remainingPercent : window.usedPercent;
-  const value = formatQuotaWindowValueLabel(window, percent, format.t);
+  const value = formatQuotaWindowValueLabel(window, percent, format.t, mode === 'used' ? 'usage' : 'remaining');
   const entry: WidgetQuota = {
     label: quotaLabel(key),
     value: value === '-' ? '' : compactQuotaValueLabel(value),

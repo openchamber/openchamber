@@ -1,7 +1,7 @@
 
 import { z } from 'zod';
 
-import { dedupeCheckRuns, summarizeCheckRuns, summarizeCombinedStatuses } from './checks-summary.js';
+import { dedupeCheckRuns, summarizeChecks } from './checks-summary.js';
 import type { Octokit } from '@octokit/rest';
 import { graphqlAliasesSchema, hasProperty } from './contracts.js';
 import type { GitHubEnvelope } from './contracts.js';
@@ -10,12 +10,15 @@ import { isProviderString } from './mappers.js';
 export type SummaryRef = z.infer<typeof summaryRefsSchema>[number];
 type CheckContext = z.infer<typeof checkContextSchema>;
 type PrNode = z.infer<typeof prNodeSchema>;
-type SummaryEntry = { kind: 'pull' | 'issue' | 'discussion'; ref: SummaryRef };
+type SummaryEntry = { kind: 'pull' | 'issue' | 'discussion'; ref: SummaryRef; queueRemoval?: boolean };
+export type PullSummaryRef = SummaryRef & { queueRemoval?: boolean };
 type PrSummary = NonNullable<ReturnType<typeof toSummary>>;
+type QueueRemoval = { id: string; createdAt: string; reason?: string | null };
 export interface PullSummary {
   owner: string; repo: string; number: number; state: string; draft: boolean; title: string; headSha: string; base: string;
   mergeable: boolean | null; mergeableState: string | null; isInMergeQueue: boolean;
   mergeQueueEntry: PrNode['mergeQueueEntry']; autoMergeRequest: PrNode['autoMergeRequest'];
+  latestQueueRemoval?: QueueRemoval | null;
   checks: ReturnType<typeof summarizeCheckContexts> | null;
   activity?: number; failedChecks?: string[]; recentActivity?: ReturnType<typeof recentActivityOf>;
 }
@@ -63,6 +66,12 @@ const SUMMARY_FIELDS = `
         }
       }
     }
+  }
+`;
+
+const QUEUE_REMOVAL_FIELDS = `
+  timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+    nodes { ... on RemovedFromMergeQueueEvent { id createdAt reason } }
   }
 `;
 
@@ -131,6 +140,19 @@ const activityNodesSchema = (timeField: string) => z.object({
   }).nullable()),
 }).nullish();
 
+const queueRemovalPullSchema = z.object({
+  timelineItems: z.object({
+    nodes: z.array(z.object({
+      id: z.string().min(1),
+      createdAt: z.iso.datetime({ offset: true }),
+      reason: z.string().nullish().catch(undefined),
+    })).max(1),
+  }),
+});
+
+type QueueRemovalEvent = z.infer<typeof queueRemovalPullSchema>['timelineItems']['nodes'][number];
+const graphqlErrorPathSchema = z.array(z.union([z.string(), z.number()])).catch([]);
+
 const prNodeSchema = z.object({
   number: z.number().int(),
   title: z.string(),
@@ -160,9 +182,7 @@ const prNodeSchema = z.object({
 
 export function summarizeCheckContexts(contexts: CheckContext[]) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
-  return checkRuns.length > 0
-    ? summarizeCheckRuns(dedupeCheckRuns(checkRuns))
-    : summarizeCombinedStatuses(statuses);
+  return summarizeChecks(dedupeCheckRuns(checkRuns), statuses);
 }
 
 function splitCheckContexts(contexts: CheckContext[]) {
@@ -189,12 +209,12 @@ const PASSING_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
 function failedCheckNames(contexts: CheckContext[]) {
   const { checkRuns, statuses } = splitCheckContexts(contexts);
-  if (checkRuns.length > 0) {
-    return dedupeCheckRuns(checkRuns)
+  return [...new Set([
+    ...dedupeCheckRuns(checkRuns)
       .filter((run) => run.status !== 'in_progress' && run.status !== 'queued' && run.conclusion && !PASSING_CONCLUSIONS.has(run.conclusion))
-      .map((run) => run.name);
-  }
-  return statuses.filter((status) => status.state === 'failure' || status.state === 'error').map((status) => status.name);
+      .map((run) => run.name),
+    ...statuses.filter((status) => status.state === 'failure' || status.state === 'error').map((status) => status.name),
+  ])];
 }
 
 function recentActivityOf(node: PrNode) {
@@ -275,6 +295,24 @@ const toMergeable = (mergeable: string | null) => {
   return null;
 };
 
+function queueRemovalOf(event: QueueRemovalEvent | undefined, alias: string, errorPaths: (string | number)[][]): QueueRemoval | null | undefined {
+  let reasonUnavailable = false;
+  for (const path of errorPaths) {
+    if (path.length === 0) {
+      if (!event) return undefined;
+      continue;
+    }
+    const [repoAlias, pull, field, nodes, index, leaf] = path;
+    if (repoAlias !== alias || (pull !== undefined && pull !== 'queueRemoval')
+      || (field !== undefined && field !== 'timelineItems')) continue;
+    if (!event || nodes !== 'nodes' || index !== 0 || leaf !== 'reason') return undefined;
+    reasonUnavailable = true;
+  }
+  if (!event) return null;
+  const { id, createdAt, reason } = event;
+  return reasonUnavailable || reason === undefined ? { id, createdAt } : { id, createdAt, reason };
+}
+
 function toSummary(ref: SummaryRef, value: GitHubEnvelope['pullRequest'], details: boolean) {
   const parsed = prNodeSchema.safeParse(value);
   if (!parsed.success || parsed.data.number !== ref.number) {
@@ -307,11 +345,11 @@ function toSummary(ref: SummaryRef, value: GitHubEnvelope['pullRequest'], detail
   return summary;
 }
 
-function buildSummaryQuery(entries: SummaryEntry[], details: boolean) {
+function buildSummaryQuery(entries: SummaryEntry[], details: boolean, queueRemovals: boolean) {
   const variables: Record<string, string | number> = {};
   const declarations: string[] = [];
   const selections: string[] = [];
-  entries.forEach(({ kind, ref }, index) => {
+  entries.forEach(({ kind, ref, queueRemoval }, index) => {
     variables[`o${index}`] = ref.owner;
     variables[`n${index}`] = ref.repo;
     variables[`p${index}`] = ref.number;
@@ -319,7 +357,7 @@ function buildSummaryQuery(entries: SummaryEntry[], details: boolean) {
     const field = {
       issue: `issue(number: $p${index}) { ...IssueSummary }`,
       discussion: `discussion(number: $p${index}) { ...DiscussionSummary }`,
-      pull: `pullRequest(number: $p${index}) { ...PrSummary }`,
+      pull: `pullRequest(number: $p${index}) { ...PrSummary }${queueRemovals && queueRemoval ? ` queueRemoval: pullRequest(number: $p${index}) {${QUEUE_REMOVAL_FIELDS}}` : ''}`,
     }[kind];
     selections.push(`a${index}: repository(owner: $o${index}, name: $n${index}) { ${field} }`);
   });
@@ -335,23 +373,32 @@ function buildSummaryQuery(entries: SummaryEntry[], details: boolean) {
 export const isGraphqlRateLimitError = (error: unknown): error is { errors: unknown[] } => hasProperty(error, 'errors') && Array.isArray(error.errors)
   && error.errors.some((entry: GitHubEnvelope['errors']) => hasProperty(entry, 'type') && entry.type === 'RATE_LIMITED');
 
-async function runSummaryQuery(octokit: Octokit, entries: SummaryEntry[], details: boolean) {
-  const { query, variables } = buildSummaryQuery(entries, details);
+async function runSummaryQuery(octokit: Octokit, entries: SummaryEntry[], details: boolean, queueRemovals = true): Promise<{ data: z.infer<typeof graphqlAliasesSchema>; errorPaths: (string | number)[][] }> {
+  const { query, variables } = buildSummaryQuery(entries, details, queueRemovals);
   try {
-    return graphqlAliasesSchema.parse(await octokit.graphql<unknown>(query, variables));
+    return { data: graphqlAliasesSchema.parse(await octokit.graphql<unknown>(query, variables)), errorPaths: [] };
   } catch (error) {
     if (!isGraphqlRateLimitError(error) && hasProperty(error, 'data') && error.data) {
-      return graphqlAliasesSchema.parse(error.data);
+      const errors: unknown[] = hasProperty(error, 'errors') && Array.isArray(error.errors) && error.errors.length > 0
+        ? error.errors : [error];
+      const errorPaths = errors.map((entry) => graphqlErrorPathSchema.parse(hasProperty(entry, 'path') ? entry.path : undefined));
+      return { data: graphqlAliasesSchema.parse(error.data), errorPaths };
+    }
+    const rejectedByGraphql = hasProperty(error, 'errors') && Array.isArray(error.errors);
+    const timedOutAtGateway = hasProperty(error, 'status') && (error.status === 502 || error.status === 504);
+    if (queueRemovals && entries.some((entry) => entry.queueRemoval) && !isGraphqlRateLimitError(error)
+      && (rejectedByGraphql || timedOutAtGateway)) {
+      return runSummaryQuery(octokit, entries, details, false);
     }
     throw error;
   }
 }
 
 export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussionRefs = [], details = false }: {
-  octokit: Octokit; refs: SummaryRef[]; issueRefs?: SummaryRef[]; discussionRefs?: SummaryRef[]; details?: boolean;
+  octokit: Octokit; refs: PullSummaryRef[]; issueRefs?: SummaryRef[]; discussionRefs?: SummaryRef[]; details?: boolean;
 }) {
   const entries: SummaryEntry[] = [
-    ...refs.map((ref): SummaryEntry => ({ kind: 'pull', ref })),
+    ...refs.map(({ queueRemoval, ...ref }): SummaryEntry => ({ kind: 'pull', ref, queueRemoval: queueRemoval === true })),
     ...issueRefs.map((ref): SummaryEntry => ({ kind: 'issue', ref })),
     ...discussionRefs.map((ref): SummaryEntry => ({ kind: 'discussion', ref })),
   ];
@@ -360,7 +407,7 @@ export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussi
   const discussionSummaries: NonNullable<ReturnType<typeof toDiscussionSummary>>[] = [];
   for (let start = 0; start < entries.length; start += SUMMARY_ALIASES_PER_QUERY) {
     const chunk = entries.slice(start, start + SUMMARY_ALIASES_PER_QUERY);
-    const data = await runSummaryQuery(octokit, chunk, details);
+    const { data, errorPaths } = await runSummaryQuery(octokit, chunk, details);
     chunk.forEach(({ kind, ref }, index) => {
       const alias = `a${index}`;
       const repository = data?.[alias];
@@ -375,7 +422,13 @@ export async function fetchPrSummaries({ octokit, refs, issueRefs = [], discussi
         return;
       }
       const summary = toSummary(ref, hasProperty(repository, 'pullRequest') ? repository.pullRequest : undefined, details);
-      if (summary) summaries.push(summary);
+      if (!summary) return;
+      const removal = queueRemovalPullSchema.safeParse(hasProperty(repository, 'queueRemoval') ? repository.queueRemoval : undefined);
+      if (removal.success) {
+        const latestQueueRemoval = queueRemovalOf(removal.data.timelineItems.nodes[0], alias, errorPaths);
+        if (latestQueueRemoval !== undefined) summary.latestQueueRemoval = latestQueueRemoval;
+      }
+      summaries.push(summary);
     });
   }
   return { summaries, issueSummaries, discussionSummaries };

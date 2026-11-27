@@ -25,6 +25,9 @@ class NotificationService: UNNotificationServiceExtension {
 
         refreshWidgetSnapshot(from: request)
         if let content = bestAttempt {
+            // Only a link sealed for this phone may name what a tap opens, as on Android.
+            var userInfo = content.userInfo
+            if userInfo.removeValue(forKey: "url") != nil { content.userInfo = userInfo }
             openSealedText(into: content, from: request)
         }
 
@@ -44,7 +47,7 @@ class NotificationService: UNNotificationServiceExtension {
         }
     }
 
-    /// A push from a server that knows this phone's key carries its real title and body
+    /// A push from a server that knows this phone's key carries its real title, body and tap link
     /// sealed in `enc` (AES-256-GCM, `v1.` + base64 of nonce||ciphertext||tag) and only a
     /// generic title in the clear, so the relay, Apple and Google never read them. Opens it
     /// with the key the app keeps in the App Group; on any failure the generic text stays.
@@ -64,6 +67,13 @@ class NotificationService: UNNotificationServiceExtension {
         }
         if let body = opened["body"] as? String {
             content.body = body
+        }
+        // The app's own link a tap follows, such as the pull request a notification names. It
+        // travels sealed because it names a repository, so only this phone's key can set it.
+        if let url = opened["url"] as? String, url.hasPrefix("openchamber://") {
+            var userInfo = content.userInfo
+            userInfo["url"] = url
+            content.userInfo = userInfo
         }
     }
 

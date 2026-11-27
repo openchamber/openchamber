@@ -1,11 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { followPendingSpaceModel, pendingSpaceSendStep } from './space-send';
+import { pendingSpaceSendStep } from './space-send';
 import { useUIStore } from '@/stores/useUIStore';
-import { resetSpaceModelAccess } from './space-model-access';
-import type { Session } from '@/lib/opencode/model';
+import { resetSpaceModelAccess } from './space-model-offer';
 import type { SpaceEntry } from './spaces-api';
 import { useSpacesStore } from './spaces-store';
 
@@ -42,7 +40,7 @@ const model = (providerID: string, modelID: string) => ({
   cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }], status: 'active' as const, enabled: true, limit: { context: 0, output: 0 },
 });
 
-const pending = { spaceId: ID, directory: DIRECTORY, sessionId: null, draftKey: 'draft-a' };
+const pending = { spaceId: ID, directory: DIRECTORY, draftKey: 'draft-a', model: { providerId: 'opencode-go', modelId: 'm' } };
 const composer = (providerId: string, modelId = 'm', draftKey: string | null = 'draft-a') => ({ draftKey, providerId, modelId });
 
 describe('"Start and send" waits for the composer it was pressed in to be ready', () => {
@@ -71,38 +69,15 @@ describe('"Start and send" waits for the composer it was pressed in to be ready'
     expect(pendingSpaceSendStep(pending, composer('opencode-go'))).toBe('send');
   });
 
-  test('first moves off a model the space refuses when it holds another, and sends a refused one it cannot replace', () => {
+  test('waits for the composer to leave a model the space refuses while the shown one is taken', () => {
     listed(space());
-    expect(pendingSpaceSendStep(pending, composer('opencode'))).toBe('follow');
+    expect(pendingSpaceSendStep(pending, composer('opencode'))).toBe('wait');
+    expect(pendingSpaceSendStep(pending, composer('opencode-go'))).toBe('send');
+  });
+
+  test('when access to the shown model is gone, hands it to the send check whatever the composer moved to', () => {
     listed(space({ grants: [] }));
-    expect(pendingSpaceSendStep(pending, composer('opencode'))).toBe('send');
-  });
-
-  test('a session moves back to its own model when the space takes it, before any other granted one', () => {
-    listed(space());
-    useUIStore.setState({ recentModels: [{ providerID: 'opencode-go', modelID: 'hy4-flash-free' }], hiddenModels: [] });
-    const session: Session = {
-      id: 'ses_1', projectID: 'p', directory: DIRECTORY, title: 'Login bug', cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-      time: { created: 0, updated: 0 },
-      model: { providerID: 'opencode-go', id: 'deepseek-v4.1-flash' },
-    };
-    useGlobalSessionsStore.setState({ activeSessions: [session] });
-    const forSession = { ...pending, sessionId: 'ses_1' };
-    expect(pendingSpaceSendStep(forSession, composer('opencode'))).toBe('follow');
-    followPendingSpaceModel(forSession);
-    expect([useConfigStore.getState().currentProviderId, useConfigStore.getState().currentModelId]).toEqual(['opencode-go', 'deepseek-v4.1-flash']);
-    // A remembered model the space's catalog no longer lists gives way to a granted one it does.
-    useGlobalSessionsStore.setState({ activeSessions: [{ ...session, model: { providerID: 'opencode-go', id: 'gone-model' } }] });
-    useConfigStore.setState({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
-    followPendingSpaceModel(forSession);
-    expect(useConfigStore.getState().currentModelId).toBe('deepseek-v4.1-flash');
-  });
-
-  test('a composer whose model is not the shared selection sends as it is', () => {
-    listed(space());
-    useConfigStore.setState({ currentProviderId: 'opencode-go' });
-    expect(pendingSpaceSendStep(pending, composer('opencode'))).toBe('send');
+    expect(pendingSpaceSendStep({ ...pending, model: { providerId: 'opencode', modelId: 'big-pickle' } }, composer('opencode-go'))).toBe('send');
   });
 
   test('gives up when the composer shows another draft, or the start failed', () => {

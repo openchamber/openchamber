@@ -1,6 +1,7 @@
 
 import { z } from "zod"
 
+import { unwrapBackgroundResult } from "./background-result"
 import type { Message, Metadata, ToolPart } from "./model"
 
 export type RunningShell = {
@@ -57,20 +58,17 @@ const completionMetadataSchema = z.object({
   timeout: z.boolean().optional(),
 })
 
-const ENVELOPE = /^\s*<shell\b[^>]*>\n?([\s\S]*?)\n?<\/shell>\s*$/
-
 export function readShellCompletion(message: Message): ShellCompletion | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = completionMetadataSchema.safeParse(message.metadata ?? {})
   if (!parsed.success) return undefined
-  const envelope = message.text.match(ENVELOPE)
   return {
     shellID: parsed.data.shellID,
     state: parsed.data.state,
     exit: parsed.data.exit,
     signal: parsed.data.signal,
     timeout: parsed.data.timeout,
-    output: envelope ? envelope[1] : message.text,
+    output: unwrapBackgroundResult(message.text, "shell") ?? message.text,
     endedAt: message.time.created,
   }
 }
@@ -90,7 +88,7 @@ export const shellCompletionFailed = (completion: ShellCompletion): boolean => (
   || (completion.exit !== undefined && completion.exit !== 0)
 )
 
-// external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src/tool/plugin/shell.ts Removing a shell reports Shell.NotFoundError to the agent, so a cancellation note precedes removal.
+// external: https://github.com/anomalyco/opencode/tree/v2.4.1/packages/core/src/job.ts A cancelled job reports only "Cancelled" (before 2.4.0, removal reported Shell.NotFoundError), so a note saying the user stopped it precedes the cancel.
 
 
 const CANCELLATION_METADATA_KEY = "openchamberShellCancellation"
@@ -114,13 +112,13 @@ export function shellCancellationNote(shells: readonly [StoppedShell, ...Stopped
     text: (single
       ? [
         `The user stopped the background command ${describeStoppedShell(shells[0])}.`,
-        "The completion notice for it that follows reports an error such as Shell.NotFoundError or says that nothing ran.",
+        "The completion notice for it that follows reports it as cancelled, or on an older server as an error such as Shell.NotFoundError.",
         "That is how the stop shows up: the command did not fail on its own, the user cancelled it.",
         "Do not start it again just because of that notice. The command itself is fine to run later when the task or the user needs it.",
       ]
       : [
         `The user stopped these background commands together: ${shells.map(describeStoppedShell).join(", ")}.`,
-        "The completion notices for them that follow report errors such as Shell.NotFoundError or say that nothing ran.",
+        "The completion notices for them that follow report them as cancelled, or on an older server as errors such as Shell.NotFoundError.",
         "That is how the stop shows up: the commands did not fail on their own, the user cancelled them.",
         "Do not start them again just because of those notices. The commands themselves are fine to run later when the task or the user needs them.",
       ]).join(" "),

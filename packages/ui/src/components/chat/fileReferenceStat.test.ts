@@ -65,6 +65,14 @@ describe('fileReferenceExists directory scoping (issue 3019)', () => {
     expect(calls).toHaveLength(2);
   });
 
+  test('asks again after the server could not answer', async () => {
+    stubFetchWith(() => (calls.length === 1
+      ? Response.json({ code: 'DIRECTORY_UNREACHABLE' }, { status: 503 })
+      : Response.json({ exists: true })));
+    expect(await fileReferenceExists('/nas/lib.ts', '/nas')).toBe(false);
+    expect(await fileReferenceExists('/nas/lib.ts', '/nas')).toBe(true);
+  });
+
   test('serves a repeated probe under the same directory from the cache', async () => {
     stubFetchWith(() => new Response(JSON.stringify({ path: '/repo-c/lib.ts', isFile: true, size: 4 }), { status: 200 }));
 

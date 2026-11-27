@@ -34,6 +34,8 @@ interface ModuleEntry {
 }
 
 const manifestError = (message: string, code = 'INVALID_SUBMODULE_MANIFEST') => Object.assign(new Error(message), { code });
+const TREE_GITLINK_PATTERN = /^160000 commit ([0-9a-f]{40}(?:[0-9a-f]{24})?)(?: +-\t|\t)([^]+)$/;
+const listingError = (code: string, message: string) => Object.assign(new Error(message), { code, status: 409 });
 
 const boundedText = (value: string | Buffer, maxBytes: number, label: string) => {
   if (!(isString(value) || Buffer.isBuffer(value))) throw manifestError(`${label} is invalid`);
@@ -160,3 +162,33 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
   if (modules.length !== gitlinksByPath.size) throw manifestError('Gitlink output contains an undeclared submodule');
   return Object.freeze({ recursionDepth, modules: Object.freeze(modules) });
 }
+
+export const createGitlinksStream = () => {
+  let remainder: Buffer = Buffer.alloc(0);
+  let output = '';
+  return Object.freeze({
+    write(chunk: Buffer) {
+      const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      remainder = remainder.length ? Buffer.concat([remainder, input]) : input;
+      for (let separator; (separator = remainder.indexOf(0)) >= 0;) {
+        const record = remainder.subarray(0, separator).toString('utf8');
+        remainder = remainder.subarray(separator + 1);
+        if (record.includes('\ufffd')) throw listingError('INVALID_REQUEST', 'Tree listing is not valid UTF-8');
+        const match = record.match(TREE_GITLINK_PATTERN);
+        if (!match) continue;
+        const entry = `${record}\0`;
+        if (Buffer.byteLength(output) + Buffer.byteLength(entry) > SUBMODULE_DISCOVERY_LIMITS.maxGitlinkBytes) {
+          throw listingError('SUBMODULE_DISCOVERY_LIMIT_EXCEEDED', 'Submodule gitlink listing exceeds its byte limit');
+        }
+        output += entry;
+      }
+      if (remainder.length > SUBMODULE_DISCOVERY_LIMITS.maxGitlinkBytes) {
+        throw listingError('SUBMODULE_DISCOVERY_LIMIT_EXCEEDED', 'Tree listing record exceeds its byte limit');
+      }
+    },
+    complete() {
+      if (remainder.length) throw listingError('INVALID_REQUEST', 'Tree listing is incomplete');
+      return output;
+    },
+  });
+};

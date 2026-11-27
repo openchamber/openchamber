@@ -77,5 +77,6 @@ export const readReviewerStates = async (
       if (mapped) states.set(mapped.id, { user: mapped, state: 'approved' });
     }
   }
+  if (states.size === 0 && reviewers.length > 0) return undefined;
   return [...states.values()];
 };

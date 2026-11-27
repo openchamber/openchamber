@@ -29,7 +29,7 @@ Ein Lead zeigt in der Seitenleiste einen Berggipfel mit Flagge statt des Pfeils.
 - **Benennt die Richtung.** Er benennt die Sitzung nach der Arbeit um, sodass du sie in der Seitenleiste, in Tabs und in der Suche über ihr Thema findest. Einen Namen, den du selbst vergeben hast, behält sie.
 - **Vergibt Ergebnisse, keine Schritte.** Jeder Teil der Arbeit geht an eine eigene Sitzung, zusammen mit dem Ergebnis, das sie erreichen soll, etwa "finde und behebe den Login-Timeout", und die Schritte erarbeitet diese Sitzung selbst. Diese Sitzungen stehen in der Seitenleiste unter dem Lead. Du kannst sie öffnen und lesen, und **Übernehmen** im Menü einer Sitzung macht sie zu deiner, wenn du direkt mit ihr sprechen willst.
 - **Prüft, was zurückkommt.** Ein Bericht, der nur sagt "Ich habe die Ursache gefunden", ist nicht das verlangte Ergebnis, also schickt der Lead die Arbeit zurück, statt sie an dich weiterzugeben. Jede Sitzung muss belegen, was sie getan hat, etwa welche Prüfungen sie ausgeführt hat und was dabei herauskam, und ein Bericht ohne Belege geht ebenfalls zurück. Selbst prüft der Lead nur dort, wo die Belege eine Lücke haben.
-- **Räumt auf.** Sitzungen, deren Ergebnisse er verwendet hat, archiviert er.
+- **Räumt auf.** Hat eine Sitzung in einem Worktree gearbeitet und ist ihre Arbeit angekommen, entfernt er diesen Worktree. Die Sitzung bleibt, damit du sie lesen kannst.
 - **Fragt dich nur, was zählt.** Er entscheidet selbst, außer die Antwort ändert, was du in deinem Projekt sehen würdest, oder zwei vernünftige Optionen unterscheiden sich wirklich. Eine große Änderung allein ist kein Grund zu fragen. Fragen seiner Sitzungen gehen an den Lead, nicht an dich, und erreichen dich nur, wenn sie dieselbe Prüfung bestehen.
 
 ## Die Übersicht
@@ -61,7 +61,7 @@ Der Lead ändert nur die Teile des Briefings, die sich geändert haben, und Open
 
 ## Leads, die schlafen
 
-Ein Lead kann stundenlang warten, während seine Sitzungen arbeiten. Wenn er aufwacht, muss das Modell normalerweise das ganze Gespräch von vorn lesen, weil Anbieter das Gespräch nur ein paar Minuten im Cache halten. Bei einem langen Gespräch kostet dieses eine Lesen so viel wie eine Menge Arbeit, und mit einem Abo frisst es dein Nutzungslimit.
+Ein Lead kann stundenlang warten, während seine Sitzungen arbeiten. Wenn er aufwacht, muss das Modell normalerweise das ganze Gespräch von vorn lesen, weil Anbieter das Gespräch nur begrenzte Zeit im Cache halten, oft ein paar Minuten bis eine Stunde. Bei einem langen Gespräch kostet dieses eine Lesen so viel wie eine Menge Arbeit, und mit einem Abo frisst es dein Nutzungslimit.
 
 Wenn ein Lead also länger untätig war, als sein Anbieter den Cache hält, und sein Gespräch lang ist, kürzt OpenChamber es, bevor er aufwacht. Der ältere Teil des Gesprächs wird durch eine kurze Notiz ersetzt: die Übersicht des Leads und den Stand seiner Sitzungen. Für die Notiz wird kein Modell aufgerufen, das kostet also nichts. Das Briefing und die neuesten Nachrichten bleiben, wie sie sind, und der Lead kann das vollständige frühere Gespräch jederzeit lesen, wenn er es braucht.
 
@@ -73,7 +73,7 @@ Ein Lead kann eine große Aufgabe in einen [Workflow](/de/workflows/) aufteilen.
 
 ## Wo Leads arbeiten
 
-Leads brauchen das [Agenten-Steuerungswerkzeug](/de/agent-control-tool/), das standardmäßig an ist, und den eigenen OpenCode-Server von OpenChamber. Sie funktionieren auf dem Desktop, im Browser und auf dem Handy. Die VS-Code-Erweiterung zeigt bestehende Leads mit ihrer Markierung und Übersicht, kann aber keinen neuen starten.
+Leads brauchen das [Agenten-Steuerungswerkzeug](/de/agent-control-tool/), das standardmäßig an ist. Auf einem OpenCode-Server, den du selbst betreibst, brauchen sie außerdem das [registrierte OpenChamber-Plugin](/de/opencode-server/#openchamber-werkzeuge-auf-einem-externen-lokalen-server-aktivieren). Sie funktionieren auf dem Desktop, im Browser und auf dem Handy. Die VS-Code-Erweiterung zeigt bestehende Leads mit ihrer Markierung und Übersicht, kann aber keinen neuen starten.
 
 ## Verwandt
 

@@ -10,7 +10,14 @@ import { createChatDraftIdentity, readChatDraft, getChatDraftIdentityKey, clearC
 import { toast } from '@/components/ui';
 import { useLinkedReferenceDrafts } from '../../composer/linkedReferenceDrafts';
 import { AgentUnavailableError } from '@/lib/opencode/client';
+import { failedSkillLoad } from '@/lib/opencode/skill-load-error';
 import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
+import { isAmbiguousTransportFailure, isUndeliveredTransportFailure } from '@/lib/relay/transport-error';
+
+const isLostPromptTransport = (error: unknown): boolean => {
+    const cause = error instanceof Error ? error.cause : undefined;
+    return [error, cause].some((candidate) => isAmbiguousTransportFailure(candidate) || isUndeliveredTransportFailure(candidate));
+};
 
 type SendFailureContext = Pick<ReturnType<typeof useComposerDraftText>, 'currentChatDraftIdentityRef' | 'composerText'>
     & Pick<ReturnType<typeof useI18n>, 't'>
@@ -84,6 +91,14 @@ export function handleComposerSendFailure(error: unknown, {
             return;
         }
 
+        if (isLostPromptTransport(error)) {
+            if (allAttachments.length > 0) {
+                useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
+            }
+            toast.error(t('chat.chatInput.toast.messageSendFailed'));
+            return;
+        }
+
         if (normalized.includes('runtime changed')) {
             if (allAttachments.length > 0) {
                 useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
@@ -106,6 +121,12 @@ export function handleComposerSendFailure(error: unknown, {
                 : null;
         if (unavailableAgent) {
             toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent.agent }));
+            return;
+        }
+
+        const unloadedSkill = failedSkillLoad(error);
+        if (unloadedSkill) {
+            toast.error(t('chat.chatInput.toast.skillLoadFailed', { skill: unloadedSkill }));
             return;
         }
 

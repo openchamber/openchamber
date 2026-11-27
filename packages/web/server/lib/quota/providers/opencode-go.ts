@@ -235,9 +235,10 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }: ConsoleGoC
   const payload = asPayload(await response.json().catch(() => null));
   if (!payload) throw new Error('OpenCode Console Go status returned an unreadable response');
   const product = payload.product;
-  if (!isString(product) || !CONSOLE_PRODUCTS.has(product) || !asObject(payload.access)) {
+  if (!isString(product) || !CONSOLE_PRODUCTS.has(product) || payload.access == null) {
     throw new Error(NO_CONSOLE_SUBSCRIPTION);
   }
+  if (!asObject(payload.access)) throw new Error('OpenCode Console Go status returned an unreadable response');
   const windows = parseConsoleGoUsage(payload);
   if (Object.keys(windows).length === 0) throw new Error('OpenCode Go usage data could not be parsed');
   return windows;
@@ -321,7 +322,7 @@ const fetchGoQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fe
             };
         return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows }, accountLabel: consoleCredential.label });
       } catch (consoleError) {
-        if (!apiKey) throw consoleError;
+        if (!apiKey && !(consoleError instanceof Error && consoleError.message === NO_CONSOLE_SUBSCRIPTION)) throw consoleError;
         consoleFailure.error = consoleError;
       }
     } else if (consoleKey) {
@@ -329,7 +330,7 @@ const fetchGoQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fe
         const windows = await fetchKeyUsage(consoleKey, fetchImpl);
         return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows }, accountLabel: consoleKey.label });
       } catch (consoleError) {
-        if (!apiKey || !(consoleError instanceof Error) || !KEY_REFUSALS.has(consoleError.message)) throw consoleError;
+        if (!(consoleError instanceof Error) || !(apiKey ? KEY_REFUSALS.has(consoleError.message) : consoleError.message === NO_CONSOLE_SUBSCRIPTION)) throw consoleError;
       }
     }
     if (!apiKey) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });

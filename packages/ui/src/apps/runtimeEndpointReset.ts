@@ -1,6 +1,6 @@
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
-import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
+import { resetSpaceModelAccess } from '@/lib/spaces/space-model-offer';
 import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation-requests';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';

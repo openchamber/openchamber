@@ -48,6 +48,8 @@ Die Vorschau zeigt Beschreibung, Labels und Kommentare. Bei einem Linear-Issue k
 
 In der Zeile **Labels** öffnet ein Stift-Button eine durchsuchbare Liste der Labels des Repositorys. Hake sie an oder ab. Gespeichert wird beim Schließen der Liste, mehrere Klicks zählen also als eine Änderung. Ein offener Pull Request (auf GitLab Merge Request) hat außerdem eine Zeile **Reviewers**, die genauso funktioniert, mit den Personen, die im Repository reviewen können. Auf GitHub wird der Autor des Pull Requests nicht angeboten. Linear-Issues haben keine dieser Zeilen.
 
+Ein Issue hat außerdem eine Zeile **Assignees**. Der Stift listet die Personen, die im Repository zugewiesen werden können; wähle aus, wer zugewiesen werden soll, oder entferne alle, und der gesamte Satz wird beim Schließen der Liste gespeichert. Ein Host, der das nicht unterstützt, oder eine Ansicht, für die der Host keine Schreibrechte meldet, zeigt die Namen ohne Stift.
+
 Ein Stift neben dem Titel bearbeitet Titel und Beschreibung zusammen. <kbd>⌘</kbd>+<kbd>Enter</kbd> speichert (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> unter Windows und Linux), <kbd>Esc</kbd> bricht ab, und die Vorschau zeigt danach, was der Host gespeichert hat. Ein über einen Link geöffneter Eintrag hat keinen Stift, und ein Host, der den Text nicht ändern kann, auch nicht.
 
 Issues und Pull Requests listen die Einträge auf, die sie in ihrer Timeline erwähnen, jeweils mit Person, Zeitpunkt und einem Chip (`owner/repo#42` repositoryübergreifend), der den Eintrag öffnet. Diskussionen haben keine solche Liste: GitHub bietet dafür keine Timeline. GitHub, GitLab, Gitea und Forgejo zeigen diese Zeilen, ebenso ein per Erweiterung hinzugefügter Host, der sie liefert; Gerrit zeigt keine.
@@ -73,15 +75,15 @@ Bei einem Linear-Issue zeigt **Start in** das Projekt, in dem die Sitzung starte
 
 ## Pull Requests
 
-Die Vorschau eines Pull Requests zeigt außerdem seinen Branch, seine Größe (hinzugefügte und entfernte Zeilen sowie geänderte Dateien), die Checks und das Review. Der Feed **Activity** ordnet Kommentare, Review-Urteile und die neuesten Commits so, wie sie passiert sind. Aufeinanderfolgende Commits werden gruppiert, so siehst du, auf welche Commits ein Review geantwortet hat.
+Die Vorschau eines Pull Requests zeigt außerdem seinen Branch, seine Größe (hinzugefügte und entfernte Zeilen sowie geänderte Dateien), die Checks und das Review. Wo der Host es erlaubt, listet ein Stift neben dem Basis-Branch die Branches des Repositorys auf, ohne den, auf den der Pull Request zeigt; wählst du einen, wandert der Pull Request dorthin, und die Vorschau zeigt die neue Basis, sobald der Host sie hat. Der Feed **Activity** ordnet Kommentare, Review-Urteile und die neuesten Commits so, wie sie passiert sind. Aufeinanderfolgende Commits werden gruppiert, so siehst du, auf welche Commits ein Review geantwortet hat.
 
 Neben der Größe stehen zwei Schaltflächen. **Changes** öffnet den Diff des Pull Requests im Seitenpanel, **Walkthrough** öffnet seinen [Änderungsrundgang](/de/walkthrough/). Ist die App gerade auf einem anderen Projekt, wechselt sie zuerst zum Projekt des PRs. Auf dem Handy öffnet **Changes** den PR im Tab **Git** der Arbeitsbereich-Leiste; **Walkthrough** gibt es nur auf Desktop und im Web.
 
-Unten fragt **Merge** vor dem Mergen nach und nutzt deine übliche Merge-Methode. Ein Entwurf bekommt zusätzlich **Ready for review**.
+Unten fragt **Merge** vor dem Mergen nach und nutzt deine übliche Merge-Methode. Ein Entwurf bekommt zusätzlich **Ready for review**. Ein offener Pull Request, der kein Entwurf ist, bietet außerdem **Update branch** oder **Rebase onto base** an, wo der Host das unterstützt; der Host kann im Hintergrund fertig werden, der Eintrag sagt also nur, dass die Arbeit begonnen hat.
 
 Auf Gerrit zeigt die Vorschau außerdem das Topic der Änderung und ob sie privat oder in Arbeit ist. Hat eine Änderung mehr als ein Patchset, wählt eine Auswahl neben **Changes**, aus welchem Dateien und Diff stammen; sie beginnt beim neuesten. Aus **Merge** wird **Einreichen**. Es bleibt aus, bis die Submit-Anforderungen der Änderung erfüllt sind, und die unerfüllten stehen daneben. Aus **Close** und **Reopen** werden **Änderung verwerfen** und **Änderung wiederherstellen**.
 
-Ein offenes Issue oder ein offener Pull Request hat unten außerdem **Close issue** oder **Close pull request** (auf GitLab **Close merge request**), ein geschlossener **Reopen issue** oder **Reopen pull request** (**Reopen merge request**). Beides fragt nicht nach, weil es sich rückgängig machen lässt. Ein gemergter Pull Request lässt sich weder schließen noch wieder öffnen. Auf GitHub wird ein Issue als erledigt geschlossen.
+Dasselbe Menü schließt ein offenes Issue oder einen offenen Pull Request (**Close issue**, **Close pull request**, auf GitLab **Close merge request**) und öffnet ein geschlossenes wieder (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Beides fragt nicht nach, weil es sich rückgängig machen lässt. Ein gemergter Pull Request hat diesen Eintrag nicht. Auf GitHub bietet das Schließen eines Issues **Close as completed** und **Close as not planned** an, was der Host behält und allen zeigt; andere Hosts schließen ohne Grund.
 
 ## Verwandt
 

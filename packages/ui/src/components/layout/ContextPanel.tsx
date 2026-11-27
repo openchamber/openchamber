@@ -14,7 +14,6 @@ import { trackerTargetOfUrl } from '@/components/sourceBoard/openTrackerItem';
 import { type RepositoryUrlMatcher, useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { type TrackerUrlMatcher, useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { trackerPresentation } from '@/lib/trackers/presentation';
-import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { isBrowserClientRuntime, isDesktopShell } from '@/lib/desktop';
 import { getDisambiguatingFolders } from '@/lib/path-utils';
 import { getRelativePathLabel } from './contextPanelPaths';
@@ -22,7 +21,6 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toast } from '@/components/ui';
 
-const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkflowsPanel } from '@/components/chat/workflows/WorkflowsPanel';
@@ -330,7 +328,7 @@ const HEADER_DRAG_DISTANCE_PX = 8;
 const HEADER_DRAG_EXCLUDED = 'button, a, input, textarea, select, label, [role="button"], [role="tab"], [role="combobox"], [role="switch"], [role="slider"], [data-sortable-tab-id], [contenteditable="true"]';
 
 const isRemountedSurface = (mode: ContextPanelMode): boolean => (
-  mode === 'context' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'workflows'
+  mode === 'context' || mode === 'pr' || mode === 'notes' || mode === 'workflows'
 );
 
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
@@ -343,21 +341,18 @@ const ZONE_GEOMETRY = {
     gutter: 'mb-2 ms-2 me-1.5',
     gutterSize: '0.875rem',
     handle: 'absolute bottom-2 inset-s-1 top-0 z-50 w-2 cursor-col-resize',
-    sizeVariable: '--oc-context-panel-width',
   },
   left: {
     axis: 'x',
     gutter: 'mb-2 ms-1.5 me-2',
     gutterSize: '0.875rem',
     handle: 'absolute bottom-2 inset-e-1 top-0 z-50 w-2 cursor-col-resize',
-    sizeVariable: '--oc-context-panel-width',
   },
   bottom: {
     axis: 'y',
     gutter: 'mb-2 mt-2',
     gutterSize: '1rem',
     handle: 'absolute inset-x-0 top-1 z-50 h-2 cursor-row-resize',
-    sizeVariable: '--oc-context-panel-height',
   },
 } as const;
 
@@ -621,9 +616,10 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
     }
     const panel = panelRef.current;
     const card = cardRef.current;
-    if (panel && card) {
+    if (isOpenRef.current) {
+      writeDragSize(finalSize);
+    } else if (panel && card) {
       const property = isVertical ? 'height' : 'width';
-      panel.style.setProperty(geometry.sizeVariable, `${finalSize}px`);
       panel.style[property] = slotSizeRef.current;
       card.style[property] = cardSizeRef.current;
     }
@@ -643,7 +639,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
     activeResizePointerIDRef.current = null;
     releaseResizeHoldRef.current?.();
     releaseResizeHoldRef.current = null;
-  }, [clampSizeForDrag, geometry.sizeVariable, isExpanded, isTreeOnly, isVertical, setContextEditorTreeWidth, setContextZoneExpandedChatSize, setContextZoneSize, size, zone]);
+  }, [clampSizeForDrag, isExpanded, isTreeOnly, isVertical, setContextEditorTreeWidth, setContextZoneExpandedChatSize, setContextZoneSize, size, writeDragSize, zone]);
 
   React.useEffect(() => {
     if (!isResizing) {
@@ -743,9 +739,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ContextPanelContent /></ContextPanelHeaderSlotProvider>
-        : activeTab?.mode === 'git'
-            ? <React.Suspense fallback={null}><ContextPanelHeaderSlotProvider value={headerSlotEl}><GitView isActive={isOpen} /></ContextPanelHeaderSlotProvider></React.Suspense>
-            : activeTab?.mode === 'pr'
+        : activeTab?.mode === 'pr'
                 ? (activeTab.targetPath
                     ? (
                       <TrackerItemView
@@ -1025,8 +1019,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
   const slotSize = !isOpen
     ? (workStatusColumn ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px')
     : cardBesidePanel
-      ? `calc(var(${geometry.sizeVariable}) + ${WORK_STATUS_COLUMN_WIDTH}px)`
-      : `min(var(${geometry.sizeVariable}), 100%)`;
+      ? `${size + WORK_STATUS_COLUMN_WIDTH}px`
+      : `min(${size}px, 100%)`;
   const panelOffset = cardBesidePanel ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px';
   besidePanelRef.current = cardBesidePanel;
 
@@ -1053,7 +1047,6 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
   const contentHidden = !isZoneExposed(isOpen, useOpenWhenSettled(isOpen), activeTab?.mode);
   const contentShown = useOpenUntilSettled(isOpen);
   const panelStyle: React.CSSProperties = {
-    [geometry.sizeVariable]: `${size}px`,
     ...(variant === 'center' ? null : isVertical
       ? { height: slotSize, maxHeight: '100%' }
       : { width: slotSize, maxWidth: '100%' }),
@@ -1061,7 +1054,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
     transitionTimingFunction: LAYOUT_ANIMATION_EASING,
   };
 
-  const cardSize = `calc(var(${geometry.sizeVariable}) - ${geometry.gutterSize})`;
+  const cardSize = `calc(${size}px - ${geometry.gutterSize})`;
   const slotSizeRef = React.useRef(slotSize);
   slotSizeRef.current = slotSize;
   const cardSizeRef = React.useRef(cardSize);
@@ -1075,6 +1068,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
       data-right-slot={zone === 'right' ? '' : undefined}
       data-context-panel-open={isOpen ? 'true' : 'false'}
       data-zone-size={size}
+      data-zone-axis={variant === 'center' ? undefined : isVertical ? 'height' : 'width'}
       tabIndex={-1}
       className={cn(
         // external: https://developer.mozilla.org/en-US/docs/Web/CSS/overflow A hidden axis also makes clip on the other axis compute to hidden.

@@ -1,6 +1,5 @@
 
-import type { FilePart, FormRequest, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
-import { compact, partIds } from "@/lib/opencode/model"
+import { compact, partIds, type FilePart, type FormRequest, type Message, type Metadata, type ModelSelection, type Part, type PermissionRequest, type Session, type SyntheticMessage, type TextPart, type UserMessage } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { attachmentBasename, withMissingCitations } from "@/lib/attachmentIdentity"
 import { isAutoModel } from "@/lib/routing/autoModel"
@@ -25,7 +24,7 @@ import {
   useRecoverableQuestionsStore,
   type RecoveredQuestion,
 } from "./recoverable-questions"
-import { resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
+import { isSessionModelChosen, resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -49,7 +48,7 @@ import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
-import { materializeSessionSnapshots } from "./materialization"
+import { getStaleRunningToolMessageID, materializeSessionSnapshots } from "./materialization"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { fileTreeChanges } from "@/lib/fileTreeChanges"
 import {
@@ -62,8 +61,8 @@ import {
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
 import { type LinkedIssue } from "@/lib/linkedIssues"
-import { withSessionWorkClosed, withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
-import { isPinnedMetadata, withSessionPinned } from "@/lib/sessionPins"
+import { type SessionWork } from "@/lib/sessionWorkMetadata"
+import { closesWorkOnPin, withSessionPinChange, withUserWorkState } from "@/lib/pinnedInWork"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
@@ -75,10 +74,10 @@ import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { isFormAlreadySettledError, isFormRequestNotFoundError } from "./form-request-error"
 import { ConnectionLostError } from "./connection-lost-error"
-import { getStaleRunningToolMessageID } from "./materialization"
+import { noteSessionMoveEvent, requestSessionMove } from "./session-move-confirmation"
 import { promoteRestoredSessionOrdering } from "./session-ordering"
 import { normalizePath } from "@/lib/pathNormalization"
-import { mergeMessages } from "./optimistic"
+import { createOptimisticRollbackPatch, createOptimisticUserMessage, mergeMessages, shouldMarkBusyFromIdle } from "./optimistic"
 import { trackPromptInFlight } from "./prompts-in-flight"
 import { messagesBefore, messagesFrom } from "./message-ordering"
 import { deleteChatDirectory } from "@/lib/chatDirectories"
@@ -107,6 +106,7 @@ type OptimisticConfirmInput = OptimisticRemoveInput
 let _optimisticAdd: ((input: OptimisticAddInput) => void) | null = null
 let _optimisticRemove: ((input: OptimisticRemoveInput) => void) | null = null
 let _optimisticConfirm: ((input: OptimisticConfirmInput) => void) | null = null
+let _optimisticAdmit: ((input: OptimisticConfirmInput) => void) | null = null
 
 function sessionsMutationPatch(
   state: ReturnType<DirectoryStoreApi["getState"]>,
@@ -165,10 +165,12 @@ export function setOptimisticRefs(
   add: (input: OptimisticAddInput) => void,
   remove: (input: OptimisticRemoveInput) => void,
   confirm?: (input: OptimisticConfirmInput) => void,
+  admit?: (input: OptimisticConfirmInput) => void,
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
   _optimisticConfirm = confirm ?? null
+  _optimisticAdmit = admit ?? null
 }
 
 function dirStore() {
@@ -184,7 +186,7 @@ function dirStoreForDirectory(directory: string) {
   return _childStores.ensureChild(directory)
 }
 
-function dirStoreForSession(sessionId: string): { store: DirectoryStoreApi; directory?: string } {
+export function dirStoreForSession(sessionId: string): { store: DirectoryStoreApi; directory?: string } {
   const directory = getSessionDirectory(sessionId)
   if (directory) {
     return { store: dirStoreForDirectory(directory), directory }
@@ -335,12 +337,12 @@ export async function moveSessionToDirectory(
   sourceDirectory: string,
   destinationDirectory: string,
   isCurrent?: () => boolean,
-): Promise<void> {
-  await opencodeClient.moveSession(session.id, destinationDirectory)
+): Promise<string> {
+  const confirmed = await requestSessionMove(session.id, () => opencodeClient.moveSession(session.id, destinationDirectory))
 
-  if (isCurrent && !isCurrent()) return
+  if ((isCurrent && !isCurrent()) || confirmed) return confirmed ?? destinationDirectory
 
-  relocateSession(session, sourceDirectory, destinationDirectory)
+  return relocateSession(session, sourceDirectory, destinationDirectory).directory
 }
 
 export function adoptSessionMove(sessionId: string, sourceDirectory: string, destinationDirectory: string): void {
@@ -348,6 +350,7 @@ export function adoptSessionMove(sessionId: string, sourceDirectory: string, des
     ?? _childStores?.getChild(destinationDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
     ?? useGlobalSessionsStore.getState().entityById.get(sessionId)
   if (!session) return
+  noteSessionMoveEvent(sessionId, destinationDirectory)
   relocateSession(session, sourceDirectory, destinationDirectory)
 }
 
@@ -458,7 +461,7 @@ export async function compactSession(
     ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, selection.providerID, selection.modelID)
     : undefined
   if (selection && !isAutoModel(selection.providerID, selection.modelID)) {
-    const { model } = await resolveSendSelection(sessionId, directory ?? undefined, selection)
+    const { model } = await resolveSendSelection(sessionId, directory ?? undefined, { ...selection, keepSessionModel: !isSessionModelChosen(sessionId, selection.providerID, selection.modelID) && !useSelectionStore.getState().getSessionAgentPick(sessionId) })
     if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
     if (model) {
       await opencodeClient.switchSessionModel(sessionId, model, directory)
@@ -585,15 +588,15 @@ function descendantRevertCutoff(state: { session: readonly Session[] }, target: 
   return child ? Math.min(child.time.created, target.time.created) : target.time.created
 }
 
-async function stageAndReadRevert(sessionId: string, messageId: string, directory: string | null | undefined, assertRuntime: () => void): Promise<Session> {
+async function stageAndReadRevert(sessionId: string, messageId: string, directory: string | null | undefined, assertRuntime: () => void): Promise<{ session: Session; staged: NonNullable<Session["revert"]> }> {
   const key = revertKey(sessionId)
   unreconciledReverts.add(key)
-  await opencodeClient.stageRevert(sessionId, messageId, { directory })
+  const staged = await opencodeClient.stageRevert(sessionId, messageId, { directory })
   assertRuntime()
-  const reverted = await opencodeClient.getSession(sessionId, directory)
+  const session = await opencodeClient.getSession(sessionId, directory)
   assertRuntime()
   unreconciledReverts.delete(key)
-  return reverted
+  return { session, staged }
 }
 
 async function cascadeRevertToDescendants(descendants: DescendantSession[], cutoff: number, assertRuntime: () => void): Promise<void> {
@@ -606,7 +609,7 @@ async function cascadeRevertToDescendants(descendants: DescendantSession[], cuto
       assertRuntime()
       const target = firstUserMessageAtOrAfter(messages, cutoff)
       if (!target) continue
-      const reverted = await stageAndReadRevert(session.id, target.id, directory, assertRuntime)
+      const { session: reverted } = await stageAndReadRevert(session.id, target.id, directory, assertRuntime)
       mirrorSessionIntoLiveStores(reverted, directory)
     } catch (error) {
       assertRuntime()
@@ -638,7 +641,7 @@ async function clearStagedRevertNow(sessionId: string): Promise<void> {
   }
 }
 
-type PendingRevert = { rootId: string; runtimeKey: string; affectsDescendants: boolean; promise: Promise<void> }
+type PendingRevert = { rootId: string; runtimeKey: string; affectsDescendants: boolean; promise: Promise<unknown> }
 const pendingReverts = new Map<string, PendingRevert>()
 const unreconciledReverts = new Set<string>()
 const revertReconciliations = new Map<string, { promise: Promise<void>; isCurrent: () => boolean }>()
@@ -777,7 +780,7 @@ function getSessionReplyDirectory(sessionId?: string): string | undefined {
   return directory ?? dir()
 }
 
-function restoreFilePartsToInput(fileParts: readonly FilePart[], target: ChatDraftIdentity | null): void {
+export function restoreFilePartsToInput(fileParts: readonly FilePart[], target: ChatDraftIdentity | null): void {
   useInputStore.getState().clearAttachedFiles(target)
   for (const filePart of fileParts) {
     if (!filePart.url) continue
@@ -789,7 +792,7 @@ function restoreFilePartsToInput(fileParts: readonly FilePart[], target: ChatDra
   }
 }
 
-function contextCarriersForMessage(messages: readonly Message[], messageID: string): ContextCarrierPart[] {
+export function contextCarriersForMessage(messages: readonly Message[], messageID: string): ContextCarrierPart[] {
   const index = messages.findIndex((message) => message.id === messageID)
   if (index < 0) return []
   const carriers: ContextCarrierPart[] = []
@@ -801,7 +804,7 @@ function contextCarriersForMessage(messages: readonly Message[], messageID: stri
   return carriers
 }
 
-function restoreContextPartsToInput(
+export function restoreContextPartsToInput(
   parts: readonly ContextCarrierPart[],
   target: InlineCommentDraftTarget,
 ): void {
@@ -1192,7 +1195,7 @@ export async function setSessionWorkState(
   const runtimeKeyAtClick = getRuntimeKey()
   try {
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      state === "open" && isPinnedMetadata(metadata) ? metadata : withSessionWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
+      withUserWorkState(metadata, state, Date.now()), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -1207,11 +1210,10 @@ export async function setSessionPinned(
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
-    return await patchSessionMetadata(sessionId, directory, (metadata) => {
-      const now = Date.now()
-      const next = withSessionPinned(metadata, pinned, now, list)
-      return pinned ? withSessionWorkClosed(next, now) : next
-    }, runtimeKeyAtClick)
+    const closesWork = pinned && await closesWorkOnPin(getGlobalSessionSnapshot(sessionId))
+    if (isStaleRuntime(runtimeKeyAtClick)) return null
+    return await patchSessionMetadata(sessionId, directory, (metadata) =>
+      withSessionPinChange(metadata, { pinned, list, closesWork, now: Date.now() }), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
@@ -1799,6 +1801,7 @@ export async function optimisticSend(input: {
   appendSubmissions?: () => void
   onOptimisticInsert?: (messageID: string) => void
   markBusy?: boolean
+  steer?: boolean
   send: (messageID: string, context: SyntheticContextInput[], commitRevert?: () => Promise<void>) => Promise<void>
 }): Promise<void> {
   if (!_optimisticAdd || !_optimisticRemove) {
@@ -1824,6 +1827,7 @@ export async function optimisticSend(input: {
   const targetDirectory = input.directory ?? dir()
   const store = targetDirectory ? dirStoreForDirectory(targetDirectory) : dirStore()
   const stateBeforeSend = store.getState()
+  const markedBusyFromIdle = shouldMarkBusyFromIdle(stateBeforeSend.session_status[input.sessionId], input.markBusy)
   const sessionBeforeSend = stateBeforeSend.session.find((session) => session.id === input.sessionId)
   const revertMessageID = sessionBeforeSend?.revert?.messageID
   const messagesBeforeSend = stateBeforeSend.message[input.sessionId] ?? []
@@ -1859,9 +1863,9 @@ export async function optimisticSend(input: {
   const messageID = ascendingId("msg")
   const optimisticIDs = [...context.map((item) => item.id), messageID]
 
-  const optimisticParts: Part[] = [
-    { id: partIds.userText(messageID), sessionID: input.sessionId, messageID, type: "text", text: input.content },
-  ]
+  const optimisticParts: Part[] = input.content.length > 0
+    ? [{ id: partIds.userText(messageID), sessionID: input.sessionId, messageID, type: "text", text: input.content }]
+    : []
   if (input.files) {
     input.files.forEach((file, index) => {
       optimisticParts.push({
@@ -1877,12 +1881,7 @@ export async function optimisticSend(input: {
   }
 
   const created = Date.now()
-  const optimisticMessage: UserMessage = {
-    id: messageID,
-    role: "user",
-    sessionID: input.sessionId,
-    time: { created },
-  }
+  const optimisticMessage: UserMessage = createOptimisticUserMessage(input.sessionId, messageID, created, input.steer)
 
   const addSyntheticContext = (item: SyntheticContextInput & { id: string }) => {
     const synthetic: SyntheticMessage = compact({
@@ -1905,7 +1904,7 @@ export async function optimisticSend(input: {
   })
   input.onOptimisticInsert?.(messageID)
 
-  if (input.markBusy !== false) markSessionStatus(input.sessionId, targetDirectory, "busy")
+  if (markedBusyFromIdle) markSessionStatus(input.sessionId, targetDirectory, "busy")
 
   let revertCommitSent = false
   let revertCommitted = false
@@ -1917,13 +1916,15 @@ export async function optimisticSend(input: {
       }
     : undefined
 
-  const releasePrompt = trackPromptInFlight(input.sessionId)
+  const releasePrompt = trackPromptInFlight(input.sessionId, markedBusyFromIdle)
   let requestSent = false
   try {
     await input.ready
     assertRuntimeUnchanged()
     requestSent = true
     await input.send(messageID, context, commitRevert)
+    for (const id of optimisticIDs) _optimisticAdmit?.({ sessionID: input.sessionId, directory: targetDirectory, messageID: id })
+    releasePrompt(true)
   } catch (error) {
     const status = getErrorStatus(error)
     const ambiguousFailure = requestSent && isAmbiguousSendFailure(error)
@@ -1933,13 +1934,8 @@ export async function optimisticSend(input: {
 
     if (acceptedRecords) {
       materializeConfirmedSendRecords(store, input.sessionId, optimisticIDs, acceptedRecords)
-      for (const optimisticID of optimisticIDs) {
-        optimisticConfirm?.({
-          sessionID: input.sessionId,
-          directory: targetDirectory,
-          messageID: optimisticID,
-        })
-      }
+      for (const id of optimisticIDs) optimisticConfirm?.({ sessionID: input.sessionId, directory: targetDirectory, messageID: id })
+      releasePrompt(true)
       return
     }
 
@@ -1988,15 +1984,10 @@ export async function optimisticSend(input: {
       }
     }
 
-    rollbackStore.setState({
-      session,
-      message,
-      part,
-      session_status: {
-        ...rollbackState.session_status,
-        [input.sessionId]: { type: "idle" as const },
-      },
-    })
+    const restoreIdle = releasePrompt(false)
+    rollbackStore.setState(createOptimisticRollbackPatch(
+      rollbackState.session_status, input.sessionId, session, message, part, restoreIdle,
+    ))
     throw error
   } finally {
     releasePrompt()
@@ -2172,7 +2163,7 @@ function resolveFormSelection(record: Session | undefined, sessionId: string): F
     const config = useConfigStore.getState()
     return {
       agent: agentPick ?? config.currentAgentName ?? undefined,
-      model: config.currentProviderId && config.currentModelId
+      model: config.currentProviderId && config.currentModelId && (agentPick || isSessionModelChosen(sessionId, config.currentProviderId, config.currentModelId))
         ? {
             providerID: config.currentProviderId,
             modelID: config.currentModelId,
@@ -2343,7 +2334,7 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
         userInitiated: true,
         queuedGoal: null,
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
-        metadata: deferred ? deferredAnswerMetadata(question.form.id) : undefined,
+        metadata: deferred ? deferredAnswerMetadata(question.form.id) : undefined, keepSessionModel: true,
       },
     )
     if (isCurrentRuntime()) noteLocalFormReplied(question.sessionID, question.form.id)
@@ -2493,7 +2484,7 @@ export async function deferQuestionsAfterSend(forms: readonly FormRequest[], sen
 }
 
 
-function runRevertOperation(sessionId: string, action: () => Promise<void>, includeDescendants = true): Promise<void> {
+export function runRevertOperation<T>(sessionId: string, action: () => Promise<T>, includeDescendants = true): Promise<T> {
   revertRevision += 1
   const descendants = includeDescendants ? getDescendantSessions(sessionId) : []
   const sessionIds = [sessionId, ...descendants.map(({ session }) => session.id)]
@@ -2505,7 +2496,7 @@ function runRevertOperation(sessionId: string, action: () => Promise<void>, incl
     const failed = results.find((result) => result.status === "rejected")
     if (failed?.status === "rejected") throw failed.reason
     if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
-    await action()
+    return action()
   })
   const tracked = operation.finally(() => {
     for (const key of keys) {
@@ -2517,16 +2508,16 @@ function runRevertOperation(sessionId: string, action: () => Promise<void>, incl
   return tracked
 }
 
-export function revertToMessage(sessionId: string, messageId: string, options?: { refresh?: boolean }): Promise<void> {
+export function revertToMessage(sessionId: string, messageId: string, options?: { refresh?: boolean }): Promise<NonNullable<Session["revert"]>> {
   return runRevertOperation(sessionId, async () => {
     const isCurrentRuntime = captureRuntimeInstance()
     if (options?.refresh) await refetchSessionMessages(sessionId)
     if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
-    await stageRevertToMessage(sessionId, messageId)
+    return stageRevertToMessage(sessionId, messageId)
   })
 }
 
-async function stageRevertToMessage(sessionId: string, messageId: string): Promise<void> {
+async function stageRevertToMessage(sessionId: string, messageId: string): Promise<NonNullable<Session["revert"]>> {
   const isCurrentRuntime = captureRuntimeInstance()
   const assertRuntime = () => {
     if (!isCurrentRuntime()) throw new Error("Runtime changed while staging the revert.")
@@ -2598,9 +2589,8 @@ async function stageRevertToMessage(sessionId: string, messageId: string): Promi
 
   try {
     await cascadeRevertToDescendants(getDescendantSessions(sessionId), descendantRevertCutoff(state, targetMessage), assertRuntime)
-    const revertedSession = await stageAndReadRevert(sessionId, revertMessageID, directory, assertRuntime)
-    const current = store.getState()
-    const updated = [...current.session]
+    const { session: revertedSession, staged } = await stageAndReadRevert(sessionId, revertMessageID, directory, assertRuntime)
+    const updated = [...store.getState().session]
     const idx = updated.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
       updated[idx] = revertedSession
@@ -2610,6 +2600,7 @@ async function stageRevertToMessage(sessionId: string, messageId: string): Promi
       sessionEvents.requestGitRefresh({ directory })
       fileTreeChanges.unknownChange(directory)
     }
+    return staged
   } catch (err) {
     if (!isCurrentRuntime()) throw err
     const current = store.getState()

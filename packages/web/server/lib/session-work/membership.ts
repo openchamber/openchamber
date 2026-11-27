@@ -29,16 +29,16 @@ export const createWorkMembership = ({ chatRoots = [] }: { chatRoots?: string[] 
     && !isChatDirectory(sessionDirectory(session))
     && !notWorkSessionSchema.safeParse(session.metadata).success;
 
-  const isInWork = (session: WorkSession | null | undefined) => !!session
+  const isInWork = (session: WorkSession | null | undefined, pinnedInWork: boolean) => !!session
     && !sessionParentId(session)
     && !session.time?.archived
     && !isChatDirectory(sessionDirectory(session))
-    && !isPinnedMetadata(session.metadata)
+    && (pinnedInWork || !isPinnedMetadata(session.metadata))
     && readWork(session.metadata)?.state === 'open';
 
-  const isDoneSuggested = (session: WorkSession | null | undefined) => {
+  const isDoneSuggested = (session: WorkSession | null | undefined, pinnedInWork: boolean) => {
     const suggestedAt = readWork(session?.metadata)?.suggestDoneAt;
-    return isInWork(session) && suggestedAt !== undefined && suggestedAt >= (session?.time?.idle ?? 0);
+    return isInWork(session, pinnedInWork) && suggestedAt !== undefined && suggestedAt >= (session?.time?.idle ?? 0);
   };
 
   return { isChatDirectory, canBeInWork, isInWork, isDoneSuggested };

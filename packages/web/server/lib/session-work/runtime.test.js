@@ -65,7 +65,7 @@ const makeRuntime = ({
   const runtime = createSessionWorkRuntime({
     buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
     getOpenCodeAuthHeaders: () => ({}),
-    getSettings: () => ({ enabled: true, reviewOffer: true, ...settings }),
+    getSettings: () => ({ enabled: true, pinnedInWork: false, reviewOffer: true, ...settings }),
     classifierEndpoint: async () => endpoint,
     jev,
     readMetadata,
@@ -144,6 +144,16 @@ describe('session work runtime: a message was sent', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(isWorktreePinned).toHaveBeenCalledWith('/repo-wt');
     expect(inPinnedWorktree.updateMetadata).not.toHaveBeenCalled();
+  });
+
+  it('opens a pinned session in a pinned worktree while pinned ones may be in work', async () => {
+    stubOpenCode({ session: { location: { directory: '/repo-wt' } } });
+    const { runtime, records, written } = makeRuntime({
+      metadata: { openchamber: { pinned: { at: 1 } } }, settings: { pinnedInWork: true }, isWorktreePinned: async () => true,
+    });
+    runtime.processPayload(sent());
+    await written;
+    expect(records.get('ses_1')).toMatchObject({ openchamber: { pinned: { at: 1 }, work: { state: 'open', openedBy: 'auto' } } });
   });
 
   it('opens the session on a message with only an attachment or attached context', async () => {

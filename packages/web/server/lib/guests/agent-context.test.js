@@ -1,11 +1,15 @@
+import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { createGuestAgentContext, describeExtensionBlocks } from './agent-context.js';
 
+const packageRoot = path.resolve('/pkg');
+const pluginRoot = path.join(packageRoot, 'plugin');
+
 const row = (overrides = {}) => ({
   id: 'desk',
   name: 'Desk',
-  packageRoot: '/pkg',
+  packageRoot,
   enabled: true,
   instructions: true,
   service: { entry: 'service/main.js', runtime: 'host' },
@@ -16,15 +20,15 @@ const row = (overrides = {}) => ({
   ...overrides,
 });
 
-// A package at /pkg whose plugin folder resolves; `/pkg/plugin` is a real directory with an entry.
+// The fixture package's plugin folder resolves to a directory with an entry.
 const fakeFs = {
   realpath: async (target) => {
-    if (target === '/pkg' || target.startsWith('/pkg/')) return target;
+    if (target === packageRoot || target.startsWith(packageRoot + path.sep)) return target;
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   },
-  stat: async (target) => ({ isDirectory: () => target === '/pkg/plugin', isFile: () => target === '/pkg/plugin/index.js' }),
+  stat: async (target) => ({ isDirectory: () => target === pluginRoot, isFile: () => target === path.join(pluginRoot, 'index.js') }),
   readFile: async (target) => {
-    if (target === '/pkg/plugin/package.json') return JSON.stringify({ name: 'p', type: 'module', main: 'index.js' });
+    if (target === path.join(pluginRoot, 'package.json')) return JSON.stringify({ name: 'p', type: 'module', main: 'index.js' });
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   },
 };
@@ -65,7 +69,7 @@ describe('what extensions add to agents', () => {
   });
 
   test('the plugin folder is listed only for an active extension holding its grant, and only while it resolves', async () => {
-    expect(await context([row()]).pluginDirectories()).toEqual(['/pkg/plugin']);
+    expect(await context([row()]).pluginDirectories()).toEqual([pluginRoot]);
     // Needs approval: a requested grant is missing.
     expect(await context([row({ capabilityGrants: ['service', 'instructions', 'skills'] })]).pluginDirectories()).toEqual([]);
     // Enterprise mode stripped the grant from the row and marked it.
@@ -83,7 +87,7 @@ describe('what extensions add to agents', () => {
     const guests = [row()];
     const built = context(guests, [{ guestId: 'desk', text: 'read the wiki' }]);
     expect(await built.instructionText('/repo')).toContain('From the extension Desk:\nread the wiki');
-    expect(await built.skillDirectories()).toEqual(['/pkg/skills']);
+    expect(await built.skillDirectories()).toEqual([path.join(packageRoot, 'skills')]);
   });
 
   test('a catalog that cannot be read keeps what the session holds, and gives no skills or plugins', async () => {

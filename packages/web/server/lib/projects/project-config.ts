@@ -1,3 +1,5 @@
+import { MAX_BRANCH_LENGTH, clampLength, hasStateFields, normalizeState } from './scheduled-task-state.js';
+import { whileReachable } from '../directory-reachability/while-reachable.js';
 import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { z } from 'zod';
@@ -9,7 +11,7 @@ import type { PlatformPath } from 'node:path';
 import type { JsonObject, JsonValue } from '../magic-prompts/runtime.js';
 import type { StorageSwitch } from '../project-context/contracts.js';
 import type { DiscoveredLoop, LoopDefinition } from '../scheduled-tasks/loops.js';
-import type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskInput, ScheduledTaskSchedule, ScheduledTaskState, ScheduledTaskStatePatch, ScheduledTaskStatus, ScheduledWorktreeCleanup, SharedProjectDocument, SharedProjectRead } from './contracts.js';
+import type { ScheduledTask, ScheduledTaskExecution, ScheduledTaskInput, ScheduledTaskSchedule, ScheduledTaskState, ScheduledTaskStatePatch, ScheduledWorktreeCleanup, SharedProjectDocument, SharedProjectRead } from './contracts.js';
 
 import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
 import { MAX_TASK_NAME_LENGTH, MAX_TASK_PROMPT_LENGTH, assertTaskTextWithinLimits } from './task-text-limits.js';
@@ -32,8 +34,6 @@ import {
 
 const PROJECT_CONFIG_VERSION = 1;
 const MAX_CRON_LENGTH = 200;
-const MAX_BRANCH_LENGTH = 200;
-const MAX_LAST_ERROR_LENGTH = 2_000;
 const worktreeCleanupSchema = z.object({
   projectID: z.string().regex(/^[a-zA-Z0-9._:-]+$/),
   projectDirectory: z.string().min(1),
@@ -84,7 +84,6 @@ const hasScheduleFields = (value: unknown): value is TaskScheduleSource & { kind
 const hasExecutionFields = (value: unknown): value is { prompt?: unknown; providerID?: unknown; modelID?: unknown; variant?: unknown; agent?: unknown; goalEnabled?: unknown; permissionAutoAccept?: unknown; useDefaults?: unknown; goalTokenBudget?: unknown } =>
   Boolean(value) && typeof value === 'object';
 const hasTaskFields = (value: unknown): value is ScheduledTaskInput => Boolean(value) && typeof value === 'object';
-const hasStateFields = (value: unknown): value is ScheduledTaskStatePatch => Boolean(value) && typeof value === 'object';
 const hasObjectErrorFields = (value: unknown): value is { code?: unknown } => Boolean(value) && typeof value === 'object';
 const hasReadableErrorFields = (value: unknown): value is { code?: unknown; message?: unknown } => value !== null && value !== undefined;
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -99,13 +98,6 @@ const hasRandomUUID = (value: Crypto | undefined): value is Crypto =>
 const hasLoopDefinition = (loop: DiscoveredLoop): loop is ResolvedLoop =>
   Boolean(loop.definition) && typeof loop.definition === 'object';
 const cleanupSessionIDOf = (value: JsonValue) => isJsonObject(value) ? value.sessionID : undefined;
-
-const clampLength = (value: string, maxLength: number) => {
-  return value.length > maxLength ? value.slice(0, maxLength) : value;
-};
-
-const isTaskStatus = (value: unknown): value is ScheduledTaskStatus =>
-  value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled';
 
 const normalizeTimeValue = (time: string | null) => {
   if (!time) {
@@ -315,47 +307,6 @@ const normalizeExecution = (value: ScheduledTaskInput['execution'], targetSessio
   if (goalEnabled && goalTokenBudget) execution.goalTokenBudget = goalTokenBudget;
   if (permissionAutoAccept) execution.permissionAutoAccept = true;
   return execution;
-};
-
-const normalizeState = (value: ScheduledTaskInput['state'], fallback: ScheduledTaskState | undefined): ScheduledTaskState => {
-  const source = hasStateFields(value) ? value : fallback || {};
-  const lastRunAt = isFiniteNumber(source.lastRunAt)
-    ? Math.max(0, Math.round(source.lastRunAt))
-    : undefined;
-  const lastDurationMs = isFiniteNumber(source.lastDurationMs)
-    ? Math.max(0, Math.round(source.lastDurationMs))
-    : undefined;
-  const nextRunAt = isFiniteNumber(source.nextRunAt)
-    ? Math.max(0, Math.round(source.nextRunAt))
-    : undefined;
-  const lastScheduledFor = isFiniteNumber(source.lastScheduledFor)
-    ? Math.max(0, Math.round(source.lastScheduledFor))
-    : undefined;
-  const lastSessionId = asNonEmptyString(source.lastSessionId);
-  const lastErrorRaw = asNonEmptyString(source.lastError);
-  const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
-  const lastRunIsolated = source.lastRunIsolated === true;
-  const lastRunBranchRaw = asNonEmptyString(source.lastRunBranch);
-  const lastRunBranch = lastRunBranchRaw ? clampLength(lastRunBranchRaw, MAX_BRANCH_LENGTH) : undefined;
-
-  const state: ScheduledTaskState = {
-    createdAt: isFiniteNumber(source.createdAt)
-      ? Math.max(0, Math.round(source.createdAt))
-      : Date.now(),
-    updatedAt: isFiniteNumber(source.updatedAt)
-      ? Math.max(0, Math.round(source.updatedAt))
-      : Date.now(),
-    lastStatus: isTaskStatus(source.lastStatus) ? source.lastStatus : 'idle',
-  };
-  if (lastRunAt !== undefined) state.lastRunAt = lastRunAt;
-  if (lastDurationMs !== undefined) state.lastDurationMs = lastDurationMs;
-  if (nextRunAt !== undefined) state.nextRunAt = nextRunAt;
-  if (lastScheduledFor !== undefined) state.lastScheduledFor = lastScheduledFor;
-  if (lastSessionId) state.lastSessionId = lastSessionId;
-  if (lastError) state.lastError = lastError;
-  state.lastRunIsolated = lastRunIsolated || undefined;
-  state.lastRunBranch = lastRunBranch;
-  return state;
 };
 
 const normalizeTaskForStorage = (value: JsonValue | ScheduledTaskInput, options: NormalizeTaskOptions): ScheduledTask => {
@@ -731,6 +682,7 @@ export const createProjectConfigRuntime = (deps: ProjectConfigDependencies) => {
         existingTask,
         allowCreate: true,
       });
+      normalizedTask.state.waitingForFolder = existingTask?.state.waitingForFolder;
 
       const nextTasks = current.scheduledTasks.slice();
       const created = !existingTask;
@@ -1005,24 +957,22 @@ export const createProjectConfigRuntime = (deps: ProjectConfigDependencies) => {
   const readSharedProjectFile = async (projectPath: string): Promise<SharedProjectRead<JsonObject>> => {
     let raw;
     try {
-      raw = await fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8');
+      raw = await whileReachable(projectPath, () => fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8'));
     } catch (error) {
       if (hasObjectErrorFields(error) && error.code === 'ENOENT') return { status: 'missing' };
-      return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
+      return { status: 'invalid', unread: true, reason: error instanceof Error ? error.message : String(error) };
     }
     return parseSharedProjectConfig(raw);
   };
 
   const readSharedProjectConfig = async (projectID: string | undefined, personalRaw: SharedProjectDocument): Promise<SharedProjectRead<JsonObject>> => {
     const projectPath = projectPathOf(projectID, personalRaw);
-    if (!projectPath) return { status: 'missing' };
-    return readSharedProjectFile(projectPath);
+    return projectPath ? readSharedProjectFile(projectPath) : { status: 'missing' };
   };
 
   const assertProjectCheckout = async (projectPath: string) => {
-    if (!projectPath) throw new Error('project checkout not found');
     try {
-      if (!(await fsPromises.stat(projectPath)).isDirectory()) throw new Error('project checkout not found');
+      if (!projectPath || !(await whileReachable(projectPath, () => fsPromises.stat(projectPath))).isDirectory()) throw new Error('project checkout not found');
     } catch {
       throw new Error('project checkout not found');
     }
@@ -1176,6 +1126,7 @@ export const createProjectConfigRuntime = (deps: ProjectConfigDependencies) => {
       const projectPath = projectPathOf(projectID, personalRaw);
       await assertProjectCheckout(projectPath);
       const currentRead = await readSharedProjectConfig(projectID, personalRaw);
+      if (currentRead.status === 'invalid' && currentRead.unread) throw new Error(currentRead.reason);
       const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
       const document = currentRead.document ?? {};
       const next = applySharedProjectSetupPatch(current, patch);

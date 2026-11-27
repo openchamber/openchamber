@@ -52,6 +52,42 @@ export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra 
   return `frame-ancestors ${sources.join(' ')}`;
 };
 
+const CLIENT_CORS_ORIGINS = ['openchamber-ui://app', 'capacitor://localhost', 'http://localhost', 'https://localhost'];
+const HEADER_REFLECTING_ORIGINS = new Set(['openchamber-ui://app']);
+const CLIENT_CORS_ALLOW_HEADERS = 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,CF-Access-Client-Id,CF-Access-Client-Secret,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells';
+// external: https://www.rfc-editor.org/rfc/rfc9110#section-5.6.2 field names are tokens; list separators allow only space or tab around the comma.
+const HTTP_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+const CORS_WILDCARD = '*';
+
+const parseRequestedHeaderNames = (value: string | string[] | undefined): string | null => {
+  if (!isString(value)) return null;
+  const names = value.split(',').map((name) => name.replace(/^[ \t]+|[ \t]+$/g, ''));
+  if (!names.every((name) => HTTP_TOKEN.test(name) && name !== CORS_WILDCARD)) return null;
+  return names.join(', ');
+};
+
+export const resolveClientCorsHeaders = (
+  req: Pick<SecurityRequest, 'headers'>,
+  { allowLocalDevOrigins = false }: { allowLocalDevOrigins?: boolean } = {},
+): Record<string, string> | null => {
+  const origin = isString(req.headers.origin) ? req.headers.origin : '';
+  if (!CLIENT_CORS_ORIGINS.includes(origin) && !(allowLocalDevOrigins && isLocalDevClientOrigin(origin))) return null;
+  const reflected = HEADER_REFLECTING_ORIGINS.has(origin)
+    ? parseRequestedHeaderNames(req.headers['access-control-request-headers'])
+    : null;
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': reflected ?? CLIENT_CORS_ALLOW_HEADERS,
+    'Access-Control-Expose-Headers': 'x-next-cursor,x-openchamber-error',
+    // external: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age Chromium caps the preflight cache lifetime at 2 hours.
+    'Access-Control-Max-Age': '7200',
+    Vary: 'Origin, Access-Control-Request-Headers',
+  };
+};
+
 export const isPasswordlessSocketOriginAllowed = async (req: SecurityRequest, isRequestOriginAllowed: RequestOriginChecker) => {
   const header = req?.headers?.origin;
   const origin = String((Array.isArray(header) ? header[0] : header) ?? '').trim();

@@ -105,6 +105,10 @@ and its entry in `/api/model`: a configured `cache.ttl` gives the lifetime,
 and the ping goes at 90% of it, the share OpenCode's own `interval: "auto"`
 uses. Claude Agent on a subscription, which OpenCode lists without a price,
 gets an hour, because Claude Code caches a subscriber's SDK requests that long.
+A price the user's OpenCode config sets for a Claude Agent model, to see
+spending, replaces the listed one, so it counts as no price. OpenCode already
+prices a login billed by key, so a configured price almost always comes from a
+subscriber; a key login that sets one anyway gets the hour too.
 That hour is Claude Code's own choice and OpenCode does not report it, so a
 subscriber on extra usage, which Claude Code drops to 5 minutes, loses the
 warming between pings; a gateway with a custom base URL also lists no price.

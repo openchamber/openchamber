@@ -298,6 +298,9 @@
     "sttEndpointPath": {
       "scope": "instance"
     },
+    "sttKeyProvider": {
+      "scope": "instance"
+    },
     "sttModel": {
       "scope": "instance"
     },
@@ -375,6 +378,9 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sessionWorkIncludesPinned": {
+      "scope": "profile"
+    },
     "sidebarSessionBatchSize": {
       "scope": "profile"
     },
@@ -394,6 +400,10 @@
       "perSurface": true
     },
     "sidebarDetailedZoneRows": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarShowSubagentSessions": {
       "scope": "profile",
       "perSurface": true
     },
@@ -484,6 +494,9 @@
     "showToolFileIcons": {
       "scope": "profile"
     },
+    "showLiveActivityPreview": {
+      "scope": "profile"
+    },
     "codeBlockLineWrap": {
       "scope": "profile"
     },
@@ -494,6 +507,9 @@
       "scope": "profile"
     },
     "selectionApprovalText": {
+      "scope": "profile"
+    },
+    "keepEarlierReplies": {
       "scope": "profile"
     },
     "showTurnChangedFiles": {
@@ -518,6 +534,12 @@
       "scope": "profile"
     },
     "diffHideWhitespace": {
+      "scope": "profile"
+    },
+    "referencePreviewNewestFirst": {
+      "scope": "profile"
+    },
+    "referencePreviewCollapseDescription": {
       "scope": "profile"
     },
     "gitChangesViewMode": {
@@ -645,6 +667,9 @@
       "scope": "profile"
     },
     "savePastedImagesAsFiles": {
+      "scope": "profile"
+    },
+    "keepModelOnAgentSwitch": {
       "scope": "profile"
     },
     "followUpBehavior": {
@@ -836,6 +861,15 @@
     "sessionGoalDefaultBudget": {
       "scope": "profile"
     },
+    "sessionCostAlertsEnabled": {
+      "scope": "profile"
+    },
+    "sessionCostWarnThreshold": {
+      "scope": "profile"
+    },
+    "sessionCostCriticalThreshold": {
+      "scope": "profile"
+    },
     "summarizeLastMessage": {
       "scope": "profile"
     },
@@ -1009,6 +1043,14 @@
       "local": true
     },
     "contextEditorTreeWidth": {
+      "scope": "device",
+      "local": true
+    },
+    "gitSidebarWidth": {
+      "scope": "device",
+      "local": true
+    },
+    "lastGitPanelScope": {
       "scope": "device",
       "local": true
     },

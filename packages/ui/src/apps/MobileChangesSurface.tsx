@@ -28,7 +28,7 @@ import { RepositoryConfigurationDialog } from '@/components/sections/openchamber
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { applyIdentityToRepository, identityApplicability } from '@/lib/source-control/applyIdentity';
-import { instanceSshHostsFrom, remoteTraits,
+import { instanceSshHostsFrom, repositoryRemoteTraits,
   selectableIdentities,
   identityDisplayName,
   identityAccountConnected,
@@ -38,10 +38,11 @@ import { useConnectedAccountIds, useSourceControlAuthStore } from '@/stores/useS
 import type { GitIdentityProfile } from '@/lib/api/types';
 import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
-import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
+import { type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
 import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
 import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { readDirectoryStatus, useMobileChangedFileOpen } from '@/hooks/useMobileChangedFileOpen';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { hasConfigChangedGrant } from '@/lib/source-control/types';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -51,7 +52,9 @@ import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
 import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
-import { useCommitComparison } from '@/hooks/useCommitComparison';
+import { useMobileChangesCommentNavigation } from '@/hooks/useMobileChangesCommentNavigation';
+import { useCommentJumpComparison } from '@/hooks/useReviewScopeCommentJump';
+import { useRequestedCommitComparison } from '@/hooks/useRequestedCommitComparison';
 import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { PullRequestComparisonSelector } from '@/components/views/git/PullRequestComparisonSelector';
 import { ChangeRequestDiffUnavailable } from '@/components/views/git/ChangeRequestDiffUnavailable';
@@ -64,20 +67,17 @@ import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { cn } from '@/lib/utils';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
-import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
-import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
+import { parseDiffFromFile } from '@pierre/diffs';
+import type { GitStatus } from '@/lib/api/types';
 import { GitPathUnavailableError } from '@/lib/api/git-path-diff';
-import { SubmoduleDiffSummary } from '@/components/views/SubmoduleDiffSummary';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { useI18n } from '@/lib/i18n';
 import { generateCommitMessage, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from '@/lib/gitApi';
 import type { GitRemote } from '@/lib/gitApi';
-import { getLanguageFromExtension, isImageFile, isOfficePreviewFile } from '@/lib/toolHelpers';
+import { isOfficePreviewFile } from '@/lib/toolHelpers';
 import { isDocumentVersions } from '@/components/views/files/documentVersions';
-import { OfficeDocumentDiff } from '@/components/views/files/OfficeDocumentDiff';
-import { diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
-import { useWholeFileComment } from '@/components/comments';
+import { diffCommentOriginFromSource } from '@/lib/diffCommentOrigin';
 import {
   useGitStore,
   useGitIdentity,
@@ -100,28 +100,16 @@ import { settleGitFileReverts } from './mobileChangesOperations';
 import { commitAndSwitchBranch } from './mobileDirtySwitch';
 import { useCommitCelebration } from '@/components/views/git/useCommitCelebration';
 import { LIST_ROUTE, useMobileChangesNavigation, type MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
-import { useGitCleanLine } from '@/components/views/git/useGitCleanLine';
 import { normalizePath } from '@/lib/pathNormalization';
 import { commitRequestRepository, commitRequestShown, type MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import { findFileRepository } from '@/lib/nestedRepositories';
-import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { isFilePathWithinDirectory, isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
+import { MobileChangesState, MobileCleanState, MobileDiffDetail, type ComparisonDiff, type MobileDiffData } from './MobileDiffDetail';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
-interface MobileDiffData {
-  original: string;
-  modified: string;
-  isBinary?: boolean;
-  fileDiff?: FileDiffMetadata;
-  submodule?: GitSubmoduleState | null;
-}
-type ComparisonDiff =
-  | { status: 'loading' }
-  | { status: 'ready'; diff: MobileDiffData }
-  | { status: 'error'; message: string };
 const LOADING_COMPARISON_DIFF: ComparisonDiff = { status: 'loading' };
 const FULL_CONTEXT_DIFF_LINES = 1_000_000;
 
@@ -152,6 +140,7 @@ type MobileChangesSurfaceProps = {
   initialDiff?: MobileChangesInitialDiff | null;
   initialCommit?: MobileChangesCommitRequest | null;
   visible?: boolean;
+  closing?: boolean;
   onNavigatedToChat?: () => void;
 };
 
@@ -181,7 +170,7 @@ interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
   repository: ReturnType<typeof useNestedGitDirectory>;
 }
 
-export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, initialCommit, visible = true, onNavigatedToChat }) => {
+export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, initialCommit, visible = true, closing = false, onNavigatedToChat }) => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
   const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = repository;
@@ -241,9 +230,21 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const runtimeKey = useGitStore((state) => state.runtimeKey);
   const ownerKey = JSON.stringify([runtimeKey, currentDirectory]);
   const {
-    navigation, setNavigation, turnFileRequest, setTurnFileRequest, mode, route,
+    navigation, setNavigation, turnFileRequest, setTurnFileRequest, showWorkingList, mode, route,
     modeMenuOpen, setModeMenuOpen, changeMode, setRoute, turnFileStatusReadRef,
-  } = useMobileChangesNavigation({ ownerKey, initialDiff, visible });
+  } = useMobileChangesNavigation({ ownerKey, initialDiff, visible: visible && !closing });
+  useMobileChangedFileOpen({ request: turnFileRequest, rootDirectory, setRequest: setTurnFileRequest, showWorkingList });
+
+  const currentBranch = status?.current ?? null;
+  const commentJump = useCommentJumpComparison({ takeFrom: rootDirectory, visible, scope: mode, directory: currentDirectory, branch: currentBranch });
+  const {
+    commitComparison, selectedCommitHash, chooseCommit,
+  } = useRequestedCommitComparison({
+    directory: currentDirectory || null,
+    branch: currentBranch,
+    enabled: visible && mode === 'commit' && isGitRepo === true,
+    requestedHash: commentJump.commitHash,
+  });
 
   React.useEffect(() => {
     if (!initialCommit || takenCommitRequests.has(initialCommit) || !commitRequestShown(currentDirectory, initialCommit)) return;
@@ -278,11 +279,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     setConflictDialogOpen(true);
   }, []);
 
-  const currentBranch = status?.current ?? null;
   const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
   const clearBaseOverride = useGitBaseBranchStore((state) => state.clearOverride);
-  const commitComparison = useCommitComparison(currentDirectory || null, currentBranch, visible && mode === 'commit' && isGitRepo === true);
-  const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
   const binding = useRepositoryBinding(currentDirectory || null, sourceControl);
   const remoteNames = React.useMemo(
     () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
@@ -290,7 +288,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   );
   const branchComparison = useBranchComparisonBase(currentDirectory || null, currentBranch, visible && isGitRepo === true, {
     branches, remoteNames, primaryRemote: binding.contexts[0]?.primaryRemote, readContext: binding.contexts[0] ?? null,
-  });
+  }, commentJump.branchBase);
   const asksBranchPullRequest = visible && isGitRepo === true;
   useBranchPullRequestRequest(asksBranchPullRequest ? currentDirectory || null : null, asksBranchPullRequest ? currentBranch : null, binding);
   const showBranchOption = isBranchScopeAvailable(currentBranch, branchComparison.base);
@@ -354,13 +352,24 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const comparisonRevision = mode === 'branch' ? branchComparison.revision : '';
   const selectedPrHead = selectedPr ? prComparison.prs.find((pr) => pr.number === selectedPr.number)?.headSha : undefined;
   const commentOrigin = React.useMemo(
-    () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
-    [comparisonSource, prComparison.provider, selectedPrHead],
+    () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }, currentDirectory),
+    [comparisonSource, currentDirectory, prComparison.provider, selectedPrHead],
   );
   const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, currentDirectory, visible && mode === 'pr');
   const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision, prComparison.readContext, prComparison.provider);
   const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile, fetchVersions: loadComparisonVersions } = comparison;
   const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
+  const openCommentFile = React.useCallback((path: string, sourceKey: string) => {
+    setRoute({ type: 'comparison', path, sourceKey });
+  }, [setRoute]);
+  const {
+    commentTarget, commentFullContextPath, unavailablePath: commentUnavailablePath, onTargetReached: onCommentTargetDone, clearCommentTargets,
+  } = useMobileChangesCommentNavigation({
+    jump: commentJump.jump, done: commentJump.done, leave: commentJump.leave, ownerKey, currentDirectory, mode, branch: currentBranch,
+    branchBaseMissing: branchComparison.shownBaseMissing,
+    comparisonKey: comparison.key, comparisonFiles: comparison.files, comparisonError: comparison.error,
+    commentOrigin, openComparison: changeMode, openComparisonFile: openCommentFile,
+  });
   const activeComparisonPath = route.type === 'comparison' && route.sourceKey === comparison.key ? route.path : null;
   const [comparisonRetry, setComparisonRetry] = React.useState(0);
   const fetchComparisonDiff = React.useCallback(async (path: string): Promise<ComparisonDiff> => {
@@ -396,7 +405,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const activeFullComparisonDiff = fullComparisonDiff && fullComparisonDiff.source === activeComparisonDiff ? fullComparisonDiff.diff : null;
   React.useEffect(() => {
     const source = activeComparisonDiff;
-    if (!pendingContextExpansion || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
+    const needsFullContext = pendingContextExpansion !== null || commentFullContextPath === activeComparisonPath;
+    if (!needsFullContext || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
     let cancelled = false;
     const path = activeComparisonPath;
     const loadFullDiff = async (): Promise<MobileDiffData> => {
@@ -405,7 +415,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         return { original, modified, fileDiff: parseDiffFromFile({ name: path, contents: original }, { name: path, contents: modified }) };
       }
       const { diff: patch } = await loadComparisonDiff(path, FULL_CONTEXT_DIFF_LINES);
-      return { original: '', modified: '', fileDiff: fileDiffFromPatch(path, patch) };
+      return { original: '', modified: '', fileDiff: fileDiffFromPatch(path, patch, { complete: true }) };
     };
     void (async () => {
       try {
@@ -420,7 +430,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return () => {
       cancelled = true;
     };
-  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
+  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, commentFullContextPath, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
 
   React.useEffect(() => {
     if (mode === 'branch' && branchUnavailable) changeMode('working');
@@ -464,7 +474,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           original: '',
           modified: '',
           isBinary,
-          fileDiff: isBinary ? undefined : fileDiffFromPatch(diff.file, diff.patch),
+          fileDiff: isBinary ? undefined : fileDiffFromPatch(diff.file, diff.patch, { complete: true }),
         });
         continue;
       }
@@ -483,14 +493,15 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }, [status?.files]);
 
   React.useEffect(() => {
-    if (!turnFileRequest || !visible) return;
+    if (!turnFileRequest || !visible || turnFileRequest.origin !== initialDiff) return;
     if (turnFileRequest.panelSessionId !== currentSessionId
       || (turnFileRequest.step === 'turn' && turnFileRequest.sessionId !== turnSessionId)
-      || route.type !== 'list' || mode !== (turnFileRequest.step === 'turn' ? 'turn' : 'working')) {
+      || route.type !== 'list' || (mode !== 'turn' && (turnFileRequest.step === 'turn' || mode !== 'working'))) {
       setTurnFileRequest(null);
       return;
     }
-    const file = toAbsoluteFilePath(turnFileRequest.directory || rootDirectory, turnFileRequest.file);
+    const sessionFolder = turnFileRequest.directory || rootDirectory;
+    const file = toAbsoluteFilePath(sessionFolder, turnFileRequest.file);
     if (turnFileRequest.step === 'turn') {
       if (!turnDiffSettled) return;
       const inTurn = closestRepoFile(file, turnDirectory, lastTurnDiffs.map((diff) => diff.file));
@@ -501,42 +512,37 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         return;
       }
       setTurnFileRequest({ ...turnFileRequest, step: 'changes' });
-      setNavigation({ ownerKey, mode: 'working', route: LIST_ROUTE });
       return;
     }
-    if (!repository.repositoriesKnown || !currentDirectory) return;
+    if (turnFileRequest.step === 'open' || !repository.repositoriesKnown || !currentDirectory) return;
     const holder = findFileRepository(file, [
       ...(rootIsGitRepo && rootDirectory ? [rootDirectory] : []),
       ...(repositoryOptions ?? []),
     ]);
+    if (!holder && rootIsGitRepo === false && nestedRepos === null) return showWorkingList();
     if (holder && holder !== currentDirectory) {
-      if (turnFileRequest.picked) {
-        setTurnFileRequest(null);
-        return;
-      }
+      if (turnFileRequest.picked) return showWorkingList();
       setTurnFileRequest({ ...turnFileRequest, picked: true });
       usePullRequestSelectionStore.getState().clearChangesRepository(rootDirectory);
       selectNestedRepo(rootDirectory, holder);
       return;
     }
     if (turnFileRequest.statusReadFor !== currentDirectory) {
-      if (turnFileStatusReadRef.current === currentDirectory) return;
-      turnFileStatusReadRef.current = currentDirectory;
-      void fetchStatus(currentDirectory, git, { silent: true }).finally(() => {
-        setTurnFileRequest((current) => current && { ...current, statusReadFor: currentDirectory });
+      const { origin } = turnFileRequest;
+      if (turnFileStatusReadRef.current?.origin === origin && turnFileStatusReadRef.current.directory === currentDirectory) return;
+      turnFileStatusReadRef.current = { origin, directory: currentDirectory };
+      void readDirectoryStatus(currentDirectory, git).then((read) => {
+        setTurnFileRequest((current) => current?.origin === origin ? { ...current, statusReadFor: currentDirectory, statusReadFailed: !read } : current);
       });
       return;
     }
-    setTurnFileRequest(null);
-    const listed = closestRepoFile(file, currentDirectory, changeEntries.map((candidate) => candidate.path));
+    const listed = turnFileRequest.statusReadFailed ? undefined : closestRepoFile(file, currentDirectory, changeEntries.map((candidate) => candidate.path));
     const entry = changeEntries.find((candidate) => candidate.path === listed);
-    if (!entry) return;
-    setNavigation({
-      ownerKey,
-      mode: 'working',
-      route: { type: 'diff', path: entry.path, staged: isStagedStatusFile(entry) && !isUnstagedStatusFile(entry) },
-    });
-  }, [changeEntries, currentDirectory, currentSessionId, turnDirectory, turnSessionId, fetchStatus, git, lastTurnDiffs, mode, ownerKey, repository.repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, route.type, selectNestedRepo, turnDiffSettled, turnFileRequest, visible]);
+    if (entry || turnFileRequest.statusReadFailed || !isFilePathWithinDirectory(file, sessionFolder)) {
+      showWorkingList();
+      if (entry) setNavigation({ ownerKey, mode: 'working', route: { type: 'diff', path: entry.path, staged: isStagedStatusFile(entry) && !isUnstagedStatusFile(entry) } });
+    } else setTurnFileRequest({ ...turnFileRequest, step: 'open' });
+  }, [changeEntries, currentDirectory, currentSessionId, turnDirectory, turnSessionId, git, initialDiff, lastTurnDiffs, mode, nestedRepos, ownerKey, repository.repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, route.type, selectNestedRepo, showWorkingList, turnDiffSettled, turnFileRequest, visible]);
 
   const walkthroughTarget = React.useMemo<WalkthroughTarget | null>(() => {
     if (mode === 'working') return changeEntries.length > 0 ? { source: { kind: 'working-tree', scope: 'all' } } : null;
@@ -1107,6 +1113,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }
 
   if (rootIsGitRepo === false && isGitRepo !== true) {
+    if (turnFileRequest && !turnDiffError) return renderListState(<MobileChangesState loading message={t('diffView.state.loadingChanges')} />);
     return renderListState(
       <NestedRepoResolutionStates
         root={rootDirectory}
@@ -1122,6 +1129,18 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   if (isLoadingStatus && isGitRepo === null) {
     return renderListState(<MobileChangesState loading message={t('gitView.loading.checkingRepository')} />);
+  }
+
+  if (commentUnavailablePath) {
+    return (
+      <MobileDiffDetail
+        path={commentUnavailablePath}
+        diff={null}
+        fileExists
+        unavailableReason="nested_repository"
+        onBack={clearCommentTargets}
+      />
+    );
   }
 
   if (route.type === 'diff') {
@@ -1181,7 +1200,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         diff={activeFullComparisonDiff ?? (activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null)}
         fileExists={!comparison.files || comparison.files.some((file) => file.path === activeComparisonPath)}
         error={comparison.error ?? (activeComparisonDiff.status === 'error' ? activeComparisonDiff.message : null)}
-        onBack={() => setRoute(LIST_ROUTE)}
+        targetLine={commentTarget && commentTarget.sourceKey === comparison.key && commentTarget.path === activeComparisonPath
+          ? { line: commentTarget.line, side: commentTarget.side, nonce: commentTarget.nonce }
+          : null}
+        onTargetReached={onCommentTargetDone}
+        onBack={() => { clearCommentTargets(); setRoute(LIST_ROUTE); }}
         onRetry={() => {
           if (comparison.error) void comparison.refresh();
           setComparisonRetry((value) => value + 1);
@@ -1287,14 +1310,14 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           <BranchComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
             branches={branches?.all ?? []} defaultBranches={branches?.defaultBranches} primaryRemote={binding.contexts[0]?.primaryRemote} currentBranch={currentBranch} base={branchComparison.base}
             automatic={branchComparison.source !== 'chosen'}
-            onSelect={(base) => { if (currentBranch) setBaseOverride(currentDirectory, currentBranch, base); }}
-            onSelectAutomatic={() => { if (currentBranch) clearBaseOverride(currentDirectory, currentBranch); }} />
+            onSelect={(base) => { commentJump.leave(); if (currentBranch) setBaseOverride(currentDirectory, currentBranch, base); }}
+            onSelectAutomatic={() => { commentJump.leave(); if (currentBranch) clearBaseOverride(currentDirectory, currentBranch); }} />
         )}
         {visible && mode === 'commit' && (
           <CommitComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
             commits={commitComparison.commits} selectedHash={selectedCommitHash}
             loading={commitComparison.loading} error={commitComparison.error}
-            onSelect={commitComparison.select} onRefresh={() => void commitComparison.refresh()} />
+            onSelect={(commit) => { commentJump.done(); chooseCommit(commit); }} onRefresh={() => void commitComparison.refresh()} />
         )}
         {visible && mode === 'pr' && <>
           <PullRequestComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])} comparison={prComparison} />
@@ -1366,7 +1389,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             onConfigure={() => setRepositoryConfigurationOpen(true)}
             applicability={(identity) => {
               const remote = binding.read?.repository.remotes.find((entry) => entry.name === bindingRemoteName);
-              return remote ? identityApplicability(identity, remoteTraits(remote.fetch.displayUrl), instanceSshHosts) : { applicable: true };
+              return remote ? identityApplicability(identity, repositoryRemoteTraits(remote), instanceSshHosts) : { applicable: true };
             }}
           />
           <GitPanelSyncActions
@@ -1499,159 +1522,3 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   );
 };
 
-const MobileChangesState: React.FC<{
-  message: string;
-  description?: string;
-  loading?: boolean;
-  icon?: boolean;
-}> = ({ message, description, loading = false, icon = false }) => (
-  <div className="flex h-full items-center justify-center px-6 text-center">
-    <div className="flex max-w-sm flex-col items-center gap-2">
-      {loading ? <Icon name="loader-4" className="size-5 animate-spin text-muted-foreground" /> : null}
-      {icon ? <Icon name="git-branch" className="size-6 text-muted-foreground" /> : null}
-      <p className="typography-ui-label font-semibold text-foreground">{message}</p>
-      {description ? <p className="typography-meta text-muted-foreground">{description}</p> : null}
-    </div>
-  </div>
-);
-
-const MobileCleanState: React.FC = () => {
-  const { t } = useI18n();
-  const description = useGitCleanLine(t('mobile.changes.cleanDescription'));
-  return <MobileChangesState icon message={t('gitView.empty.cleanTitle')} description={description} />;
-};
-
-const MobileDiffDetail: React.FC<{
-  path: string;
-  previousPath?: string;
-  subtitle?: string;
-  diff: MobileDiffData | null;
-  staged?: boolean;
-  fileExists: boolean;
-  unavailableReason?: 'nested_repository' | 'untracked_directory' | null;
-  error?: string | null;
-  onBack: () => void;
-  onRetry?: () => void;
-  onExpandContextRequest?: (request: ContextExpansionRequest) => void;
-  pendingContextExpansion?: ContextExpansionRequest | null;
-  contextLoading?: boolean;
-  commentOrigin?: DiffCommentOrigin;
-}> = ({ path, previousPath, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
-  const { t } = useI18n();
-  const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
-  const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
-  const trimmedPath = path.replace(/\/$/, '');
-  const lastSlash = trimmedPath.lastIndexOf('/');
-  const fileName = trimmedPath.slice(lastSlash + 1);
-  const folder = lastSlash > 0 ? trimmedPath.slice(0, lastSlash) : null;
-  const location = previousPath ? `${previousPath} → ${folder ?? fileName}` : folder;
-
-  return (
-    <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge text-foreground')}>
-        <button
-          type="button"
-          className={MOBILE_HEADER_BUTTON_CLASS}
-          aria-label={t('header.actions.backAria')}
-          onClick={onBack}
-        >
-          <Icon name="arrow-left" className="size-5" />
-        </button>
-        <div className="min-w-0 flex-1 px-1" title={previousPath ? `${previousPath} → ${path}` : path}>
-          <h2 dir="ltr" className={cn('oc-ui-start-align truncate', MOBILE_HEADER_TITLE_CLASS)}>{fileName}</h2>
-          <p className="flex min-w-0 items-baseline gap-1.5 typography-micro text-muted-foreground">
-            {location ? <span dir="ltr" className="oc-ui-start-align min-w-0 truncate">{location}</span> : null}
-            {location && subtitle ? <span aria-hidden className="shrink-0 opacity-60">·</span> : null}
-            {subtitle ? <span className="min-w-0 max-w-full shrink-0 truncate">{subtitle}</span> : null}
-          </p>
-        </div>
-        <button
-          type="button"
-          className={cn(
-            MOBILE_HEADER_BUTTON_CLASS,
-            wholeFileComment.isOpen ? 'text-foreground' : 'text-muted-foreground',
-          )}
-          aria-label={t('inlineComment.actions.commentOnFile')}
-          aria-pressed={wholeFileComment.isOpen}
-          title={t('inlineComment.actions.commentOnFile')}
-          onClick={wholeFileComment.toggle}
-        >
-          <Icon name="chat-1" className="size-5" />
-        </button>
-      </header>
-      {wholeFileComment.cards}
-      {wholeFileComment.editor}
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {!fileExists ? (
-          <MobileChangesState icon message={t('mobile.changes.diffDetail.missingTitle')} description={t('mobile.changes.diffDetail.missingDescription')} />
-        ) : unavailableReason === 'nested_repository' ? (
-          <MobileChangesState icon message={t('diffView.unavailable.nestedRepositoryTitle')} description={t('diffView.unavailable.nestedRepositoryDescription')} />
-        ) : unavailableReason === 'untracked_directory' ? (
-          <MobileChangesState icon message={t('diffView.unavailable.untrackedDirectoryTitle')} description={t('diffView.unavailable.untrackedDirectoryDescription')} />
-        ) : error ? (
-          <div className="flex h-full items-center justify-center px-6 text-center">
-            <div className="flex max-w-sm flex-col items-center gap-3">
-              <p className="typography-ui-label font-semibold text-foreground">{t('mobile.changes.diffDetail.loadFailed')}</p>
-              <p className="typography-meta text-muted-foreground">{error}</p>
-              <Button type="button" size="sm" variant="outline" onClick={() => onRetry?.()}>{t('diffView.actions.retry')}</Button>
-            </div>
-          </div>
-        ) : !diff ? (
-          <MobileChangesState loading message={t('diffView.state.loadingDiff')} />
-        ) : diff.submodule ? (
-          <div className="p-3"><SubmoduleDiffSummary state={diff.submodule} staged={staged} /></div>
-        ) : diff.isBinary ? (
-          <MobileChangesState icon message={t('diffView.binary.unavailable')} />
-        ) : isOfficePreviewFile(path) && isDocumentVersions(diff.original, diff.modified) ? (
-          <ScrollableOverlay outerClassName="h-full" className="p-3" disableHorizontal data-diff-virtual-root data-diff-virtual-content>
-            <OfficeDocumentDiff
-              filePath={path}
-              original={diff.original}
-              modified={diff.modified}
-              renderText={(text) => (
-                <PierreDiffViewer
-                  original={text.original}
-                  modified={text.modified}
-                  language="text"
-                  fileName={path}
-                  commentOrigin={commentOrigin}
-                  renderSideBySide={false}
-                  wrapLines={true}
-                  layout="inline"
-                />
-              )}
-            />
-          </ScrollableOverlay>
-        ) : previousPath && (diff.fileDiff ? diff.fileDiff.hunks.length === 0 : diff.original === diff.modified) ? (
-          <MobileChangesState icon message={t('diffView.change.renamedFrom', { from: previousPath })} />
-        ) : isImageFile(path) && !diff.fileDiff ? (
-          <MobileChangesState icon message={t('mobile.changes.diffDetail.imageUnavailable')} />
-        ) : (
-          <ScrollableOverlay
-            outerClassName="h-full"
-            className="p-3"
-            useScrollShadow
-            disableHorizontal
-            data-diff-virtual-root
-            data-diff-virtual-content
-          >
-            <PierreDiffViewer
-              original={diff.original}
-              modified={diff.modified}
-              fileDiff={diff.fileDiff}
-              language={language}
-              fileName={path}
-              commentOrigin={commentOrigin}
-              renderSideBySide={false}
-              wrapLines={true}
-              layout="inline"
-              onExpandContextRequest={onExpandContextRequest}
-              pendingContextExpansion={pendingContextExpansion}
-              contextLoading={contextLoading}
-            />
-          </ScrollableOverlay>
-        )}
-      </div>
-    </div>
-  );
-};

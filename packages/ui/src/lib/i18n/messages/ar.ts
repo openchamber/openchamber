@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { workStatusAccountsI18n } from './work-status-accounts.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
@@ -63,10 +64,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { diffReviewedI18n } from './diff-reviewed.i18n';
 import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
+import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
@@ -116,21 +120,24 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'يلزم نموذج صغير. سجّل الدخول إلى موفر نماذج أو اختر نموذجًا من الإعدادات ← الجلسات.',
   'commitComparison.mode': 'إيداع',
   'pullRequestComparison.select': 'اختيار طلب سحب',
+  'pullRequestComparison.searchShort': 'البحث في طلبات السحب',
   'pullRequestComparison.pickAbove': 'اختر طلب سحب من الأعلى',
   'pullRequestComparison.diffUnavailable': "لا يوفّر {provider} الفروقات لطلبات السحب، لذا لا يمكن عرضها أو شرحها هنا",
   'pullRequestComparison.partial': 'تعذّر تحميل بعض طلبات السحب',
   'commitComparison.select': 'اختيار إيداع',
+  'commitComparison.branchDividerSingle': 'في الأعلى: الإيداع الموجود فقط في {branch}. في الأسفل: موجود بالفعل في {base}.',
+  'commitComparison.branchDividerPlural': 'في الأعلى: {count} إيداعات موجودة فقط في {branch}. في الأسفل: موجودة بالفعل في {base}.',
+  'commitComparison.backToList': 'العودة إلى الإيداعات',
   'commitComparison.search': 'البحث في الإيداعات…',
   'commitComparison.loadError': 'تعذّر تحميل الإيداعات',
   'commitComparison.noCommits': 'لم يُعثر على إيداعات',
   'commitComparison.emptyDiff': 'لا توجد تغييرات في هذا الإيداع',
-  'chat.liveActivity.title': 'النشاط',
-  'chat.liveActivity.moreRows': '+{count} أخرى',
   'chat.liveActivity.changedFile': 'تغيير {count} ملف',
   'chat.liveActivity.changedFiles': 'تغيير {count} ملفات',
-  'chat.liveActivity.explored': 'استكشاف قاعدة الشيفرة',
+  'chat.liveActivity.working': 'جارٍ العمل…',
   'chat.liveActivity.ranCommand': 'تشغيل {count} أمر',
   'chat.liveActivity.ranCommands': 'تشغيل {count} أوامر',
+  'chat.liveActivity.explored': 'استكشاف قاعدة الشيفرة',
   'chat.liveActivity.researched': 'البحث في الويب',
   'chat.liveActivity.usedSubagent': 'استخدام {count} وكيل فرعي',
   'chat.liveActivity.usedSubagents': 'استخدام {count} وكلاء فرعيين',
@@ -339,10 +346,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.update': 'تحديث',
   'mobile.menu.settings': 'الإعدادات',
   'mobile.sessions.newChatCta': 'محادثة جديدة في {project}',
-  'mobile.sessions.dateGroup.today': 'اليوم',
-  'mobile.sessions.dateGroup.yesterday': 'أمس',
-  'mobile.sessions.dateGroup.thisWeek': 'في وقت سابق من هذا الأسبوع',
-  'mobile.sessions.dateGroup.older': 'أقدم',
   'mobile.sessions.section.worktrees': 'أشجار العمل',
   'mobile.sessions.section.otherProjects': 'تبديل المشروع',
   'mobile.sessions.section.projects': 'المشاريع',
@@ -619,6 +622,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': 'مبسّط',
   'sessions.sidebar.header.displayMode.showWork': 'إظهار قسم قيد العمل',
   'sessions.sidebar.header.displayMode.showPinned': 'إظهار قسم المثبّتة',
+  'sessions.sidebar.header.displayMode.showSubagents': 'إظهار جلسات الوكلاء الفرعيين',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'صفوف مفصّلة',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'تسمية worktree باسم الفرع',
   'sessions.sidebar.activity.pinnedTitle': 'المثبّتة',
@@ -647,6 +651,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': 'جرّب عنوانًا أو فرعًا مختلفًا.',
   'sessions.sidebar.activity.chatsTitle': 'المحادثات',
   'sessions.sidebar.activity.chatsEmpty': 'لا توجد محادثات بعد.',
+  'sessions.sidebar.timeline.noSessionsYet': 'لا توجد جلسات بعد',
   'chat.chatInput.chooseProject': 'اختر مشروعًا',
   'sessions.sidebar.header.projectDisplay.label': 'إظهار المشاريع',
   'sessions.sidebar.header.projectDisplay.all': 'كل المشاريع',
@@ -795,6 +800,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': 'جارٍ نقل الجلسة إلى شجرة عمل جديدة',
   'sessions.sidebar.session.status.permissionRequired': 'مطلوب إذن',
   'sessions.sidebar.session.status.questionPending': 'سؤال بانتظار الرد',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'مطلوب إذن. يفتح الجلسة التي تطلب ذلك',
+  'sessions.sidebar.session.status.questionPendingOpen': 'سؤال بانتظار الرد. يفتح الجلسة التي تطلب ذلك',
   'sessions.sidebar.session.status.activeFor': 'نشطة منذ {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'استغرق الدور الأخير {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'طي الجلسات الفرعية',
@@ -1517,6 +1524,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.emptyDiff.description': 'لا توجد تغييرات في هذا النطاق بعد.',
   'walkthrough.blocked.contextTooSmall.title': 'هذه الفروقات كبيرة جدًا على النموذج الحالي',
   'walkthrough.blocked.contextTooSmall.description': 'يتسع {model} لنحو {available}K حرف وتحتاج هذه الفروقات إلى نحو {required}K. لن يُقتطع أي شيء — اختر بدلًا من ذلك نموذجًا بسياق أكبر.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': 'رفض {model} هذه الفروقات لأنها أطول من اللازم. اختر نموذجًا بسياق أكبر، أو راجع نطاقًا أضيق.',
   'walkthrough.blocked.structuredOutput.title': 'لا يستطيع هذا النموذج إنتاج مخرجات منظّمة',
   'walkthrough.blocked.structuredOutput.description': 'لا يدعم {model} الردود المنظّمة التي تحتاجها جولة الشرح.',
   'walkthrough.blocked.chooseModel': 'اختر النموذج الصغير',
@@ -1593,6 +1601,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': 'هذا تحديد عليه تعليق توضيحي من المتصفح المدمج في التطبيق.',
   'contextPanel.browser.annotate.attached': 'تم إرفاق التعليق بالمحادثة',
   'contextPanel.browser.annotate.noSession': 'افتح جلسة محادثة قبل إرفاق تعليق',
+  'contextPanel.browser.annotate.readOnly': 'هذه المحادثة للقراءة فقط، لذا لا يمكن إرفاق تعليقات بها',
   'contextPanel.browser.annotate.noPage': 'حمّل صفحة قبل إضافة التعليقات',
   'contextPanel.browser.annotate.failed': 'تعذّر إضافة تعليق على هذه الصفحة',
   'contextPanel.browser.annotate.tool.element': 'عنصر',
@@ -1900,6 +1909,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': 'جارٍ تحميل الفروقات…',
   'diffView.state.loadingChanges': 'جارٍ تحميل التغييرات…',
   'diffView.state.largeDiff': 'فروقات كبيرة ({count} سطرًا متغيرًا)',
+  'diffView.state.largeDiffLongLines': 'فروقات كبيرة (أسطر طويلة جدًا)',
+  'diffView.state.largeFile': 'ملف كبير',
   'diffView.state.largeDiffDescription': 'قد يكون العرض بطيئًا. لا يزال بإمكانك عرض الفروقات بالنقر أدناه.',
   'diffView.summary.changedFilesSingle': 'تغيّر ملف واحد ({count})',
   'diffView.summary.changedFilesPlural': 'تغيّرت {count} ملفات',
@@ -2316,6 +2327,9 @@ export const dict: Record<I18nKey, string> = {
   'session.githubPrPicker.empty.noPullRequestsFound': 'لم يُعثر على طلبات سحب',
   'session.githubPrPicker.loading.pullRequests': 'جارٍ تحميل طلبات السحب…',
   'session.githubPrPicker.actions.loadMore': 'تحميل المزيد',
+  'session.githubPrPicker.filter.group.repository': 'المستودع',
+  'session.githubPrPicker.filter.group.author': 'المؤلف',
+  'session.githubPrPicker.filter.clearAll': 'مسح عوامل التصفية',
   'session.newWorktree.title': 'شجرة عمل (worktree) جديدة',
   'session.newWorktree.mode.newBranch': 'فرع جديد',
   'session.newWorktree.mode.existingBranch': 'فرع موجود',
@@ -2458,6 +2472,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': 'تم التراجع إلى {preview}',
   'chat.revert.toast.redo': 'تمت الإعادة',
   'chat.revert.toast.restored': 'تمت استعادة كل الرسائل',
+  'chat.revert.toast.filesUnchanged': 'تم التراجع في المحادثة. لم تتغير الملفات.',
   'chat.toast.opencodeRestartInterrupted.title': 'انقطعت المحادثة',
   'chat.toast.opencodeRestartInterrupted.description': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. أرسل رسالة للمتابعة.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. ستستأنف المحادثة تلقائيًا؛ أرسل رسالة إذا لم تفعل.',
@@ -2590,6 +2605,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': 'حفظ النص المحدد في الملاحظات',
   'chat.messageBody.actions.revertAria': 'التراجع إلى هذه الرسالة',
   'chat.messageBody.actions.revert': 'التراجع من هنا',
+  'chat.messageBody.status.waitingForAgent': 'بانتظار الوكيل',
   'chat.messageBody.actions.forkAria': 'الاشتقاق من هذه الرسالة',
   'chat.messageBody.actions.fork': 'الاشتقاق من هنا',
   'chat.messageBody.actions.copyMessageAria': 'نسخ نص الرسالة',
@@ -2690,6 +2706,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'تعذّر إرسال المرفقات. جرّب عددًا أقل من الملفات أو صورًا أصغر.',
   'chat.chatInput.toast.messageSendFailed': 'تعذّر إرسال الرسالة. تمت استعادة المرفقات.',
   'chat.chatInput.toast.agentUnavailable': 'الوكيل "{agent}" غير متاح في مجلد هذه الجلسة. اختر وكيلًا آخر وأعد الإرسال.',
+  'chat.chatInput.toast.skillLoadFailed': 'لم تُحمَّل المهارة "{skill}" من خادم MCP الخاص بها. تأكد من أن الخادم متصل في الإعدادات، ثم أعد الإرسال.',
   'chat.chatInput.toast.noModelSelected': 'اختر موفرًا ونموذجًا قبل الإرسال.',
   'chat.chatInput.toast.clipboardAttachFailed': 'تعذّر إرفاق الصورة من الحافظة',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'تعذّر إرفاق النص الملصق كملف',
@@ -3041,6 +3058,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': 'نسخ المسار',
   'openInApp.actions.refreshApps': 'تحديث التطبيقات',
   'openInApp.toast.pathCopied': 'تم نسخ المسار إلى الحافظة',
+  'openInApp.toast.sshOpenFailed': 'تعذّر فتح {app}. تأكد من أنه مثبّت على هذا الكمبيوتر.',
+  'openInApp.toast.sshInstanceChanged': 'انتقلت هذه النافذة إلى مثيل آخر قبل فتح {app}. حاول مرة أخرى.',
+  'openInApp.toast.sshSettingsMismatch': 'لن يتصل {app} بالطريقة التي يتصل بها هذا المثيل: أمر SSH الخاص به يضبط {settings}، ولا يقرأها {app}. انقلها إلى إدخال المضيف في ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'تعذّرت قراءة إعدادات SSH لهذا المثيل، لذلك لم يُفتح {app}. تحقق من أمر SSH الخاص به.',
+  'openInApp.toast.sshUnsupported': 'لا يستطيع {app} فتح هذا المشروع عبر SSH.',
   'projectActions.actions.addActionAria': 'إضافة إجراء',
   'projectActions.actions.addAction': 'إضافة إجراء',
   'projectActions.actions.addNewAction': 'إضافة إجراء جديد',
@@ -3970,7 +3992,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.ar,
   ...documentToolbarI18n.ar,
   ...uiBlocksI18n.ar,
-  ...updateDialogCanaryI18n.ar,
+  ...updateDialogCanaryI18n.ar, ...updateIdleI18n.ar,
   ...aboutReleaseNotesI18n.ar,
   ...updateCheckErrorsI18n.ar,
   ...secretRequestI18n.ar,
@@ -3980,6 +4002,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
   ...sessionWarmingI18n.ar,
+  ...sessionCostI18n.ar,
   ...connectionHeartbeatI18n.ar,
   ...workStatusAccountsI18n.ar,
   ...compactionSettingsI18n.ar,
@@ -4017,10 +4040,13 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ar,
   ...integrationsCatalogI18n['ar'],
   ...diffFindI18n['ar'],
+  ...diffReviewedI18n['ar'],
   ...contextWindowI18n['ar'],
   ...markdownOutlineI18n['ar'],
   ...markdownGithubI18n['ar'],
   ...autocompleteScopeI18n['ar'],
+  ...chatExchangeI18n['ar'],
+  ...integrateConflictI18n['ar'],
   ...workflowsI18n['ar'],
   ...subagentsI18n['ar'],
   ...sessionReferencesI18n['ar'],
@@ -4082,6 +4108,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': 'العرض جنبًا إلى جنب',
   'diffView.actions.wrapLines': 'التفاف الأسطر',
   'diffView.actions.moreActions': 'إجراءات أخرى',
+  'diffView.actions.viewOptions': 'خيارات عرض الفروقات',
+  'gitView.sidebar.resizeAria': 'تغيير حجم الشريط الجانبي لـ Git',
+  'gitView.commit.stagedCountSummary': '{count} مُجهَّز',
+  'gitView.commit.collapseAria': 'طي نموذج الإيداع',
   'session.newWorktree.trust.skip': 'تخطٍّ',
   'chat.revertPopover.toast.restoreFailed': 'تعذّرت استعادة الرسائل المتراجع عنها',
   'notifications.error.bodyFallback': 'حدث خطأ',

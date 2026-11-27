@@ -1,4 +1,6 @@
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { isAppLinkScheme, type AppLinkSchemeContext } from '@/lib/appLinkSchemes';
+import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 
 type DesktopBridgeGlobal = {
   openExternal?: (url: string) => Promise<unknown>;
@@ -20,6 +22,37 @@ export const isExternalHttpUrl = (url: string): boolean => {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 };
 
+const ALLOWED_MAILTO_QUERY_KEYS = new Set(['to', 'cc', 'bcc', 'subject', 'body', 'in-reply-to', 'references']);
+const ENCODED_CONTROL_BYTE_RE = /%([01][0-9a-f]|7f)/i;
+
+const hasControlCharacters = (value: string, allowLineBreaks = false): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (allowLineBreaks && (code === 0x09 || code === 0x0a || code === 0x0d)) continue;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+};
+
+const hasUnsafeRawCharacters = (value: string): boolean => /\s/.test(value) || value.includes('\\') || value.includes('"');
+
+export const isMailtoUrl = (url: string): boolean => {
+  if (hasControlCharacters(url)) return false;
+  const trimmed = url.trim();
+  if (!trimmed || /^mailto:\/\//i.test(trimmed) || hasUnsafeRawCharacters(trimmed)) return false;
+  const parsed = parseUrlSafely(trimmed);
+  if (!parsed || parsed.protocol !== 'mailto:') return false;
+  if (!parsed.pathname.trim() && parsed.searchParams.size === 0) return false;
+  if (ENCODED_CONTROL_BYTE_RE.test(parsed.pathname) || ENCODED_CONTROL_BYTE_RE.test(parsed.hash)) return false;
+  for (const [key, value] of parsed.searchParams.entries()) {
+    const normalizedKey = key.toLowerCase();
+    if (!ALLOWED_MAILTO_QUERY_KEYS.has(normalizedKey)) return false;
+    if (hasControlCharacters(value, normalizedKey === 'body')) return false;
+  }
+  const serialized = parsed.toString();
+  return !hasControlCharacters(serialized) && !hasUnsafeRawCharacters(serialized);
+};
+
 export const getUrlScheme = (url: string): string | null => {
   const parsed = parseUrlSafely(url.trim());
   if (!parsed) {
@@ -28,29 +61,20 @@ export const getUrlScheme = (url: string): string | null => {
   return parsed.protocol.replace(/:$/, '').toLowerCase();
 };
 
-const BROWSER_HANDLED_SCHEMES = new Set(['http', 'https', 'mailto', 'tel', 'sms', 'callto', 'cid', 'xmpp', 'irc', 'news', 'nntp', 'feed', 'webcal']);
-
-const BLOCKED_APP_LINK_SCHEMES = new Set([
-  'javascript', 'data', 'vbscript', 'blob', 'filesystem', 'about',
-  'chrome', 'chrome-extension', 'devtools', 'moz-extension', 'ms-browser-extension',
-  'file',
-  'ws', 'wss', 'ftp', 'ftps',
-  'intent',
-  'ms-msdt', 'search-ms', 'shell',
-  'openchamber', 'openchamber-ui', 'capacitor',
-]);
-
-const APP_LINK_SCHEME_RE = /^[a-z][a-z0-9+.-]{1,31}$/;
+const appLinkSchemeContext = (): AppLinkSchemeContext => {
+  const config = getVSCodeBootstrapConfig();
+  if (config) {
+    return { editorUriScheme: config.uriScheme ?? '' };
+  }
+  return getRegisteredRuntimeAPIs()?.runtime?.isVSCode ? { editorUriScheme: '' } : {};
+};
 
 export const isAppLinkUrl = (url: string): boolean => {
   const scheme = getUrlScheme(url);
   if (!scheme) {
     return false;
   }
-  if (BROWSER_HANDLED_SCHEMES.has(scheme) || BLOCKED_APP_LINK_SCHEMES.has(scheme)) {
-    return false;
-  }
-  return APP_LINK_SCHEME_RE.test(scheme);
+  return isAppLinkScheme(scheme, appLinkSchemeContext());
 };
 
 export const getExternalFaviconUrl = (url: string): string | null => {
@@ -104,7 +128,7 @@ export const extractLoopbackUrls = (text: string): string[] => {
   return out;
 };
 
-const openValidatedExternalUrl = async (url: string): Promise<boolean> => {
+const openValidatedExternalUrl = async (url: string, browserFallback = true): Promise<boolean> => {
   if (typeof window === 'undefined') {
     return false;
   }
@@ -137,8 +161,12 @@ const openValidatedExternalUrl = async (url: string): Promise<boolean> => {
       await desktop.openExternal(normalizedTarget);
       return true;
     } catch {
-      if (isAppLinkUrl(normalizedTarget)) return false;
+      if (!browserFallback || isAppLinkUrl(normalizedTarget)) return false;
     }
+  }
+
+  if (!browserFallback) {
+    return false;
   }
 
   try {
@@ -154,3 +182,6 @@ export const openExternalUrl = (url: string): Promise<boolean> =>
 
 export const openConfirmedAppLinkUrl = (url: string): Promise<boolean> =>
   isAppLinkUrl(url) ? openValidatedExternalUrl(url) : Promise.resolve(false);
+
+export const openMailtoUrl = (url: string): Promise<boolean> =>
+  isMailtoUrl(url) ? openValidatedExternalUrl(url, false) : Promise.resolve(false);

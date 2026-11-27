@@ -13,6 +13,8 @@ interface WalkthroughTocProps {
   view: WalkthroughView;
   activeStopId: string | null;
   visitedStopIds: ReadonlySet<string>;
+  reviewedPaths?: ReadonlySet<string>;
+  totalFileCount?: number;
   onSelectStop: (stopId: string) => void;
   width?: number;
 }
@@ -30,6 +32,7 @@ const TocStop = ({
   stopView,
   isActive,
   isVisited,
+  reviewedPaths,
   onSelect,
   activeRef,
   page,
@@ -37,12 +40,15 @@ const TocStop = ({
   stopView: WalkthroughStopView;
   isActive: boolean;
   isVisited: boolean;
+  reviewedPaths?: ReadonlySet<string>;
   onSelect: () => void;
   activeRef: React.Ref<HTMLButtonElement>;
   page: boolean;
 }) => {
   const { t } = useI18n();
   const files = summarizeHunkFiles(stopView.hunks);
+  const allReviewed = files.length > 0 && Boolean(reviewedPaths) && files.every((file) => reviewedPaths?.has(file.path));
+  const done = allReviewed || isVisited;
 
   return (
     <li>
@@ -64,14 +70,16 @@ const TocStop = ({
               'typography-micro flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 tabular-nums',
               isActive
                 ? 'bg-interactive-selection-foreground/20'
-                : isVisited
+                : done
                   ? 'bg-status-success/15 text-status-success'
                   : 'oc-tile-inset text-muted-foreground'
             )}
           >
-            {isVisited && !isActive ? <Icon name="check" className="size-2.5" /> : stopView.position}
+            {done && !isActive ? <Icon name="check" className="size-2.5" /> : stopView.position}
           </span>
-          <span className={cn('truncate font-medium', page ? 'typography-ui-label' : 'typography-meta')}>{stopView.stop.title}</span>
+          <span className={cn('truncate font-medium', page ? 'typography-ui-label' : 'typography-meta', allReviewed && !isActive && 'text-muted-foreground')}>
+            {stopView.stop.title}
+          </span>
           {stopView.isStale && (
             <Icon
               name="error-warning"
@@ -100,12 +108,15 @@ export const WalkthroughToc = memo(function WalkthroughToc({
   view,
   activeStopId,
   visitedStopIds,
+  reviewedPaths,
+  totalFileCount = 0,
   onSelectStop,
   width,
 }: WalkthroughTocProps) {
   const { t } = useI18n();
   const activeRef = useRef<HTMLButtonElement | null>(null);
   const page = width === undefined;
+  const reviewedCount = reviewedPaths?.size ?? 0;
 
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: 'nearest' });
@@ -121,6 +132,12 @@ export const WalkthroughToc = memo(function WalkthroughToc({
       {view.walkthrough.focus && (
         <p className={cn('px-2 pb-3 pt-1 text-muted-foreground', page ? 'typography-ui-label' : 'typography-meta')}>{view.walkthrough.focus}</p>
       )}
+      {reviewedCount > 0 && totalFileCount > 0 && (
+        <p className="typography-micro flex items-center gap-1.5 px-2 pb-2.5 tabular-nums text-muted-foreground">
+          <Icon name="checkbox-circle" className="size-3.5 shrink-0 text-[var(--status-success)]" />
+          <span>{t('diffView.reviewed.progress', { reviewed: reviewedCount, total: totalFileCount })}</span>
+        </p>
+      )}
       {view.chapters.map(({ chapter, stops }) => (
         <section key={chapter.id} className="pb-3">
           <h4 className="typography-micro flex items-center gap-1.5 px-2 py-1 font-semibold uppercase tracking-wide text-muted-foreground">
@@ -134,6 +151,7 @@ export const WalkthroughToc = memo(function WalkthroughToc({
                 stopView={stopView}
                 isActive={activeStopId === stopView.stop.id}
                 isVisited={visitedStopIds.has(stopView.stop.id)}
+                reviewedPaths={reviewedPaths}
                 onSelect={() => onSelectStop(stopView.stop.id)}
                 activeRef={activeRef}
                 page={page}

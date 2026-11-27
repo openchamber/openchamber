@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
-import { buildSessionSidebarRowModel, type SessionSidebarBlock, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, type SessionSidebarBlock, type SessionSidebarRowModelArgs, type SessionSidebarTimelineEntry } from './sessionSidebarRowModel';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import type { DirectoryOwner } from './sessions/sessionOwnership';
 import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
@@ -71,7 +71,7 @@ describe('sidebar folder ownership', () => {
 });
 
 describe('sidebar folders in the list by time', () => {
-  const entry = (id: string): SessionSidebarWorkEntry => ({ kind: 'session', item: { node: node(id), projectId: 'p', groupDirectory: '/repo', secondaryMeta: null } });
+  const entry = (id: string): SessionSidebarTimelineEntry => ({ kind: 'session', item: { node: node(id), projectId: 'p', groupDirectory: '/repo', secondaryMeta: null }, activity: { kind: 'lead' } });
   const summary = (model: ReturnType<typeof build>) => model.rows.flatMap((row) => {
     if (row.kind === 'activity-header') return [row.activityKey];
     if (row.kind === 'folder-header') return [`folder:${row.displayName}`];
@@ -126,5 +126,24 @@ describe('sidebar folder members', () => {
   test('a folder with nothing in it has no members', () => {
     const model = build({ foldersMap: { '/repo': [{ id: 'f', name: 'Folder', createdAt: 1, sessionIds: ['gone'] }] } });
     expect(folderRow(model).memberCount).toBe(0);
+  });
+});
+
+describe('sidebar folders with subagent sessions hidden', () => {
+  const filedSubagent = (showSubagentSessions: boolean) => {
+    const subagent: SessionNode = { ...node('sub'), session: { ...session('sub', '/repo'), parentID: 'parent-elsewhere' } };
+    const sections: ProjectSection[] = [{ project: { id: 'p', normalizedPath: '/repo' }, groups: [rootGroup([node('root'), subagent])] }];
+    return build({
+      sections, authoritativeSections: sections, showSubagentSessions,
+      foldersMap: { '/repo': [{ id: 'f', name: 'Folder', createdAt: 1, sessionIds: ['sub'] }] },
+    });
+  };
+  const ids = (model: ReturnType<typeof build>) => model.rows.flatMap((row) => row.kind === 'session' ? [row.node.session.id] : []);
+
+  test('a subagent filed without its parent leaves the folder and comes back with the option, keeping its membership', () => {
+    const hidden = filedSubagent(false);
+    expect(ids(hidden)).not.toContain('sub');
+    expect(folderRow(hidden).nodes.map((entry) => entry.session.id)).toEqual(['sub']);
+    expect(ids(filedSubagent(true))).toContain('sub');
   });
 });

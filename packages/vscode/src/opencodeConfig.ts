@@ -1152,7 +1152,7 @@ const buildConfigFileContent = (
   return JSON.stringify(desired, null, 2);
 };
 
-const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_FILE) => {
+export const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_FILE) => {
   let existingRaw = '';
   let existingParse: ConfigParseResult | null = null;
   if (fs.existsSync(filePath)) {
@@ -1990,7 +1990,7 @@ const getJsonEntrySource = (
   return { section: null, config: null, path: null, exists: false, sectionKey: null, legacy: false };
 };
 
-const getJsonWriteTarget = (
+export const getJsonWriteTarget = (
   layers: ReturnType<typeof readConfigLayers>,
   preferredScope: AgentScope | CommandScope
 ) => {

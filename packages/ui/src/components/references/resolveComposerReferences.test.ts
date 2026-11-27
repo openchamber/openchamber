@@ -93,6 +93,27 @@ describe('resolveComposerReferences', () => {
         expect(result.references).toEqual([]);
         expect(result.failures).toEqual([{ key: 'github:acme/app~5', label: '#5', error: 'Discussion not found' }]);
     });
+
+    test('attaches an item listed across a folder through the repository it was listed from', async () => {
+        const through: string[] = [];
+        const unexpected = () => Promise.reject(new Error('not read for a discussion'));
+        const nested = { ...context, directory: '/multi/app', accountId: 'work' };
+        const result = await resolveComposerReferences([{ source: 'repository', reference: discussion, includeDiff: false, directory: nested.directory }], {
+            sourceControl: {
+                issueGet: unexpected, issueComments: unexpected, changeRequestContext: unexpected,
+                referenceDetail: async (read) => {
+                    through.push(`${read.directory} ${read.accountId}`);
+                    return { connected: true, detail };
+                },
+            },
+            context: null,
+            contextOf: (directory) => (directory === nested.directory ? nested : null),
+            readTrackerDetail: unexpected,
+            trackerName: () => '',
+        });
+        expect(result.failures).toEqual([]);
+        expect(through).toEqual(['/multi/app work']);
+    });
 });
 
 describe('resolveReferenceLink', () => {

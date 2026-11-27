@@ -9,9 +9,9 @@ import {
   toggleProjectsCaption,
 } from '@/components/session/sidebar/projects/sessionProjectListActions';
 import { SessionSidebarRows } from '@/components/session/sidebar/SessionSidebarRows';
+import { SessionSidebarDateHeading } from '@/components/session/sidebar/sessionSidebarHeaderPresentation';
 import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { isGroupWork } from '@/components/session/sidebar/works/sidebarWorks';
-import type { SessionNode } from '@/components/session/sidebar/types';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -22,35 +22,12 @@ import { MobileDraftRow, MobileRunRow, MobileWorktreeRow } from './MobileWorkRow
 import { MOBILE_TREE_GEOMETRY } from './mobileSidebarGeometry';
 import { useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileShowControl } from './mobileRowParts';
+import { findCurrentRowIndex } from './mobileCurrentRow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SidebarConversationRow, SidebarSearchArchivedCaption, SidebarSearchShowMore, SidebarSearchMore } from '@/components/session/sidebar/SidebarConversationRow';
 
 const FLAT_TEXT_INSET_PX = 12;
 const NO_FIRST_VISIBLE = (): void => undefined;
-
-const nodeHolds = (nodes: readonly SessionNode[], sessionId: string): boolean => nodes.some((node) => (
-  node.session.id === sessionId || nodeHolds(node.children, sessionId)
-));
-
-const findCurrentRowIndex = (
-  rows: readonly SessionSidebarRow[],
-  current: { sessionId: string | null; runKey: string | null; projectId: string | null },
-): number => {
-  const { sessionId, runKey, projectId } = current;
-  if (runKey) {
-    const index = rows.findIndex((row) => row.kind === 'run' && row.run.key === runKey);
-    if (index >= 0) return index;
-  }
-  if (sessionId) {
-    const index = rows.findIndex((row) => (
-      (row.kind === 'session' && row.node.session.id === sessionId)
-      || (row.kind === 'run' && row.run.memberIds.includes(sessionId))
-      || (row.kind === 'group-header' && nodeHolds(row.group.sessions, sessionId))
-    ));
-    if (index >= 0) return index;
-  }
-  return projectId ? rows.findIndex((row) => row.kind === 'project-header' && row.section.project.id === projectId) : -1;
-};
 
 export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, view, actions }) => {
   const { t } = useI18n();
@@ -90,6 +67,8 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
         return <MobileZoneHeader row={row} onToggle={() => toggleActivityZone(row, { model, actions })} />;
       case 'caption':
         return <MobileProjectsCaption row={row} onToggle={() => toggleProjectsCaption(row, { model })} />;
+      case 'date-header':
+        return <SessionSidebarDateHeading day={row.day} inset={row.detailed ? geometry.detailedLeft(0) : geometry.textLeft(0)} className="pt-2 pb-1" />;
       case 'project-header': {
         const project = row.section.project;
         return <MobileProjectHeader

@@ -29,6 +29,8 @@ O OpenChamber lê o endereço e a senha do serviço em execução a partir do `s
 
 Desativar a opção faz o OpenChamber voltar ao seu próprio servidor OpenCode privado sem parar o serviço compartilhado.
 
+Se um gerenciador de serviços como o systemd executa o OpenCode, deixe esta opção desativada e [conecte-se ao servidor que você já executa](#conectar-a-um-servidor-que-você-já-executa). O OpenChamber nunca inicia nem reinicia um servidor ao qual se conecta dessa forma.
+
 Depois de `opencode update`, o serviço em execução continua na versão antiga até reiniciar. Quando o OpenChamber se conecta e encontra uma versão do OpenCode instalada mais nova que o serviço em execução, ele reinicia o serviço, exceto no modo empresarial. Na notificação de atualização do OpenCode, selecione **Atualizar** para executar `opencode upgrade` e depois **Recarregar OpenCode** para reiniciar o serviço na nova versão.
 
 ## Ativar as ferramentas do OpenChamber em um servidor local externo
@@ -41,6 +43,8 @@ Quando o OpenChamber se conecta a um servidor local externo (por meio de **Usar 
 Se o seu `opencode.json` global for somente leitura ou gerenciado pela sua organização, selecione **Copiar caminho** no mesmo banner e adicione o caminho dessa pasta à lista `plugins` na sua configuração gerenciada do OpenCode.
 
 Depois de registrado, as ferramentas do OpenChamber, o failover de limites e os títulos de sessão são ativados automaticamente sempre que o OpenChamber está rodando, e ocultam ferramentas integradas do OpenCode que se sobrepõem (como as ferramentas integradas de navegador e automação do OpenCode) enquanto o OpenChamber está aberto. Quando o OpenChamber fecha, o plugin é desativado e o OpenCode volta às suas ferramentas e prompts integrados padrão.
+
+Sessões em uma pasta onde o OpenCode carregou o plugin também recebem as instruções do OpenChamber para as ferramentas dele, como quando vincular uma issue, desenhar uma página ou pedir um segredo, e os [leads](/pt-br/leads/) funcionam lá. Uma configuração de projeto que desativa o plugin para uma pasta também desativa essas instruções.
 
 As ferramentas do OpenChamber exigem um servidor OpenCode local na mesma máquina e não ficam disponíveis quando conectado a um servidor remoto.
 

@@ -44,6 +44,8 @@ export const rejectPendingDraftWorktreeRequest = (id: string, error: Error): voi
   entry.reject(error);
 };
 
+export const isPendingDraftWorktreeRequest = (id: string | null | undefined): boolean => Boolean(id && requests.has(id));
+
 export const waitForPendingDraftWorktreeRequest = (id: string): Promise<string> => {
   const done = settled.get(id);
   if (done !== undefined) return Promise.resolve(done);

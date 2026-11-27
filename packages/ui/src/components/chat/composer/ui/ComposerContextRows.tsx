@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 
 import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
+import { opensDiff, useOpenCommentSource } from '@/components/comments/useOpenCommentSource';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
@@ -11,7 +12,8 @@ import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { readBrowserAnnotationPrompt, withoutBrowserAnnotationComment, withoutBrowserAnnotationScreenshot } from '@/lib/browser/annotationPrompt';
 import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
-import { quoteDisplayText } from '@/lib/messages/quoteDisplayText';
+import { chatQuoteExcerpt, quoteDisplayText } from '@/lib/messages/quoteDisplayText';
+import { ChatQuoteBody } from '../../ChatQuoteBody';
 import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -58,6 +60,8 @@ type RowView = {
     title: string;
     snippet: string;
     quote: string;
+    quoteContent?: React.ReactNode;
+    quoteDir?: 'ltr' | 'rtl' | 'auto';
     mono: boolean;
     comment: string;
     editable: boolean;
@@ -91,10 +95,12 @@ const DraftRow: React.FC<{
     onComposeCancel: () => void;
     onFocusQuote: ((focused: boolean) => void) | null;
     onRevealQuote: (() => void) | null;
+    onOpenSource: (() => void) | null;
+    openSourceLabel: string;
     attachmentFilenames: readonly string[];
     onOpenScreenshot: (() => void) | null;
     onRemoveScreenshot: () => void;
-}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, composing, onComposeText, onComposeFinish, onComposeCancel, onFocusQuote, onRevealQuote, attachmentFilenames, onOpenScreenshot, onRemoveScreenshot }) => {
+}> = ({ draft, view, open, editsInPlace, phoneLayout, onToggle, onClose, onRemove, onSaveComment, composing, onComposeText, onComposeFinish, onComposeCancel, onFocusQuote, onRevealQuote, onOpenSource, openSourceLabel, attachmentFilenames, onOpenScreenshot, onRemoveScreenshot }) => {
     const { t } = useI18n();
     const [typedText, setTypedText] = React.useState<string | null>(null);
     const editText = typedText ?? view.comment;
@@ -238,7 +244,25 @@ const DraftRow: React.FC<{
             >
                 <span aria-hidden="true" className="h-4 w-[3px] shrink-0 rounded-full bg-primary/45" />
                 <Icon name={view.icon} className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', view.iconClassName)} />
-                {phoneLayout && hasComment ? null : (
+                {phoneLayout && onOpenSource ? (
+                    <button
+                        type="button"
+                        dir="auto"
+                        className={cn(
+                            'min-w-0 truncate text-start text-muted-foreground underline-offset-2 hover:underline',
+                            view.editable ? 'max-w-[45%] shrink-0' : 'flex-1',
+                        )}
+                        style={{ minHeight: 0, minWidth: 0 }}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenSource();
+                        }}
+                        aria-label={openSourceLabel}
+                        title={view.title}
+                    >
+                        {view.snippet}
+                    </button>
+                ) : phoneLayout && hasComment ? null : (
                     <span
                         dir="auto"
                         className={cn(
@@ -293,12 +317,30 @@ const DraftRow: React.FC<{
                 }}
             >
                 <Icon name={view.icon} className={cn('ms-1.5 h-3.5 w-3.5 shrink-0', view.iconClassName)} />
-                <span dir="auto" className="min-w-0 flex-1 truncate" title={view.title}>{view.title}</span>
+                {onOpenSource ? (
+                    <button
+                        type="button"
+                        dir="auto"
+                        className="min-w-0 flex-1 truncate text-start underline-offset-2 hover:underline"
+                        style={{ minHeight: 0, minWidth: 0 }}
+                        onPointerDown={keepEditorFocus}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenSource();
+                        }}
+                        aria-label={openSourceLabel}
+                        title={view.title}
+                    >
+                        {view.title}
+                    </button>
+                ) : (
+                    <span dir="auto" className="min-w-0 flex-1 truncate" title={view.title}>{view.title}</span>
+                )}
                 {actions}
             </div>
             {view.quote.trim() ? (
                 <div
-                    dir="auto"
+                    dir={view.quoteDir ?? 'auto'}
                     className={cn(
                         'mx-1.5 mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-muted-foreground',
                         QUOTE_BAR_CLASS,
@@ -309,7 +351,7 @@ const DraftRow: React.FC<{
                     onClick={onRevealQuote ?? undefined}
                     title={onRevealQuote ? t('chat.message.context.showQuoteSource') : undefined}
                 >
-                    {view.quote}
+                    {view.quoteContent ?? view.quote}
                 </div>
             ) : null}
             {onOpenScreenshot && draft.screenshot ? (
@@ -384,6 +426,7 @@ function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment, surf
     const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
     const attachmentFilenames = React.useMemo(() => attachedFiles.map((file) => file.filename), [attachedFiles]);
     const mobileComment = useMobileCommentComposerController();
+    const openCommentSource = useOpenCommentSource(draftTarget?.directory ?? null);
     const [openId, setOpenId] = React.useState<string | null>(null);
     const [showAll, setShowAll] = React.useState(false);
     const openRowEditsRef = React.useRef(false);
@@ -399,11 +442,14 @@ function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment, surf
         switch (draft.source) {
             case 'chat-quote': {
                 const quote = quoteDisplayText(draft.code);
+                const excerpt = chatQuoteExcerpt(draft.code, draft.anchor);
                 return {
                     icon: 'chat-1',
                     title: t('chat.message.context.chatQuote'),
                     snippet: firstLine(quote),
                     quote,
+                    quoteContent: <ChatQuoteBody excerpt={excerpt} />,
+                    quoteDir: excerpt.dir ?? 'auto',
                     mono: false,
                     comment: draft.text,
                     editable: true,
@@ -590,6 +636,8 @@ function ComposerContextRowsView({ draftTarget, isMobile, onOpenAttachment, surf
                 onRevealQuote={revealable
                     ? () => quoteHighlights.reveal(draft.fileLabel, draft.anchor ?? legacyChatQuoteAnchor(draft.code))
                     : null}
+                onOpenSource={openCommentSource.canOpen(draft) ? () => openCommentSource.open(draft) : null}
+                openSourceLabel={t(opensDiff(draft.origin) ? 'chat.toolPart.openFileDiff' : 'chat.toolPart.openFile')}
                 attachmentFilenames={attachmentFilenames}
                 onOpenScreenshot={draft.screenshot && attachmentFilenames.includes(draft.screenshot) ? () => onOpenAttachment(draft.screenshot ?? '') : null}
             />

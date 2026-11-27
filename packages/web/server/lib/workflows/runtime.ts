@@ -832,5 +832,5 @@ export const createWorkflowRuntime = ({
     }
   };
 
-  return { executeAction, approve, decline, stop, resume, remove, list, listByDirectory, listSaved, startSaved, detail, agentDetail, start, deliverPending, shutdown };
+  return { executeAction, approve, decline, stop, resume, remove, list, listByDirectory, listSaved, startSaved, detail, agentDetail, start, deliverPending, hasLiveRun: () => active.size > 0, shutdown };
 };

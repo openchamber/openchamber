@@ -269,13 +269,15 @@ export const createBrowserPanelDriver = () => {
 
   const sendAnnotationMessage = async (state, message) => {
     const annotation = state.annotation;
-    if (!annotation?.contextId) return { delivered: false };
-    const reply = await send(state, 'Runtime.evaluate', {
-      expression: `(function (message) { var receive = window[${JSON.stringify(ANNOTATION_RECEIVER)}]; if (typeof receive === 'function') receive(message); })(${JSON.stringify(message)})`,
-      contextId: annotation.contextId,
+    if (!annotation?.contextId) return { delivered: false, submitting: false };
+    const reply = await send(state, 'Runtime.callFunctionOn', {
+      functionDeclaration: `function (message) { var receive = window[${JSON.stringify(ANNOTATION_RECEIVER)}]; return typeof receive === 'function' ? receive(message) : false; }`,
+      executionContextId: annotation.contextId,
+      arguments: [{ value: message }],
       returnByValue: true,
     }).catch(() => null);
-    return { delivered: Boolean(reply && !reply.exceptionDetails) };
+    const taken = reply && !reply.exceptionDetails ? reply.result?.value : false;
+    return { delivered: taken !== false, submitting: taken === 'submitting' };
   };
 
   const MAX_ANSWERED_DIALOGS = 5;

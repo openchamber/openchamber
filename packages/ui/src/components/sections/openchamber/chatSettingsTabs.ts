@@ -12,9 +12,11 @@ export const useChatSettingsTabStore = create<{
 
 const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.activity-default', 'messages'],
+  ['chat.live-activity-preview', 'messages'],
   ['chat.reasoning', 'messages'],
   ['chat.reasoning-traces', 'messages'],
   ['chat.tool-file-icons', 'messages'],
+  ['chat.keep-earlier-replies', 'messages'],
   ['chat.changed-files', 'messages'],
   ['chat.streaming-auto-follow', 'messages'],
   ['chat.message-appearance', 'messages'],
@@ -42,6 +44,7 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.document-attach', 'composer'],
   ['chat.subagent-read-only-banner', 'composer'],
   ['chat.save-pasted-images', 'composer'],
+  ['chat.keep-model-on-agent-switch', 'composer'],
   ['chat.spellcheck', 'composer'],
   ['chat.input-history-scope', 'composer'],
   ['chat.input-history-limit', 'composer'],

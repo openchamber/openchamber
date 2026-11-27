@@ -1,5 +1,8 @@
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { expect } from 'vitest';
 import { z } from 'zod';
@@ -11,6 +14,7 @@ import { createRegistryToolsSource, readHostToolVersions } from '../tools.js';
 import type { ToolsSource } from '../tools.js';
 import { SPACE_BASE_IMAGE, createDockerPlace } from './docker.js';
 import { parseInspectOutput } from './docker-wire.js';
+import { createSshConnections } from './ssh-connections.js';
 
 export const LIVE_DOCKER_ENABLED = process.env.OPENCHAMBER_TEST_DOCKER === '1';
 const LIVE_DOCKER_HOST = process.env.OPENCHAMBER_TEST_DOCKER_HOST || null;
@@ -45,7 +49,9 @@ export const parseUpstreamLog = (log: string) => log.split('\n').filter((line) =
 
 export function createLiveDockerPlace({ toolsSource = createRegistryToolsSource(readHostToolVersions()), dockerHost = LIVE_DOCKER_HOST }: { toolsSource?: ToolsSource; dockerHost?: string | null } = {}) {
   const owner = `test-${crypto.randomBytes(6).toString('hex')}`;
-  const placeWith = (source: ToolsSource) => createDockerPlace({ runCommand, dockerPath: 'docker', dockerHost, owner, toolsSource: source });
+  const connectionsDirectory = dockerHost === null ? null : fs.mkdtempSync(path.join(os.homedir(), '.oc-test-'));
+  const connections = dockerHost === null || connectionsDirectory === null ? null : createSshConnections({ dockerHost, directory: connectionsDirectory });
+  const placeWith = (source: ToolsSource) => createDockerPlace({ runCommand, dockerPath: 'docker', dockerHost, connections, owner, toolsSource: source });
   const place = placeWith(toolsSource);
   const ownerFilter = ['--filter', `label=${LABEL_MARKER}`, '--filter', `label=${LABEL_OWNER}=${owner}`];
   const helperLabels = ['--label', `${LABEL_MARKER}=true`, '--label', `${LABEL_OWNER}=${owner}`];
@@ -209,6 +215,8 @@ require('node:http').createServer((request, response) => {
       await docker(['volume', 'rm', volume]);
     }
     expect(await leftovers()).toEqual([]);
+    connections?.close();
+    if (connectionsDirectory !== null) fs.rmSync(connectionsDirectory, { recursive: true, force: true });
   };
 
   return { place, placeWith, dispose, host, owner };

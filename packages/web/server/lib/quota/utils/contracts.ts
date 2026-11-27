@@ -17,6 +17,13 @@ export interface UsageWindowInput<Percent = number | null | undefined, Seconds =
   valueLabel?: string | null | undefined;
   value?: UsageWindowValue | undefined;
   creditsUsed?: number | undefined;
+  credits?: UsageWindowCredits | undefined;
+}
+
+export interface UsageWindowCredits {
+  used: number;
+  limit: number;
+  remaining?: number;
 }
 
 export interface UsageWindow<Percent = number | null | undefined, Seconds = number | null> {
@@ -30,6 +37,7 @@ export interface UsageWindow<Percent = number | null | undefined, Seconds = numb
   valueLabel?: string;
   value?: UsageWindowValue;
   creditsUsed?: number;
+  credits?: UsageWindowCredits;
 }
 
 export interface ProviderUsage {

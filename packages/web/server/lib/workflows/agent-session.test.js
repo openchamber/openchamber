@@ -2,11 +2,13 @@ import { OpenCode } from '@opencode/client';
 import { describe, expect, it } from 'vitest';
 
 import { WorkflowAgentStopped, createWorkflowAgentSessions } from './agent-session.js';
+import { createSessionDirectoryCanonicalizer } from '../opencode/directory-canonicalization.js';
 
 /** Creates an agent's session and stops before its prompt, to read the request. */
-const createSessionRequest = async ({ parent, allowTools, model }) => {
+const createSessionRequest = async ({ parent, allowTools, model, getSessionDirectoryCanonicalizer }) => {
   const created = [];
   const sessions = createWorkflowAgentSessions({
+    getSessionDirectoryCanonicalizer,
     buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
     getOpenCodeAuthHeaders: () => ({}),
     globalEventHub: { subscribeEvent: () => () => {} },
@@ -82,6 +84,22 @@ describe('workflow agent sessions', () => {
       metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_parent' } },
       location: { directory: '/repo/worktree' },
     });
+  });
+
+  it.each([
+    [true, '/data/repo/worktree'],
+    [false, '/repo/worktree'],
+  ])('resolves the parent directory only while OpenCode shares this filesystem (shared=%s)', async (shared, expected) => {
+    const getSessionDirectoryCanonicalizer = createSessionDirectoryCanonicalizer({
+      sharesFilesystem: () => shared,
+      realpath: async (value) => (value === '/repo/worktree' ? '/data/repo/worktree' : value),
+    });
+    const request = await createSessionRequest({
+      parent: { id: 'ses_parent', location: { directory: '/repo/worktree' } },
+      allowTools: [],
+      getSessionDirectoryCanonicalizer,
+    });
+    expect(request.location).toEqual({ directory: expected });
   });
 
   it("runs on the parent's model when the call names none", async () => {

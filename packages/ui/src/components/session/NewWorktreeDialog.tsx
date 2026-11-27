@@ -527,7 +527,7 @@ export function NewWorktreeDialog({
       const failure = (message: string): ReferencePickerConfirmFailure => ({ failedKeys: [referencePickerItemKey(choice)], message });
       try {
         const result = await validateWorktreeCreate(projectRef, { mode: 'new', branchName: branch, worktreeName: branch });
-        if (result.errors.some((entry) => entry.code === 'branch_in_use')) {
+        if (result.errors.some((entry) => entry.code === 'branch_in_use' && !entry.setupFailed)) {
           return failure(t('session.githubIntegration.validation.branchAlreadyCheckedOut'));
         }
       } catch {

@@ -14,7 +14,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -24,6 +24,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { workStatusAccountsI18n } from './work-status-accounts.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
@@ -62,10 +63,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { diffReviewedI18n } from './diff-reviewed.i18n';
 import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
+import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
@@ -116,22 +120,25 @@ export const dict = {
   'sessions.aiRename.noSmallModel': 'Needs a Small Model. Sign in to a model provider or pick one in Settings → Sessions.',
   'commitComparison.mode': 'Commit',
   'pullRequestComparison.select': 'Select pull request',
+  'pullRequestComparison.searchShort': 'Search pull requests',
   'pullRequestComparison.pickAbove': 'Pick a pull request above',
   'pullRequestComparison.diffUnavailable': "{provider} doesn't serve pull request diffs, so they can't be shown or walked through here",
   'pullRequestComparison.partial': "Some pull requests couldn't be loaded",
   'commitComparison.select': 'Select commit',
+  'commitComparison.branchDividerSingle': 'Above: the commit only in {branch}. Below: already in {base}.',
+  'commitComparison.branchDividerPlural': 'Above: {count} commits only in {branch}. Below: already in {base}.',
+  'commitComparison.backToList': 'Back to commits',
   'commitComparison.search': 'Search commits...',
   'commitComparison.loadError': 'Failed to load commits',
   'commitComparison.noCommits': 'No commits found',
   'commitComparison.emptyDiff': 'No changes in this commit',
-  'chat.liveActivity.title': 'Activity',
-  'chat.liveActivity.moreRows': '+{count} more',
   'chat.liveActivity.changedFile': 'Changed {count} file',
   'chat.liveActivity.changedFiles': 'Changed {count} files',
-  'chat.liveActivity.explored': 'Explored codebase',
+  'chat.liveActivity.working': 'Working…',
   'chat.liveActivity.ranCommand': 'Ran {count} command',
   'chat.liveActivity.ranCommands': 'Ran {count} commands',
-  'chat.liveActivity.researched': 'Researched the web',
+  'chat.liveActivity.explored': 'Explored codebase',
+  'chat.liveActivity.researched': 'Searched the web',
   'chat.liveActivity.usedSubagent': 'Used {count} subagent',
   'chat.liveActivity.usedSubagents': 'Used {count} subagents',
   'sessions.sidebar.projectAction.active': 'Project action active',
@@ -213,7 +220,7 @@ export const dict = {
   ...htmlRenderI18n.en,
   ...documentToolbarI18n.en,
   ...uiBlocksI18n.en,
-  ...updateDialogCanaryI18n.en,
+  ...updateDialogCanaryI18n.en, ...updateIdleI18n.en,
   ...aboutReleaseNotesI18n.en,
   ...updateCheckErrorsI18n.en,
   ...secretRequestI18n.en,
@@ -223,6 +230,7 @@ export const dict = {
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
   ...sessionWarmingI18n.en,
+  ...sessionCostI18n.en,
   ...connectionHeartbeatI18n.en,
   ...workStatusAccountsI18n.en,
   ...compactionSettingsI18n.en,
@@ -260,10 +268,13 @@ export const dict = {
   ...pluginsGridI18n.en,
   ...integrationsCatalogI18n['en'],
   ...diffFindI18n['en'],
+  ...diffReviewedI18n['en'],
   ...contextWindowI18n['en'],
   ...markdownOutlineI18n['en'],
   ...markdownGithubI18n['en'],
   ...autocompleteScopeI18n['en'],
+  ...chatExchangeI18n['en'],
+  ...integrateConflictI18n['en'],
   ...workflowsI18n['en'],
   ...subagentsI18n['en'],
   ...sessionReferencesI18n['en'],
@@ -423,10 +434,6 @@ export const dict = {
   'mobile.menu.update': 'Update',
   'mobile.menu.settings': 'Settings',
   'mobile.sessions.newChatCta': 'New chat in {project}',
-  'mobile.sessions.dateGroup.today': 'Today',
-  'mobile.sessions.dateGroup.yesterday': 'Yesterday',
-  'mobile.sessions.dateGroup.thisWeek': 'Earlier this week',
-  'mobile.sessions.dateGroup.older': 'Older',
   'mobile.sessions.section.worktrees': 'Worktrees',
   'mobile.sessions.section.otherProjects': 'Switch project',
   'mobile.sessions.section.projects': 'Projects',
@@ -703,6 +710,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
   'sessions.sidebar.header.displayMode.showWork': 'Show in work section',
   'sessions.sidebar.header.displayMode.showPinned': 'Show pinned section',
+  'sessions.sidebar.header.displayMode.showSubagents': 'Show subagent sessions',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Detailed rows',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'Name worktrees by branch',
   'sessions.sidebar.activity.pinnedTitle': 'Pinned',
@@ -731,6 +739,7 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.description': 'Try a different title or branch.',
   'sessions.sidebar.activity.chatsTitle': 'Chats',
   'sessions.sidebar.activity.chatsEmpty': 'No chats yet.',
+  'sessions.sidebar.timeline.noSessionsYet': 'No sessions yet',
   'chat.chatInput.chooseProject': 'Choose project',
   'sessions.sidebar.header.projectDisplay.label': 'Show projects',
   'sessions.sidebar.header.projectDisplay.all': 'All projects',
@@ -879,6 +888,8 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Moving session to a new worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',
   'sessions.sidebar.session.status.questionPending': 'Pending question',
+  'sessions.sidebar.session.status.permissionRequiredOpen': 'Permission required. Opens the session that asks',
+  'sessions.sidebar.session.status.questionPendingOpen': 'Pending question. Opens the session that asks',
   'sessions.sidebar.session.status.activeFor': 'Active for {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': 'Last turn took {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Collapse subsessions',
@@ -1602,6 +1613,7 @@ export const dict = {
   'walkthrough.blocked.emptyDiff.description': 'There are no changes in this scope yet.',
   'walkthrough.blocked.contextTooSmall.title': 'This diff is too large for the current model',
   'walkthrough.blocked.contextTooSmall.description': '{model} fits about {available}K characters and this diff needs about {required}K. Nothing gets truncated — pick a model with a larger context instead.',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': '{model} refused this diff because it is too long. Pick a model with a larger context, or review a narrower scope.',
   'walkthrough.blocked.structuredOutput.title': 'This model cannot produce structured output',
   'walkthrough.blocked.structuredOutput.description': '{model} does not support the structured responses a walkthrough needs.',
   'walkthrough.blocked.chooseModel': 'Choose the small model',
@@ -1678,6 +1690,7 @@ export const dict = {
   'contextPanel.browser.annotate.intro': 'This is an annotated selection from the in-app browser.',
   'contextPanel.browser.annotate.attached': 'Annotation attached to chat',
   'contextPanel.browser.annotate.noSession': 'Open a chat session before attaching an annotation',
+  'contextPanel.browser.annotate.readOnly': 'This chat is read-only, so annotations cannot be attached to it',
   'contextPanel.browser.annotate.noPage': 'Load a page before annotating',
   'contextPanel.browser.annotate.failed': 'Could not annotate this page',
   'contextPanel.browser.annotate.tool.element': 'Element',
@@ -2000,6 +2013,8 @@ export const dict = {
   'diffView.state.loadingDiff': 'Loading diff...',
   'diffView.state.loadingChanges': 'Loading changes...',
   'diffView.state.largeDiff': 'Large diff ({count} changed lines)',
+  'diffView.state.largeDiffLongLines': 'Large diff (very long lines)',
+  'diffView.state.largeFile': 'Large file',
   'diffView.state.largeDiffDescription': 'Rendering may be slow. You can still view the diff by clicking below.',
   'diffView.summary.changedFilesSingle': '{count} file changed',
   'diffView.summary.changedFilesPlural': '{count} files changed',
@@ -2024,6 +2039,10 @@ export const dict = {
   'diffView.layout.sideBySide': 'Side-by-side view',
   'diffView.actions.wrapLines': 'Wrap lines',
   'diffView.actions.moreActions': 'More actions',
+  'diffView.actions.viewOptions': 'Diff view options',
+  'gitView.sidebar.resizeAria': 'Resize Git sidebar',
+  'gitView.commit.stagedCountSummary': '{count} staged',
+  'gitView.commit.collapseAria': 'Collapse commit form',
   'diffView.actions.openFileInEditorAtChange': 'Open this file in editor at change',
   'diffView.actions.openFileAtFirstChangedLine': 'Open this file at first changed line',
   'diffView.actions.reviewAria': 'Review changes',
@@ -2419,6 +2438,9 @@ export const dict = {
   'session.githubPrPicker.empty.noPullRequestsFound': 'No pull requests found',
   'session.githubPrPicker.loading.pullRequests': 'Loading pull requests...',
   'session.githubPrPicker.actions.loadMore': 'Load more',
+  'session.githubPrPicker.filter.group.repository': 'Repository',
+  'session.githubPrPicker.filter.group.author': 'Author',
+  'session.githubPrPicker.filter.clearAll': 'Clear filters',
   'session.newWorktree.title': 'New worktree',
   'session.newWorktree.mode.newBranch': 'New branch',
   'session.newWorktree.mode.existingBranch': 'Existing branch',
@@ -2561,6 +2583,7 @@ export const dict = {
   'chat.revert.toast.undo': 'Reverted to {preview}',
   'chat.revert.toast.redo': 'Redone',
   'chat.revert.toast.restored': 'Restored all messages',
+  "chat.revert.toast.filesUnchanged": "Chat reverted. Files weren't changed.",
   'chat.toast.opencodeRestartInterrupted.title': 'Chat interrupted',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode restarted while a response was still running. Send a message to continue.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode restarted while a response was still running. The chat will resume automatically; send a message if it does not.',
@@ -2693,6 +2716,7 @@ export const dict = {
   'chat.textSelection.title.saveInsightToNotes': 'Save selected text to notes',
   'chat.messageBody.actions.revertAria': 'Revert to this message',
   'chat.messageBody.actions.revert': 'Revert from here',
+  'chat.messageBody.status.waitingForAgent': 'Waiting for the agent',
   'chat.messageBody.actions.forkAria': 'Fork from this message',
   'chat.messageBody.actions.fork': 'Fork from here',
   'chat.messageBody.actions.copyMessageAria': 'Copy message text',
@@ -2793,6 +2817,7 @@ export const dict = {
   'chat.chatInput.toast.sendAttachmentsFailed': 'Failed to send attachments. Try fewer files or smaller images.',
   'chat.chatInput.toast.messageSendFailed': 'Message failed to send. Attachments restored.',
   'chat.chatInput.toast.agentUnavailable': 'Agent "{agent}" isn\'t available in this session\'s folder. Pick another agent and send again.',
+  'chat.chatInput.toast.skillLoadFailed': 'Skill "{skill}" didn\'t load from its MCP server. Check that the server is connected in Settings, then send again.',
   'chat.chatInput.toast.noModelSelected': 'Select a provider and model before sending.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Failed to attach image from clipboard',
   'chat.chatInput.toast.clipboardTextAttachFailed': 'Failed to attach pasted text as a file',
@@ -3144,6 +3169,11 @@ export const dict = {
   'openInApp.actions.copyPath': 'Copy Path',
   'openInApp.actions.refreshApps': 'Refresh Apps',
   'openInApp.toast.pathCopied': 'Path copied to clipboard',
+  'openInApp.toast.sshOpenFailed': 'Couldn\'t open {app}. Check that it\'s installed on this computer.',
+  'openInApp.toast.sshInstanceChanged': 'This window switched to another instance before {app} opened. Try again.',
+  'openInApp.toast.sshSettingsMismatch': '{app} wouldn\'t connect the way this instance does: its SSH command sets {settings}, which {app} doesn\'t read. Move them to the host\'s entry in ~/.ssh/config.',
+  'openInApp.toast.sshUnresolved': 'Couldn\'t read this instance\'s SSH settings, so {app} wasn\'t opened. Check its SSH command.',
+  'openInApp.toast.sshUnsupported': '{app} can\'t open this project over SSH.',
   'projectActions.actions.addActionAria': 'Add action',
   'projectActions.actions.addAction': 'Add action',
   'projectActions.actions.addNewAction': 'Add new action',

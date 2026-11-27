@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app-icon quick actions, mirroring the iOS UIApplicationShortcutItems in Info.plist.
+     New session opens the same openchamber:// deep link the web layer routes. Dictate starts the
+     microphone, which no link may do, so it targets the unexported DictateShortcut alias of
+     MainActivity instead: only this app and the launcher (which starts shortcuts as this app) can
+     reach it. The icons are plain vector glyphs rather than the adaptive launcher icon, which
+     renders as an empty square in the menu. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new-session"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_new_session"
+        android:shortcutShortLabel="@string/shortcut_new_session">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.openchamber.app"
+            android:targetClass="com.openchamber.app.MainActivity"
+            android:data="openchamber://new" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="dictate"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_dictate"
+        android:shortcutShortLabel="@string/shortcut_dictate">
+        <intent
+            android:action="com.openchamber.app.action.DICTATE"
+            android:targetPackage="com.openchamber.app"
+            android:targetClass="com.openchamber.app.DictateShortcut" />
+    </shortcut>
+</shortcuts>

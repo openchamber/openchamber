@@ -14,6 +14,7 @@ interface HubOptions extends UpstreamConnection {
   replayByteLimit?: number;
   deltaCoalesceWindowMs?: number;
   isHiddenPayload?: (payload: JsonValue) => boolean;
+  admitPayload?: (payload: JsonValue) => JsonValue[];
 }
 
 export interface ReplayEntry {
@@ -54,6 +55,7 @@ export function createGlobalMessageStreamHub({
   replayByteLimit = MESSAGE_STREAM_GLOBAL_REPLAY_BYTES,
   deltaCoalesceWindowMs = DELTA_COALESCE_WINDOW_MS,
   isHiddenPayload = () => false,
+  admitPayload = (payload) => [payload],
 }: HubOptions) {
   if (!Number.isSafeInteger(replayLimit) || replayLimit < 0 || !Number.isSafeInteger(replayByteLimit) || replayByteLimit < 0) {
     throw new RangeError('Replay limits must be nonnegative safe integers');
@@ -192,7 +194,9 @@ export function createGlobalMessageStreamHub({
       },
       onEvent(event) {
         if (isHiddenPayload(event?.payload) || isStaleTurnBoundary(event.payload)) return;
-        coalescer.push(event);
+        for (const payload of admitPayload(event.payload)) {
+          coalescer.push(payload === event.payload ? event : { envelope: { directory: event.envelope.directory, spaceId: event.envelope.spaceId ?? null }, payload });
+        }
       },
       onError(error) {
         if (controller?.signal.aborted) {

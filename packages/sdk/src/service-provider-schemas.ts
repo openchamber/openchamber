@@ -35,6 +35,7 @@ import {
   type TrackerProviderStatesData,
 } from './service-providers.ts';
 import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
+import { SOURCE_CONTROL_REVIEW_STATES } from './source-control-reviews.ts';
 
 export const browserProviderResultSchema = z.union([
   z.object({ ok: z.literal(true), data: z.object({}).passthrough() }),
@@ -179,6 +180,57 @@ const liveSummariesSchema = z.object({
   issueSummaries: z.array(liveIssueSummarySchema).max(LIVE_SUMMARIES_MAX),
 });
 
+const reviewPersonSchema = z.object({
+  login: z.string().min(1).max(256),
+  avatarUrl: z.string().max(2_048).optional(),
+});
+
+const reviewPath = z.string().min(1).max(4_096);
+
+const reviewDraftCommentSchema = z.object({
+  id: text,
+  path: reviewPath,
+  side: z.enum(['old', 'new']),
+  line: z.number().int().positive().nullable(),
+  startLine: z.number().int().positive().nullable(),
+  body: z.string().max(1_000_000),
+  author: reviewPersonSchema.nullable(),
+}).strict();
+
+const reviewThreadCommentSchema = z.object({
+  id: text,
+  body: z.string().max(1_000_000),
+  createdAt: z.string().max(64),
+  url: z.string().max(2_048),
+  author: reviewPersonSchema.nullable(),
+}).strict();
+
+const reviewThreadSchema = z.object({
+  id: text,
+  path: reviewPath,
+  side: z.enum(['old', 'new']),
+  line: z.number().int().positive().nullable(),
+  startLine: z.number().int().positive().nullable(),
+  resolved: z.boolean(),
+  outdated: z.boolean().optional(),
+  canReply: z.boolean(),
+  canResolve: z.boolean(),
+  comments: z.array(reviewThreadCommentSchema).max(1_000),
+}).strict();
+
+const reviewStateSchema = z.object({
+  connected: z.literal(true),
+  viewerIsAuthor: z.boolean(),
+  headSha: commitSha,
+  draft: z.object({
+    id: text,
+    body: z.string().max(1_000_000),
+    comments: z.array(reviewDraftCommentSchema).max(1_000),
+  }).strict().nullable(),
+  threads: z.array(reviewThreadSchema).max(1_000),
+  truncated: z.boolean(),
+}).strict();
+
 const identitySchema = z.object({ provider: text, instance: text }).passthrough();
 const projectSchema = z.object({ provider: text, instance: text, id: text, owner: text, name: text, url: text }).passthrough();
 
@@ -220,22 +272,6 @@ const referencesCarrierSchema = jsonObject.refine(
   (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
   { message: 'answer is larger than the response cap' },
 ).transform(withValidReferences);
-
-const changeRequestContextSchema = z.object({
-  reviewerStates: z.unknown().optional(),
-}).passthrough().refine(
-  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
-  { message: 'answer is larger than the response cap' },
-).transform(({ reviewerStates, ...rest }) => {
-  const states = Array.isArray(reviewerStates)
-    ? reviewerStates.flatMap((entry) => {
-      const parsed = reviewerStateSchema.safeParse(entry);
-      return parsed.success ? [parsed.data] : [];
-    })
-    : [];
-  const context = withValidReferences(rest);
-  return states.length > 0 ? { ...context, reviewerStates: states } : context;
-});
 
 const STACK_LAYERS_MAX = 50;
 
@@ -289,6 +325,44 @@ const passThroughSchema = z.union([jsonObject, z.array(z.json())]).refine(
   { message: 'answer is larger than the response cap' },
 );
 
+const SOURCE_CONTROL_REVIEW_LIST_MAX = 1_000;
+
+const changeRequestReviewSchema = z.object({
+  id: z.string().min(1).max(256),
+  state: z.enum(SOURCE_CONTROL_REVIEW_STATES),
+  author: z.object({
+    login: z.string().min(1).max(256),
+    avatarUrl: z.string().max(2_048).optional(),
+  }).passthrough().nullable().optional(),
+  submittedAt: z.string().max(64).nullable().optional(),
+}).passthrough();
+
+const changeRequestContextSchema = z.object({
+  reviewerStates: z.unknown().optional(),
+  reviews: z.unknown().optional(),
+}).passthrough().transform(({ reviewerStates, reviews, ...rest }) => {
+  const states = Array.isArray(reviewerStates)
+    ? reviewerStates.flatMap((entry) => {
+      const parsed = reviewerStateSchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    })
+    : [];
+  const parsedReviews = !Array.isArray(reviews) || reviews.length > SOURCE_CONTROL_REVIEW_LIST_MAX
+    ? undefined
+    : reviews.flatMap((entry) => {
+      const parsed = changeRequestReviewSchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    });
+  const context = withValidReferences(rest);
+  const withStates = states.length > 0 ? { ...context, reviewerStates: states } : context;
+  if (parsedReviews === undefined) return withStates;
+  if (parsedReviews.length > 0) return { ...withStates, reviews: parsedReviews };
+  return Array.isArray(reviews) && reviews.length === 0 ? { ...withStates, reviews: [] } : withStates;
+}).refine(
+  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
+  { message: 'answer is larger than the response cap' },
+);
+
 const dataSchemas = {
   'auth.verify': verifySchema,
   'auth.probe': probeSchema,
@@ -308,6 +382,7 @@ const dataSchemas = {
   liveSummaries: liveSummariesSchema,
   readChangeRequestHead: changeRequestHeadSchema,
   resolveChangeRequestSource: changeRequestSourceSchema,
+  reviewState: reviewStateSchema,
   'mutation.resolveTarget': mutationResolutionSchema,
   'mutation.perform': mutationResultSchema,
   'mutation.reconcile': reconcileSchema,
@@ -334,6 +409,7 @@ export const sourceControlProviderSchemasV1 = {
   reconcile: reconcileSchema,
   liveSummaries: liveSummariesSchema,
   changeRequestStatus: changeRequestStatusSchema,
+  reviewState: reviewStateSchema,
   passThrough: passThroughSchema,
   outboundRequest: outboundRequestSchema,
   data: dataSchemas,

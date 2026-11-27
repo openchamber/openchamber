@@ -15,7 +15,11 @@ describe('catalog request diagnostics', () => {
       expect(useGuestsStore.getState().status).toBe('error');
       expect(useGuestsStore.getState().failure).toEqual({ method: 'GET', path: '/api/guests', kind: 'http', status: 404 });
       fetch.mockResolvedValue(Response.json({ guests: [] }));
-      await loadGuestCatalog();
+      const retry = loadGuestCatalog();
+      const pending = useGuestsStore.getState();
+      await retry;
+      expect(pending.status).toBe('loading');
+      expect(pending.failure).toEqual({ method: 'GET', path: '/api/guests', kind: 'http', status: 404 });
       expect(useGuestsStore.getState().status).toBe('ready');
       expect(useGuestsStore.getState().failure).toBeNull();
     } finally { fetch.mockRestore(); }

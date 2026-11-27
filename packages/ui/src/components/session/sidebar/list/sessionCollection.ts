@@ -8,25 +8,28 @@ import {
 } from '@/sync/session-ordering';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { normalizePath } from '../utils';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
-import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
+import { isSubagentSession, resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { haveSameSidebarHierarchy, haveSameSidebarStructure } from './sidebarStructureKey';
 import { useSidebarReadsActivityTime } from './useSidebarReadsActivityTime';
 import type { SessionNode } from '../types';
+import type { ReadOnlySessionAssociation } from '@/lib/worktrees/readOnlySessionAssociation';
 
 type ProjectSidebarActiveSessionsArgs = {
   globalActiveSessions: Session[];
   liveSessions: Session[];
   knownDirectories: Set<string>;
   isVSCode: boolean;
+  nestedSessionOwners?: ReadonlyMap<string, ReadOnlySessionAssociation>;
 };
 
 type SidebarSessionPartitions = {
@@ -71,6 +74,15 @@ const isKnownActiveSessionDirectory = (
   return knownDirectories.has(directory) || (!isVSCode && [...knownDirectories].some((root) => directory.startsWith(root.endsWith('/') ? root : `${root}/`)));
 };
 
+const hasExactActiveAssociation = (
+  session: Session,
+  nestedSessionOwners: ReadonlyMap<string, ReadOnlySessionAssociation> | undefined,
+): boolean => {
+  if (session.time?.archived || session.parentID) return false;
+  const association = nestedSessionOwners?.get(session.id);
+  return Boolean(association && normalizePath(resolveGlobalSessionDirectory(session)) === normalizePath(association.directory));
+};
+
 const keepKnownSessionsWithDescendants = (
   sessions: readonly Session[],
   isKnown: (session: Session) => boolean,
@@ -96,6 +108,7 @@ export const projectSidebarActiveSessions = ({
   liveSessions,
   knownDirectories,
   isVSCode,
+  nestedSessionOwners,
 }: ProjectSidebarActiveSessionsArgs): Session[] => {
   const sessions = [...globalActiveSessions];
   const knownIds = new Set(globalActiveSessions.map((session) => session.id));
@@ -109,7 +122,8 @@ export const projectSidebarActiveSessions = ({
   const partition = partitionSidebarSessions(sessions, isVSCode);
   return keepKnownSessionsWithDescendants(
     partition.projectSessions,
-    (session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode),
+    (session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode)
+      || (!isVSCode && hasExactActiveAssociation(session, nestedSessionOwners)),
     partition.chatSessions,
   );
 };
@@ -150,6 +164,12 @@ export const getDescendantIds = (
   return descendants;
 };
 
+export const listedAsRoot = (
+  session: Session,
+  nestedSessionIds: ReadonlySet<string>,
+  showSubagentSessions: boolean,
+): boolean => !nestedSessionIds.has(session.id) && (showSubagentSessions || !isSubagentSession(session));
+
 export const buildActiveSessionNode = (
   childrenMap: ReadonlyMap<string, readonly Session[]>,
   session: Session,
@@ -182,6 +202,7 @@ const buildSidebarSessionStructure = ({
   liveSessions,
   knownDirectories,
   isVSCode,
+  nestedSessionOwners,
   globalStructure,
 }: SidebarSessionStructureArgs) => {
   countSyncPerformance('sidebarStructureBuilds');
@@ -191,7 +212,8 @@ const buildSidebarSessionStructure = ({
   const knownDirectoryKeys = new Set([...knownDirectories].map((directory) => isVSCode ? directory.toLowerCase() : directory));
   const projectSessions = keepKnownSessionsWithDescendants(
     partition.projectSessions,
-    (session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode),
+    (session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode)
+      || (!isVSCode && hasExactActiveAssociation(session, nestedSessionOwners)),
     partition.chatSessions,
   );
   const sessions = [...projectSessions, ...partition.chatSessions];
@@ -244,12 +266,14 @@ export const buildSidebarSessionProjection = ({
   isVSCode,
   pinnedSessionIds,
   sessionOrderRanks,
+  nestedSessionOwners,
 }: SidebarSessionProjectionArgs) => {
   const structure = buildSidebarSessionStructure({
     globalActiveSessions,
     liveSessions,
     knownDirectories,
     isVSCode,
+    nestedSessionOwners,
   });
   const ordering = orderSidebarSessionStructure(structure, pinnedSessionIds, sessionOrderRanks);
   const projectSessionIds = new Set(structure.projectSessions.map((session) => session.id));
@@ -298,6 +322,7 @@ export const useSessionProjectCollection = ({
   searchActive,
   projectSortOrder,
 }: UseSessionProjectCollectionArgs) => {
+  const nestedSessionOwners = useSessionUIStore((state) => state.nestedSessionOwners);
   const readsActivityTime = useSidebarReadsActivityTime(searchActive, projectSortOrder);
   const globalActiveSessions = useStructurallyStableSessions(useGlobalSessionsStore((state) => state.activeSessions), readsActivityTime);
   const globalStructure = useStableHierarchy(useGlobalSessionsStore((state) => state.structure));
@@ -325,7 +350,8 @@ export const useSessionProjectCollection = ({
     liveSessions: liveGapSessions,
     knownDirectories,
     isVSCode,
-  }), [globalActiveSessions, globalStructure, isVSCode, knownDirectories, liveGapSessions]);
+    nestedSessionOwners,
+  }), [globalActiveSessions, globalStructure, isVSCode, knownDirectories, liveGapSessions, nestedSessionOwners]);
   const ordering = React.useMemo(
     () => orderSidebarSessionStructure(structure, pinnedSessionIds, sessionOrderRanks),
     [pinnedSessionIds, sessionOrderRanks, structure],
@@ -395,5 +421,6 @@ export const useSessionProjectCollection = ({
     sessions,
     rootSessions,
     sessionById,
+    nestedSessionOwners,
   };
 };

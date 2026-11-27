@@ -1756,6 +1756,76 @@ describe('docker place over SSH', () => {
     expect(opened).toEqual([['/usr/bin/docker', '--host', HOST, 'exec', '--interactive', '--user', '1000:1000', CONTAINER, ...SPACE_CONNECT_COMMAND]]);
   });
 
+  describe('over a shared connection', () => {
+    const sharedConnections = (leasePath = '/shared:/usr/bin') => {
+      const state = { held: 0, taken: 0, closed: 0, killed: 0, keys: [] };
+      const lease = async (key) => {
+        state.keys.push(key);
+        state.held += 1;
+        state.taken += 1;
+        return { path: leasePath, release: ({ killed } = { killed: false }) => { state.held -= 1; if (killed) state.killed += 1; } };
+      };
+      return { state, lease, close: () => { state.closed += 1; } };
+    };
+
+    it('runs every docker command through the connection and gives it back, after a failed command too', async () => {
+      const { fake, runCommand } = remoteFake();
+      const connections = sharedConnections();
+      const paths = new Set();
+      const place = remotePlace((file, args, options) => { paths.add(options.env?.PATH); return runCommand(file, args, options); }, fake, { connections });
+      await place.list();
+      await expect(place.exec('0f0f0f0f0f0f', ['/bin/true'])).rejects.toMatchObject({ code: 'space_not_found' });
+      const failing = remotePlace(async () => { throw new SpaceError('command_timeout', 'too slow'); }, fake, { connections });
+      await expect(failing.list()).rejects.toMatchObject({ code: 'command_timeout' });
+      expect(connections.state.killed).toBe(3);
+      expect([...paths]).toEqual(['/shared:/usr/bin']);
+      expect(connections.state.taken).toBeGreaterThan(7);
+      expect(connections.state.held).toBe(0);
+      place.close();
+      expect(connections.state.closed).toBe(1);
+    });
+
+    it('gives the dispatcher a stream that holds the space\'s connection until it closes, and git a plain argv', async () => {
+      const { fake, runCommand } = remoteFake();
+      const connections = sharedConnections();
+      const opened = [];
+      const exits = [];
+      const stream = {};
+      const place = remotePlace(runCommand, fake, { connections, openCommandStream: (file, args, options) => { opened.push([options.env.PATH, file]); exits.push(options.onExit); return stream; } });
+      expect((await place.execArgv(ID)).slice(0, 3)).toEqual(['/usr/bin/docker', '--host', HOST]);
+      await place.connect(ID);
+      expect(opened).toEqual([['/shared:/usr/bin', '/usr/bin/docker']]);
+      expect(connections.state.held).toBe(1);
+      expect(connections.state.keys).toEqual([null, null, ID]);
+      exits[0]({ clean: true });
+      expect(connections.state.held).toBe(0);
+      await place.exec(ID, ['/bin/true']);
+      expect(connections.state.keys.slice(-2)).toEqual([null, ID]);
+      expect(connections.state.killed).toBe(0);
+      await place.connect(ID);
+      exits[1]({ clean: false });
+      expect(connections.state).toMatchObject({ held: 0, killed: 1 });
+    });
+
+    it('lists the kinds at once only while a connection is shared, so nothing else opens more logins than before', async () => {
+      const most = async (shared) => {
+        const { fake, runCommand } = remoteFake();
+        let running = 0;
+        let peak = 0;
+        const place = remotePlace(async (...args) => {
+          running += 1;
+          peak = Math.max(peak, running);
+          await Promise.resolve();
+          try { return await runCommand(...args); } finally { running -= 1; }
+        }, fake, { connections: sharedConnections(shared ? '/shared:/usr/bin' : null) });
+        expect((await place.list()).map((space) => space.id)).toEqual([ID]);
+        return peak;
+      };
+      expect(await most(false)).toBe(1);
+      expect(await most(true)).toBe(3);
+    });
+  });
+
   describe('check', () => {
     const checkWith = (runCommand) => placeOn(runCommand, { dockerPath: '/usr/bin/docker', dockerHost: HOST, id: 'docker-ssh' }).check();
     const client = JSON.stringify({ Client: { Version: '29.3.0' }, Server: null });

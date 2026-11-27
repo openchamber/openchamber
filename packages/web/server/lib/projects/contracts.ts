@@ -44,7 +44,7 @@ export interface PersonalProjectSetup extends Omit<SharedProjectConfig, 'plansDi
 export type SharedProjectRead<Document extends SharedProjectDocument = SharedProjectDocument> =
   | { status: 'ok'; config: SharedProjectConfig; document: Document }
   | { status: 'missing'; document?: never }
-  | { status: 'invalid'; reason: string; document?: Document };
+  | { status: 'invalid'; reason: string; unread?: boolean; document?: Document };
 
 export interface StoredProjectSetupPatch {
   'setup-worktree'?: string[];
@@ -111,6 +111,7 @@ export type ScheduledTaskState = {
   lastDurationMs?: number | undefined;
   nextRunAt?: number | undefined;
   lastScheduledFor?: number | undefined;
+  waitingForFolder?: number | undefined;
   lastSessionId?: string | undefined;
   lastError?: string | undefined;
   lastRunIsolated?: boolean | undefined;
@@ -187,6 +188,7 @@ export interface ScheduledTaskStatePatch {
   lastDurationMs?: unknown;
   nextRunAt?: unknown;
   lastScheduledFor?: unknown;
+  waitingForFolder?: unknown;
   lastSessionId?: unknown;
   lastError?: unknown;
   lastRunIsolated?: unknown;

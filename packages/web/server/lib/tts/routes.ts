@@ -9,7 +9,9 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
-import { describeVoiceKeys, readVoiceKey, updateVoiceKeys, voiceKeysPatchSchema } from './voice-keys.js';
+import { approveProviderServer, approveSpeechServer, describeVoiceKeys, readSpeechServerKey, readVoiceKey, speechServerKeyId, updateVoiceKeys, voiceKeysPatchSchema } from './voice-keys.js';
+import { approvedProviderKey, describeKeyProviders, findKeyProvider } from './provider-keys.js';
+import { listCustomServerVoices } from './voices.js';
 
 const optionalText = z.string().optional().catch(undefined);
 const optionalNumber = z.number().optional().catch(undefined);
@@ -21,6 +23,7 @@ const speakBodySchema = z.object({
   speed: optionalNumber,
   instructions: optionalText,
   apiKey: optionalText,
+  keyProvider: optionalText,
   baseURL: z.unknown().optional(),
   endpointPath: z.unknown().optional(),
 }).catch({});
@@ -40,14 +43,40 @@ const sayBodySchema = z.object({
   languageSample: optionalText,
 }).catch({});
 
+const voicesBodySchema = z.object({
+  baseURL: z.unknown().optional(),
+  keyProvider: optionalText,
+}).catch({});
+
+const voicesApprovalBodySchema = z.object({
+  baseURL: z.unknown().optional(),
+  keyId: optionalText,
+  keyProvider: optionalText,
+}).catch({});
+
+const voiceKeysQuerySchema = z.object({ speechServer: optionalText }).catch({});
+
+const keyProvidersQuerySchema = z.object({ baseURL: optionalText }).catch({});
+
 const sttHeadersSchema = z.object({
   'content-type': optionalText,
   'x-base-url': optionalText,
+  'x-key-provider': optionalText,
   'x-model': optionalText,
   'x-language': optionalText,
   'x-endpoint-path': z.unknown().optional(),
   authorization: optionalText,
 }).catch({});
+
+const checkVoicesBaseURL = (baseURL: z.infer<typeof voicesBodySchema>['baseURL']) => {
+  const base = normalizeCustomOpenAIBaseURL(baseURL);
+  if (base.value) return { value: base.value };
+  return {
+    status: base.code === 'enterprise_mode' ? 403 : 400,
+    error: base.error ?? 'A custom server URL is required',
+    code: base.code ?? 'invalid_base_url',
+  };
+};
 
 const bodyOf = <Body>(body: Body) => body || {};
 
@@ -65,14 +94,24 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
   };
 
   app.get('/api/voice/keys', (_req, res) => {
-    res.json(describeVoiceKeys());
+    res.json({ ...describeVoiceKeys(), openaiCompatibleKeyId: speechServerKeyId() });
   });
 
   app.put('/api/voice/keys', express.json({ limit: '16kb' }), (req, res) => {
     try {
-      res.json(updateVoiceKeys(voiceKeysPatchSchema.parse(req.body)));
+      const state = updateVoiceKeys(voiceKeysPatchSchema.parse(req.body), voiceKeysQuerySchema.parse(req.query).speechServer);
+      res.json({ ...state, openaiCompatibleKeyId: speechServerKeyId() });
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid voice keys' });
+    }
+  });
+
+  app.get('/api/voice/key-providers', async (req, res) => {
+    try {
+      res.json({ providers: await describeKeyProviders(keyProvidersQuerySchema.parse(req.query).baseURL) });
+    } catch (error) {
+      console.warn('[voice] OpenCode providers are unreadable:', error instanceof Error ? error.message : error);
+      res.status(503).json({ error: 'The OpenCode providers could not be read' });
     }
   });
 
@@ -113,7 +152,7 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
       return res.status(415).json({ error: 'Send the speech request as JSON' });
     }
     try {
-      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, apiKey, baseURL, endpointPath } = speakBodySchema.parse(bodyOf(req.body));
+      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, apiKey, keyProvider, baseURL, endpointPath } = speakBodySchema.parse(bodyOf(req.body));
 
       const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
       if (normalizedBaseURLResult.error) {
@@ -142,13 +181,12 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
 
       const { ttsService } = await getTtsModule();
 
-      const hasServerKey = await ttsService.isAvailable();
       const hasCustomBaseURL = normalizedBaseURL !== undefined && normalizedBaseURL.length > 0;
       const requestKey = apiKey?.trim() ? apiKey.trim() : undefined;
-      const clientKey = requestKey ?? readVoiceKey(hasCustomBaseURL ? 'openaiCompatible' : 'openai');
-      const hasClientKey = Boolean(clientKey);
+      const typedKey = requestKey ?? readVoiceKey(hasCustomBaseURL ? 'openaiCompatible' : 'openai');
+      const providerKey = typedKey === undefined ? await approvedProviderKey(keyProvider, normalizedBaseURL) : undefined;
 
-      if (!hasServerKey && !hasClientKey && !hasCustomBaseURL) {
+      if (!hasCustomBaseURL && !typedKey && !(await ttsService.isAvailable())) {
         return res.status(503).json({ 
           error: 'TTS service not available. Please configure OpenAI in OpenCode, provide an API key, or set a custom server URL in settings.' 
         });
@@ -162,7 +200,8 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
         model,
         speed,
         instructions,
-        apiKey: clientKey,
+        apiKey: typedKey,
+        providerKey,
         baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
         endpointPath: hasCustomBaseURL ? normalizedEndpointPath : undefined,
       });
@@ -180,6 +219,40 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
           detail: { model: detail.model, voice: detail.voice, hasBaseURL: !!detail.baseURL },
         });
       }
+    }
+  });
+
+  app.post('/api/tts/voices', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the voice list request as JSON' });
+    }
+    const { baseURL, keyProvider } = voicesBodySchema.parse(bodyOf(req.body));
+    const base = checkVoicesBaseURL(baseURL);
+    if (!base.value) return res.status(base.status).json({ error: base.error, code: base.code });
+    const typed = readSpeechServerKey(base.value);
+    const providerKey = typed === null ? await approvedProviderKey(keyProvider, base.value) : undefined;
+    const result = await listCustomServerVoices(base.value, { apiKey: typed?.approvedKey, providerKey });
+    if (result.code) {
+      const keyWithheld = result.code === 'rejected_key' && typed !== null && typed.approvedKey === undefined;
+      return res.status(502).json({ code: keyWithheld ? 'key_not_sent' : result.code, keyId: typed?.keyId });
+    }
+    return res.json({ voices: result.voices, keyId: typed?.keyId });
+  });
+
+  app.post('/api/tts/voices/approval', async (req, res) => {
+    if (!req.is('application/json')) {
+      return res.status(415).json({ error: 'Send the approval as JSON' });
+    }
+    const { baseURL, keyId, keyProvider } = voicesApprovalBodySchema.parse(bodyOf(req.body));
+    const base = checkVoicesBaseURL(baseURL);
+    if (!base.value) return res.status(base.status).json({ error: base.error, code: base.code });
+    try {
+      if (!keyProvider) return res.json({ approval: approveSpeechServer(base.value, keyId ?? '') });
+      const provider = await findKeyProvider(keyProvider);
+      return res.json({ approval: provider ? approveProviderServer(provider, base.value, keyId ?? '') : 'refused' });
+    } catch (error) {
+      console.error('[TTS] Could not store the speech server approval:', error);
+      return res.status(500).json({ error: 'Could not store the approval' });
     }
   });
 
@@ -307,7 +380,8 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
         }
         const endpointPath = endpointPathResult.value;
         const authHeader = headers.authorization?.trim() ?? '';
-        const apiKey = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
+        const apiKey = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined)
+          || readVoiceKey('stt');
 
         if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
           return res.status(400).json({ error: 'Audio data is required' });
@@ -317,13 +391,14 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
           return res.status(400).json({ error: 'X-Base-URL header is required' });
         }
 
+        const providerKey = apiKey ? undefined : await approvedProviderKey(headers['x-key-provider'], baseURL);
         console.log('[STT] Transcribing audio:', {
           bytes: req.body.length,
           mimeType,
           model,
           baseURL,
           language,
-          hasApiKey: !!apiKey,
+          hasApiKey: Boolean(apiKey || providerKey),
         });
 
         const transcript = await transcribeAudio({
@@ -332,11 +407,12 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
           model,
           baseURL,
           apiKey,
+          providerKey,
           language,
           endpointPath,
         });
 
-        console.log('[STT] Transcript:', transcript?.slice(0, 120));
+        console.log('[STT] Transcript:', providerKey ? { length: transcript?.length } : transcript?.slice(0, 120));
         res.json({ transcript: transcript ?? '' });
       } catch (error) {
         console.error('[STT] Error:', error);

@@ -20,7 +20,7 @@ type MoveSessionImplementation = (
   session: Session,
   sourceDirectory: string,
   destinationDirectory: string,
-) => Promise<void>;
+) => Promise<string | void>;
 type RefreshImplementation = (directories: string[]) => Promise<void>;
 type CreateQuickWorktreeOptions = { preferredName?: string; startRef?: string };
 type GitStatusResult = {
@@ -51,7 +51,7 @@ const metadataWrites: Array<{ sessionId: string; metadata: WorktreeMetadata | nu
 const toastSuccesses: string[] = [];
 const toastErrors: Array<{ title: string; description?: string }> = [];
 const toastWarnings: string[] = [];
-const titleWrites: Array<{ directory: string; title: string; by: 'agent' | 'user' }> = [];
+const titleWrites: Array<{ directory: string; title: string; by: 'agent' | 'user'; session?: string }> = [];
 const directoryStates = new Map<string, DirectoryState>();
 const storedMetadata = new Map<string, WorktreeMetadata | null>();
 const originalConsoleWarn = console.warn;
@@ -123,8 +123,8 @@ mock.module('@/components/ui', () => ({
 mock.module('@/lib/gitApi', () => ({
   checkIsGitRepository: (directory: string) => isGitRepositoryImplementation(directory),
   getGitStatus: (directory: string) => getGitStatusImplementation(directory),
-  setGitWorktreeTitle: (directory: string, title: string, by: 'agent' | 'user') => {
-    titleWrites.push({ directory, title, by });
+  setGitWorktreeTitle: (directory: string, title: string, by: 'agent' | 'user', session?: string) => {
+    titleWrites.push({ directory, title, by, session });
     return Promise.resolve({ applied: true, title });
   },
   deleteRemoteBranch: mock(),
@@ -239,8 +239,9 @@ const getSessionLiveActivity = (sessionId: string): 'unknown' | 'idle' | 'active
 mock.module('@/sync/session-actions', () => ({
   moveSessionToDirectory: async (session: Session, sourceDirectory: string, destinationDirectory: string, isCurrent?: () => boolean) => {
     moveCalls.push({ sessionId: session.id, sourceDirectory, destinationDirectory });
-    await moveSessionImplementation(session, sourceDirectory, destinationDirectory);
+    const placedDirectory = await moveSessionImplementation(session, sourceDirectory, destinationDirectory);
     if (!isCurrent || isCurrent()) publishedMoves.push(session.id);
+    return placedDirectory ?? destinationDirectory;
   },
   // As the real one: the stores answer first, then the server's map of running sessions.
   readSessionsLiveActivity: async (sessionIds: string[], directory: string) => {
@@ -651,6 +652,32 @@ describe('moveSessionTreeToExistingWorktree', () => {
     expect(refreshCalls).toEqual([]);
   });
 
+  test('rolls a child back from the real folder the server placed it in, not the requested alias', async () => {
+    const root = makeSession('root');
+    const child = makeSession('child');
+    const previousChildMetadata = makeWorktreeMetadata({ path: '/old-child', label: 'Old child' });
+    setStatuses('/source', { root: 'idle', child: 'idle' });
+    storedMetadata.set(child.id, previousChildMetadata);
+    moveSessionImplementation = async (session, sourceDirectory, destinationDirectory) => {
+      if (session.id === 'root') throw new Error('root failed');
+      return destinationDirectory === '/destination' ? '/real-destination' : undefined;
+    };
+
+    await expect(moveSessionTreeToExistingWorktree({
+      root,
+      descendants: [child],
+      sourceDirectory: '/source',
+      destination: makeWorktreeMetadata(),
+    })).rejects.toThrow('root failed');
+
+    expect(moveCalls).toEqual([
+      { sessionId: 'child', sourceDirectory: '/source', destinationDirectory: '/destination' },
+      { sessionId: 'root', sourceDirectory: '/source', destinationDirectory: '/destination' },
+      { sessionId: 'child', sourceDirectory: '/real-destination', destinationDirectory: '/source' },
+    ]);
+    expect(storedMetadata.get(child.id)).toBe(previousChildMetadata);
+  });
+
   test('rolls back an earlier child and never moves a later descendant that becomes busy', async () => {
     const root = makeSession('root');
     const childA = makeSession('child-a');
@@ -940,9 +967,9 @@ describe('moveSessionTreeToExistingWorktree', () => {
     requestSessionTreeMove({ ...makeQuickIntent(), root: { ...makeSession('user'), title: 'My task', metadata: { openchamber: { workTitle: { title: 'My task', by: 'user' } } } } });
     await waitFor(() => toastSuccesses.length === 3);
     expect(titleWrites).toEqual([
-      { directory: '/created-worktree', title: 'Login fix', by: 'agent' },
-      { directory: '/created-worktree', title: 'Generated title', by: 'agent' },
-      { directory: '/created-worktree', title: 'My task', by: 'user' },
+      { directory: '/created-worktree', title: 'Login fix', by: 'agent', session: 'named' },
+      { directory: '/created-worktree', title: 'Generated title', by: 'agent', session: 'plain' },
+      { directory: '/created-worktree', title: 'My task', by: 'user', session: 'user' },
     ]);
   });
 

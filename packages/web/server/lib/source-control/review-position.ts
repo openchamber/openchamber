@@ -9,6 +9,7 @@ export interface ReviewDraftContext {
 interface ReviewDraftDependencies<Body extends string | undefined = string | undefined> {
   commentText(value: SourceControlJson | undefined, required: true): Body;
   fail(message: string): never;
+  fileComments?: boolean;
 }
 
 const PATH_MAX_LENGTH = 4096;
@@ -27,7 +28,7 @@ export function reviewCommentPosition(body: SourceControlJsonObject, fail: Revie
   return { path: body.path, side: body.side, startLine: body.startLine, line: body.line };
 }
 
-export function reviewDraftEntries<Body extends string | undefined>({ commentText, fail }: ReviewDraftDependencies<Body>) {
+export function reviewDraftEntries<Body extends string | undefined>({ commentText, fail, fileComments = true }: ReviewDraftDependencies<Body>) {
   const requireTarget = (context: ReviewDraftContext) => {
     if (!context.target.number) fail('target number is required');
   };
@@ -43,6 +44,7 @@ export function reviewDraftEntries<Body extends string | undefined>({ commentTex
         requireTarget(context);
         if (!context.target.headSha) fail('target head SHA is required');
         const position = reviewCommentPosition(isPlainObject(input) ? input : {}, fail);
+        if (!fileComments && !('line' in position)) fail('This host comments on lines only, not on a whole file');
         const body = commentText(input.body, true);
         return { position, body, digest: { ...position, body } };
       },

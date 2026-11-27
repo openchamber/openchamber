@@ -1,6 +1,6 @@
 import { parseModelIdentifier, parseModelSelection } from '@/lib/modelIdentifier';
 import { type Model, findCatalogModel, type Agent } from '@/lib/opencode/model';
-import { type ConfigStore, type CurrentVariantSelection, type DirectoryScopedConfig, type ProviderWithModelList, type ProviderModelSelection, type DefaultAgentModelSelection, type GitModelSelection } from './types';
+import { type ConfigStore, type CurrentVariantSelection, type DirectoryScopedConfig, type ProviderWithModelList, type ProviderModelSelection, type DefaultAgentModelSelection } from './types';
 import { listModelVariantIds, modelVariantNames } from '@/lib/modelVariants';
 import { type EffortChoice, resolveEffortChoice, readRememberedEffort } from '@/lib/modelEfforts';
 import { isAutoModel } from '@/lib/routing/autoModel';
@@ -12,8 +12,6 @@ import { isAgentHidden } from '../useAgentsStore';
 
 const FALLBACK_PROVIDER_ID = "opencode";
 const FALLBACK_MODEL_ID = "big-pickle";
-const GIT_UTILITY_PROVIDER_ID = "zen";
-const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 
 export const resolveVariantFromSelection = (selection: CurrentVariantSelection): string | undefined => {
     if (selection.override === null) return undefined;
@@ -118,6 +116,11 @@ export const isMissingFromCatalog = (
     && !isAutoModel(providerId, modelId)
     && !hasProviderModel(providers, providerId, modelId);
 
+const isReplaceableChoice = (providers: ProviderWithModelList[], catalogLoaded: boolean, providerId: string, modelId: string): boolean => (
+    isMissingFromCatalog(providers, catalogLoaded, providerId, modelId)
+    && (providerId === FALLBACK_PROVIDER_ID || providers.some((provider) => provider.id !== FALLBACK_PROVIDER_ID))
+);
+
 type ConfiguredDefault = { model: string | undefined; variant: string | undefined; fallbackVariant?: string };
 
 type ScopeAndSettingsDefaults = {
@@ -166,7 +169,7 @@ const pickConfiguredDefault = (
     for (const candidate of candidates) {
         const parsed = candidate.model ? parseModelString(candidate.model) : null;
         if (!parsed || isStaleAutoSelection(settingsDefaultsLoaded, parsed.providerId, parsed.modelId)) continue;
-        if (isMissingFromCatalog(providers, catalogLoaded, parsed.providerId, parsed.modelId)) continue;
+        if (isReplaceableChoice(providers, catalogLoaded, parsed.providerId, parsed.modelId)) continue;
         return { ...parsed, variant: candidate.variant, fallbackVariant: candidate.fallbackVariant };
     }
     return null;
@@ -246,7 +249,9 @@ export const resolveProviderModelSelection = ({
                 : inherited.variant,
         };
     }
-    const fallback = resolveLastSelectedModel(fallbackPrefs, providers, catalogLoaded) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
+    const fallback = resolveLastSelectedModel(fallbackPrefs, providers, catalogLoaded)
+        ?? firstNamedChoice([...configuredDefaults, ...inheritedDefaults], fallbackPrefs)
+        ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
     if (!fallback) return null;
     return {
         ...fallback,
@@ -278,8 +283,22 @@ const resolveLastSelectedModel = (
     if (!parsed) return null;
     if (isModelHidden(hiddenModels, parsed.providerId, parsed.modelId)) return null;
     if (isStaleAutoSelection(settingsDefaultsLoaded, parsed.providerId, parsed.modelId)) return null;
-    if (isMissingFromCatalog(providers, catalogLoaded, parsed.providerId, parsed.modelId)) return null;
+    if (isReplaceableChoice(providers, catalogLoaded, parsed.providerId, parsed.modelId)) return null;
     return parsed;
+};
+
+const firstNamedChoice = (
+    candidates: ConfiguredDefault[],
+    { hiddenModels, lastSelectedModel, settingsDefaultsLoaded }: FallbackModelPrefs,
+): { providerId: string; modelId: string } | null => {
+    for (const { model } of candidates) {
+        const parsed = model ? parseModelString(model) : null;
+        if (parsed && !isStaleAutoSelection(settingsDefaultsLoaded, parsed.providerId, parsed.modelId)) return parsed;
+    }
+    const lastPick = lastSelectedModel ? parseModelString(lastSelectedModel) : null;
+    const standing = lastPick && !isModelHidden(hiddenModels, lastPick.providerId, lastPick.modelId)
+        && !isStaleAutoSelection(settingsDefaultsLoaded, lastPick.providerId, lastPick.modelId);
+    return standing ? lastPick : null;
 };
 
 const resolveFallbackModel = (
@@ -404,7 +423,7 @@ export const resolveDefaultAgentModelSelection = ({
 
     const agentModel = resolvedAgent?.model;
     if (agentModel?.providerID && agentModel.id
-        && !isMissingFromCatalog(providers, catalogLoaded, agentModel.providerID, agentModel.id)) {
+        && !isReplaceableChoice(providers, catalogLoaded, agentModel.providerID, agentModel.id)) {
         providerId = agentModel.providerID;
         modelId = agentModel.id;
         variant = hasProviderModel(providers, providerId, modelId)
@@ -414,7 +433,7 @@ export const resolveDefaultAgentModelSelection = ({
 
     if (!providerId && opencodeDefaultModel) {
         const parsed = parseModelSelection(opencodeDefaultModel);
-        if (parsed && !isMissingFromCatalog(providers, catalogLoaded, parsed.providerID, parsed.modelID)) {
+        if (parsed && !isReplaceableChoice(providers, catalogLoaded, parsed.providerID, parsed.modelID)) {
             providerId = parsed.providerID;
             modelId = parsed.modelID;
             variant = hasProviderModel(providers, providerId, modelId)
@@ -424,7 +443,12 @@ export const resolveDefaultAgentModelSelection = ({
     }
 
     if (!providerId) {
-        const fallback = resolveLastSelectedModel(fallbackPrefs, providers, catalogLoaded) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
+        const fallback = resolveLastSelectedModel(fallbackPrefs, providers, catalogLoaded)
+            ?? firstNamedChoice([
+                ...scopeDefaultCandidates({ projectDefaultModel, projectDefaultVariant, settingsDefaultModel, settingsDefaultVariant }),
+                ...inheritedDefaultsFor(resolvedAgent ? [resolvedAgent] : [], resolvedAgent?.name, opencodeDefaultModel),
+            ], fallbackPrefs)
+            ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
         providerId = fallback?.providerId;
         modelId = fallback?.modelId;
     }
@@ -434,42 +458,6 @@ export const resolveDefaultAgentModelSelection = ({
     }
 
     return { agentName: resolvedAgent?.name, providerId, modelId, variant };
-};
-
-export const resolveGitGenerationModelSelection = ({
-    providers,
-    settingsZenModel,
-}: {
-    providers: ProviderWithModelList[];
-    settingsZenModel?: string;
-}): GitModelSelection | null => {
-    const zenModel = normalizeOptionalString(settingsZenModel);
-
-    if (!Array.isArray(providers) || providers.length === 0) {
-        if (zenModel) {
-            return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: zenModel };
-        }
-        return null;
-    }
-
-    if (zenModel && hasProviderModel(providers, GIT_UTILITY_PROVIDER_ID, zenModel)) {
-        return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: zenModel };
-    }
-
-    if (hasProviderModel(providers, GIT_UTILITY_PROVIDER_ID, GIT_UTILITY_PREFERRED_MODEL_ID)) {
-        return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: GIT_UTILITY_PREFERRED_MODEL_ID };
-    }
-
-    const zenProvider = providers.find((provider) => provider.id === GIT_UTILITY_PROVIDER_ID);
-    if (zenProvider?.models.length) {
-        const randomIndex = Math.floor(Math.random() * zenProvider.models.length);
-        const randomModelId = normalizeOptionalString(zenProvider.models[randomIndex]?.modelID);
-        if (randomModelId) {
-            return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: randomModelId };
-        }
-    }
-
-    return null;
 };
 
 export const resolveConfiguredDefaultVariant = (

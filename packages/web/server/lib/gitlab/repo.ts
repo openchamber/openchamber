@@ -1,4 +1,5 @@
 import { getRemotes, getStatus } from '../git/index.js';
+import { sshHostReaches, sshRemoteUrlsReaching } from '../git/ssh-host-alias.js';
 import { normalizeGitLabInstance } from './instance.js';
 
 export interface GitLabRemote {
@@ -26,6 +27,7 @@ export interface GitLabProjectDependencies {
     tracking?: string | null;
   } | null>;
   exactRemote?: boolean;
+  sshHostReaches?: (host: string, hostname: string, user: string | null) => Promise<boolean>;
 }
 
 const isRemoteString = (value: unknown): value is string => typeof value === 'string';
@@ -45,17 +47,18 @@ const matchScpRemote = (value: string) => {
   return { host, path };
 };
 
-export function parseGitLabRemoteUrl(raw: string | null | undefined, instance: string) {
+export function parseGitLabRemoteUrl(raw: string | null | undefined, instance: string, sshHosts: ReadonlySet<string> | null = null) {
   if (!isRemoteString(raw) || !raw.trim()) return null;
   const origin = normalizeGitLabInstance(instance);
   const originUrl = new URL(origin);
   const expectedHost = originUrl.host.toLowerCase();
   const expectedHostname = originUrl.hostname.toLowerCase();
   const value = raw.trim();
+  const reachesInstance = sshHosts?.has(value) === true;
 
   const scpMatch = matchScpRemote(value);
   if (scpMatch) {
-    if (scpMatch.host.toLowerCase() !== expectedHostname) return null;
+    if (scpMatch.host.toLowerCase() !== expectedHostname && !reachesInstance) return null;
     const projectPath = normalizeProjectPath(scpMatch.path);
     return projectPath ? { projectPath, url: `${origin}/${projectPath}` } : null;
   }
@@ -71,7 +74,7 @@ export function parseGitLabRemoteUrl(raw: string | null | undefined, instance: s
   const isWebRemote = url.protocol === 'http:' || url.protocol === 'https:';
   const hostMatches = isWebRemote
     ? url.host.toLowerCase() === expectedHost
-    : url.hostname.toLowerCase() === expectedHostname;
+    : url.hostname.toLowerCase() === expectedHostname || reachesInstance;
   if (!hostMatches || (isWebRemote && (url.username || url.password))) return null;
   if (url.search || url.hash) return null;
   const projectPath = normalizeProjectPath(url.pathname);
@@ -125,13 +128,17 @@ export async function resolveGitLabProjectsFromDirectory(
 ): Promise<GitLabDirectoryProjects> {
   const loadRemotes = dependencies.getRemotes ?? getRemotes;
   const loadStatus = dependencies.getStatus ?? getStatus;
+  const hostname = new URL(normalizeGitLabInstance(instance)).hostname.toLowerCase();
+  const parseRemote = async (candidates: GitLabRemote[]) => {
+    const sshHosts = await sshRemoteUrlsReaching(candidates.flatMap((remote) => [remote.pushUrl, remote.fetchUrl]),
+      hostname, dependencies.sshHostReaches ?? sshHostReaches);
+    return (remote: GitLabRemote) => parseGitLabRemoteUrl(remote.pushUrl || remote.fetchUrl, instance, sshHosts)
+      ?? parseGitLabRemoteUrl(remote.fetchUrl, instance, sshHosts);
+  };
   if (dependencies.exactRemote) {
     const remotes = await loadRemotes(directory);
     const remote = remotes.find((candidate) => candidate?.name === explicitRemote);
-    const parsed = remote
-      ? parseGitLabRemoteUrl(remote.pushUrl || remote.fetchUrl, instance)
-        ?? parseGitLabRemoteUrl(remote.fetchUrl, instance)
-      : null;
+    const parsed = remote ? (await parseRemote([remote]))(remote) : null;
     return {
       branch: '',
       tracking: '',
@@ -144,12 +151,12 @@ export async function resolveGitLabProjectsFromDirectory(
   ]);
   const rankedNames = rankGitLabRemotes(remotes, explicitRemote, status?.tracking);
   const byName = new Map(remotes.map((remote) => [remote.name, remote]));
+  const parse = await parseRemote(remotes);
   const projects: GitLabProjectRemote[] = [];
   for (const remoteName of rankedNames) {
     const remote = byName.get(remoteName);
     if (!remote) continue;
-    const parsed = parseGitLabRemoteUrl(remote.pushUrl || remote.fetchUrl, instance)
-      ?? parseGitLabRemoteUrl(remote.fetchUrl, instance);
+    const parsed = parse(remote);
     if (!parsed || projects.some((item) => item.projectPath.toLowerCase() === parsed.projectPath.toLowerCase())) continue;
     projects.push({ ...parsed, remoteName });
   }

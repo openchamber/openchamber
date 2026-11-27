@@ -432,6 +432,44 @@
       ]
     },
     {
+      "id": "phone-pin",
+      "name": "Pinning to a list on the phone",
+      "sources": ["packages/ui/src/components/session/SessionSidebar.tsx", "packages/ui/src/apps/mobileSidebar/MobilePinToSheet.tsx", "packages/ui/src/apps/mobileSidebar/mobileSessionActions.ts", "packages/ui/src/apps/mobileSidebar/MobileSessionRow.tsx", "packages/ui/src/components/session/sidebar/sections/NewPinListDialog.tsx"],
+      "what": "With a pin list of their own, Pin session in a phone row's menu opens the Pin to sheet: Pinned, each list, New list. The pick pins the session into that list.",
+      "reach": "The phone's session drawer: long-press a row, then Pin session.",
+      "proof": "Pin to opens with the list in it; after the pick the row stands under that list's caption and carries the pin mark.",
+      "scenarios": [
+        {
+          "id": "pin-to-list",
+          "kind": "path",
+          "title": "Pin session on the phone opens Pin to, and the chosen list holds the session",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "Phone pin list"},
+            {"do": "session.create", "as": "b", "title": "Phone pin me"},
+            {"do": "open", "session": "a"},
+            {"do": "click", "on": "sidebar.rowMain", "session": "a", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to"},
+            {"do": "click", "on": "menu.item", "text": "New list…", "exact": true},
+            {"do": "type", "text": "Review"},
+            {"do": "click", "on": "dialog.button", "text": "Create and pin", "exact": true},
+            {"do": "see", "on": "sidebar.rowPinned", "session": "a"},
+            {"do": "open", "session": "a", "phone": true},
+            {"do": "click", "on": "phone.sessions"},
+            {"do": "see", "on": "phone.rowPinned", "session": "b", "count": 0},
+            {"do": "click", "on": "phone.row", "session": "b", "button": "long"},
+            {"do": "click", "on": "menu.item", "text": "Pin session", "exact": true},
+            {"do": "see", "on": "phone.pinTo"},
+            {"do": "screenshot", "name": "pin-to"},
+            {"do": "click", "on": "phone.pinToRow", "text": "Review", "exact": true},
+            {"do": "gone", "on": "phone.pinTo"},
+            {"do": "see", "on": "phone.rowPinned", "session": "b"},
+            {"do": "above", "on": "phone.caption", "text": "Review", "exact": true, "to": {"on": "phone.row", "session": "b"}},
+            {"do": "above", "on": "phone.row", "session": "b", "to": {"on": "phone.caption", "text": "Projects", "exact": true}}
+          ]
+        }
+      ]
+    },
+    {
       "id": "row-actions",
       "name": "A row's hover buttons",
       "sources": ["packages/ui/src/components/session/sidebar/sessions/SessionRowActions.tsx", "packages/ui/src/components/session/sidebar/sessions/QuickSessionAction.tsx", "packages/ui/src/components/session/sidebar/sessions/sessionRowLayout.ts", "packages/ui/src/components/session/sidebar/sessions/useSessionRowWork.ts", "packages/ui/src/components/session/sidebar/sessions/sessionWorkToggle.ts", "packages/ui/src/components/session/sidebar/shell/ConfirmDialogs.tsx", "packages/ui/src/components/session/sidebar/pages/SidebarPageRow.tsx", "packages/ui/src/components/views/ArchiveView.tsx"],
@@ -560,6 +598,39 @@
             {"do": "see", "on": "sidebar.rowQuestion", "session": "b", "timeout": 40},
             {"do": "see", "on": "sidebar.rowRunning", "session": "b", "count": 0, "timeout": 1},
             {"do": "see", "on": "sidebar.rowBold", "session": "b"}
+          ]
+        },
+        {
+          "id": "hidden-child-permission",
+          "kind": "path",
+          "title": "The parent row's shield opens the folded subagent that waits for the permission",
+          "steps": [
+            {"do": "file.write", "path": "notes.secret", "content": "rotate the staging key on Friday\n"},
+            {"do": "session.create", "as": "a", "title": "State hidden child open"},
+            {"do": "session.create", "as": "p", "title": "State hidden child asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "p", "prompt": "Hand the secret notes to a subagent.", "wait": false},
+            {"do": "see", "on": "sidebar.rowPermission", "session": "p", "timeout": 40},
+            {"do": "click", "on": "sidebar.rowPermission", "session": "p"},
+            {"do": "see", "on": "chat.readOnlyBanner", "text": "Subagent sessions cannot be prompted."},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once"}
+          ]
+        },
+        {
+          "id": "hidden-worker-elsewhere-permission",
+          "kind": "path",
+          "title": "The parent row's shield opens a folded worker in another worktree, in that worktree",
+          "steps": [
+            {"do": "session.create", "as": "a", "title": "State worker elsewhere open"},
+            {"do": "session.create", "as": "p", "title": "State worker elsewhere asks"},
+            {"do": "open", "session": "a"},
+            {"do": "session.send", "session": "p", "prompt": "Start a worker of your own in a new worktree for the secret notes.", "timeout": 120},
+            {"do": "see", "on": "sidebar.anyRow", "text": "Notes worker", "count": 0},
+            {"do": "see", "on": "sidebar.rowPermission", "session": "p", "timeout": 40},
+            {"do": "click", "on": "sidebar.rowPermission", "session": "p"},
+            {"do": "see", "on": "chat.message", "text": "Read the secret notes."},
+            {"do": "see", "on": "workStatus", "text": "notes-check"},
+            {"do": "see", "on": "chat.permissionButton", "text": "Allow once"}
           ]
         },
         {
@@ -828,6 +899,57 @@
             {"do": "above", "on": "sidebar.section", "text": "In work", "exact": true, "to": {"on": "sidebar.rowInScope", "session": "b", "scope": "activity:work"}},
             {"do": "above", "on": "sidebar.rowInScope", "session": "b", "scope": "activity:work", "to": {"on": "sidebar.section", "text": "Projects", "exact": true}},
             {"do": "above", "on": "sidebar.section", "text": "Projects", "exact": true, "to": {"on": "sidebar.rowInProject", "session": "a"}}
+          ]
+        },
+        {
+          "id": "pinned-chat",
+          "kind": "path",
+          "title": "A Chat shows in its chosen pin list, stays in Chats beside Pinned and leaves Chats for a claiming list",
+          "steps": [
+            {"do": "settings", "values": {
+              "sidebarShowChatsSection": true, "sidebarShowPinnedSection": true, "sidebarKeepPinnedInPlace": true,
+              "sidebarPinLists": [{"id": "reference", "name": "Reference pins"}],
+              "sidebarSections": [
+                {"kind": "custom", "id": "reference-section", "name": "Reference pins", "grouping": "time", "claims": true, "filter": {"pins": ["reference"]}},
+                {"kind": "custom", "id": "project-sessions", "name": "Project sessions", "grouping": "time", "filter": {"kinds": ["session"]}}
+              ]
+            }},
+            {"do": "session.create", "as": "projectSession", "title": "Project session"},
+            {"do": "open", "session": "projectSession"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "projectSession", "scope": "activity:section:project-sessions"},
+            {"do": "hover", "on": "sidebar.section", "text": "Chats", "exact": true},
+            {"do": "click", "on": "sidebar.newChat"},
+            {"do": "click", "on": "composer.editor"},
+            {"do": "type", "text": "The sidebar jumps to the top whenever I collapse a project and open it again after a reload. Where is the scroll position lost?"},
+            {"do": "press", "key": "Enter"},
+            {"do": "see", "on": "chat.answer", "text": "The list remounts"},
+            {"do": "remember", "on": "sidebar.anyActiveRow", "attr": "data-session-row", "as": "chat"},
+            {"do": "remember", "on": "sidebar.row", "session": "chat", "attr": "data-session-scope", "as": "chatScope"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "chatScope", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Pinned", "exact": true},
+            {"do": "see", "on": "sidebar.rowPinned", "session": "chat"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:pinned"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "chatScope", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Reference pins", "exact": true},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:reference-section"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:pinned"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:project-sessions"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"},
+            {"do": "reload"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:reference-section"},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "activity:section:reference-section", "button": "right"},
+            {"do": "click", "on": "menu.item", "text": "Archive"},
+            {"do": "see", "on": "dialog", "text": "Archive session?", "count": 1},
+            {"do": "click", "on": "dialog.button", "text": "Cancel", "exact": true},
+            {"do": "click", "on": "sidebar.rowMainInScope", "session": "chat", "scope": "activity:section:reference-section", "button": "right"},
+            {"do": "hover", "on": "menu.item", "text": "Pin to", "exact": true},
+            {"do": "click", "on": "menu.item", "text": "Unpin session", "exact": true},
+            {"do": "gone", "on": "sidebar.rowInScope", "session": "chat", "scope": "activity:section:reference-section"},
+            {"do": "see", "on": "sidebar.rowInScope", "session": "chat", "scope": "chatScope"}
           ]
         },
         {

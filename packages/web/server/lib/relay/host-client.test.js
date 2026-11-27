@@ -5,10 +5,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'bun:test';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { startRelayHost } from './host-client.js';
+import { relayDialBypassesProxy, startRelayHost } from './host-client.js';
 import {
   bytesToBase64Url,
   createFrameDecryptor,
@@ -825,5 +826,109 @@ describe('relay host-client error redaction', () => {
     } finally {
       host.stop();
     }
+  });
+});
+
+describe('proxy environment', () => {
+  const PROXY_KEYS = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY'];
+  const teardowns = new Set();
+  const runtimes = [
+    ['Node', 'node', ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href]],
+    ['Bun', process.versions.bun ? process.execPath : 'bun', []],
+  ];
+
+  // Runs a relay host in a child process whose only proxy settings are `env`,
+  // the way the server starts: applyOutboundProxyFromEnv, then the host's own
+  // dial. Resolves with the first CONNECT the fixture proxy sees, or with
+  // `direct` once the host reports its control socket closed without one.
+  const dialFromChild = async (runtime, relayUrl, env) => {
+    const proxy = http.createServer((req, res) => { res.writeHead(502); res.end(); });
+    const connects = [];
+    proxy.on('connect', (req, socket) => {
+      connects.push(req.url);
+      // The child is killed with this tunnel still open; its reset is expected.
+      socket.on('error', () => {});
+      socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+    });
+    await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyUrl = `http://127.0.0.1:${proxy.address().port}`;
+    const childEnv = Object.fromEntries(Object.entries(process.env)
+      .filter(([key]) => !PROXY_KEYS.includes(key.toUpperCase())));
+    for (const [key, value] of Object.entries(env(proxyUrl))) childEnv[key] = value;
+
+    const [, command, args] = runtime;
+    const child = spawn(command, [...args, '--input-type=module', '--eval', `
+      import { applyOutboundProxyFromEnv } from ${JSON.stringify(new URL('../outbound-proxy.js', import.meta.url).href)};
+      import { startRelayHost } from ${JSON.stringify(new URL('./host-client.js', import.meta.url).href)};
+      applyOutboundProxyFromEnv();
+      startRelayHost({
+        relayUrl: ${JSON.stringify(relayUrl)},
+        identity: { serverId: 'proxy-test', signRelayAuth: () => ({ ts: 1, sig: 'sig', pk: 'pk' }) },
+        getLocalPort: () => 1,
+        logger: { warn: () => {}, info: (line) => console.log(line) },
+      });
+    `], { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+
+    const teardown = async () => {
+      if (!teardowns.delete(teardown)) return;
+      child.kill();
+      proxy.closeAllConnections?.();
+      await new Promise((resolve) => proxy.close(resolve));
+    };
+    teardowns.add(teardown);
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    try {
+      return await new Promise((resolve, reject) => {
+        proxy.on('connect', (req) => resolve(req.url));
+        child.stdout.on('data', (chunk) => {
+          if (String(chunk).includes('[Relay] control socket closed') && connects.length === 0) resolve('direct');
+        });
+        child.on('error', reject);
+        child.on('exit', (code) => reject(new Error(`child exited ${code}; stderr: ${stderr}`)));
+      });
+    } finally {
+      await teardown();
+    }
+  };
+
+  // A test that times out never reaches the fixture's `finally`.
+  afterEach(async () => {
+    await Promise.all([...teardowns].map((teardown) => teardown()));
+  });
+
+  for (const runtime of runtimes) {
+    it(`dials a wss relay through HTTPS_PROXY on ${runtime[0]}`, async () => {
+      expect(await dialFromChild(runtime, 'wss://upstream.invalid/ws', (proxyUrl) => ({ HTTPS_PROXY: proxyUrl })))
+        .toBe('upstream.invalid:443');
+    }, 15_000);
+
+    it(`dials a relay NO_PROXY covers directly on ${runtime[0]}`, async () => {
+      expect(await dialFromChild(runtime, 'wss://relay.upstream.invalid/ws', (proxyUrl) => ({ HTTPS_PROXY: proxyUrl, NO_PROXY: '.upstream.invalid' })))
+        .toBe('direct');
+    }, 15_000);
+  }
+});
+
+describe('relayDialBypassesProxy', () => {
+  it.each([
+    ['wss://relay.example.com/ws', '*', true],
+    ['wss://relay.example.com/ws', 'relay.example.com', true],
+    ['wss://child.relay.example.com/ws', 'relay.example.com', false],
+    ['wss://relay.example.com/ws', 'relay.example.com:443', true],
+    ['wss://relay.example.com/ws', 'relay.example.com:8443', false],
+    ['wss://example.com/ws', '.example.com', true],
+    ['wss://relay.example.com/ws', '.example.com', true],
+    ['wss://badexample.com/ws', '.example.com', false],
+    ['wss://relay.example.com/ws', '*.example.com', true],
+    ['ws://192.168.1.10:8080/ws', '192.168.1.1-192.168.1.100', true],
+    ['ws://192.168.1.200:8080/ws', '192.168.1.1-192.168.1.100', false],
+    ['ws://[fd00::1]:8080/ws', 'fd00::1', true],
+    ['ws://127.0.0.2:8080/ws', '', true],
+    ['ws://localhost:8080/ws', '', true],
+    ['ws://[::1]:8080/ws', '', true],
+    ['wss://relay.example.com/ws', 'other.example.org', false],
+  ])('%s with NO_PROXY=%s bypasses: %s', (url, noProxy, expected) => {
+    expect(relayDialBypassesProxy(url, noProxy)).toBe(expected);
   });
 });

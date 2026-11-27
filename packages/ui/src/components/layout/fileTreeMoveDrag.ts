@@ -1,4 +1,5 @@
 import { rebaseMovedPath } from '@/lib/filePathMoves';
+import { getParentPath } from './sidebarFilesTree/treePaths';
 
 // external: https://html.spec.whatwg.org/multipage/dnd.html#the-drag-data-store Drag data is protected during dragover, so record the source at dragstart.
 
@@ -14,13 +15,6 @@ export const setFileTreeDragSource = (source: FileTreeEntry | null): void => {
 };
 
 export const getFileTreeDragSource = (): FileTreeEntry | null => activeDragSource;
-
-const getParentPath = (path: string): string => {
-  const separatorIndex = path.lastIndexOf('/');
-  if (separatorIndex < 0) return '';
-  if (separatorIndex === 0) return '/';
-  return path.slice(0, separatorIndex);
-};
 
 export const getFileTreeMoveTarget = (
   source: FileTreeEntry,

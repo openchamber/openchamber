@@ -4,6 +4,7 @@ import path from 'path';
 
 import { z } from 'zod';
 
+import { DIRECTORY_UNREACHABLE, directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
 import { assessOpenCodeConfig } from './assessment.js';
 import { createOpenCodeTrustStore, hasMessage } from './store.js';
 import type { ConfigAssessment, OpenCodeTrustAssessment, OpenCodeTrustAnswer, OpenCodeTrustRequest, OpenCodeTrustRouteRequest, ReadTrustBody, TrustOptions } from './contracts.js';
@@ -119,6 +120,7 @@ export const createOpenCodeTrust = ({
   homeDirectory = os.homedir(),
   fsPromises = fs.promises,
   now = Date.now,
+  checkDirectory = directoryReachability.check,
 }: TrustOptions) => {
   const store = createOpenCodeTrustStore({ filePath: storePath, fsPromises });
   type Evaluation = { assessment: ConfigAssessment; trusted: boolean };
@@ -132,7 +134,9 @@ export const createOpenCodeTrust = ({
 
   let seeding: Promise<void> | null = null;
   const assessWithin = (directory: string) => Promise.race([
-    assessOpenCodeConfig(directory, { fsPromises, homeDirectory }).catch(() => null),
+    checkDirectory(directory).then((reachability) => (
+      reachability === 'unreachable' ? null : assessOpenCodeConfig(directory, { fsPromises, homeDirectory })
+    )).catch(() => null),
     new Promise<null>((resolve) => { setTimeout(resolve, SEED_PROJECT_TIMEOUT_MS, null).unref?.(); }),
   ]);
   const seedKnown = async () => {
@@ -151,6 +155,7 @@ export const createOpenCodeTrust = ({
 
   const evaluate = async (directory: string) => {
     await ensureSeeded();
+    if (await checkDirectory(directory) === 'unreachable') throw directoryUnreachableError(directory);
     const assessment = await assessOpenCodeConfig(directory, { fsPromises, homeDirectory });
     const trusted = assessment.fingerprint === null || await store.has(assessment.repositoryKey, assessment.fingerprint);
     return { assessment, trusted };
@@ -181,7 +186,9 @@ export const createOpenCodeTrust = ({
   };
 
   const forget = async (directory: string) => {
-    const resolved = await fsPromises.realpath(directory).catch(() => directory);
+    const resolved = await checkDirectory(directory) === 'unreachable'
+      ? directory
+      : await fsPromises.realpath(directory).catch(() => directory);
     for (const [key, entry] of cache) {
       if ([key, entry.resolved].some((name) => name === directory || name === resolved)) cache.delete(key);
     }
@@ -234,6 +241,11 @@ export const createOpenCodeTrust = ({
       if (destination) directories.unshift(destination);
     }
     if (directories.length === 0) return null;
+    for (const directory of new Set(directories)) {
+      if (await checkDirectory(directory) === 'unreachable') {
+        return { status: 503, body: { error: directoryUnreachableError(directory).message, code: DIRECTORY_UNREACHABLE, directory } };
+      }
+    }
     const untrusted = await firstUntrusted(directories);
     if (!untrusted) return null;
     return {

@@ -4,6 +4,8 @@ import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { readMachineSetting } from './machine-settings';
 import { configureOpenCodeCredentials, openCodeCredentialSource } from './opencodeAuth';
+import { formatOpenCodeStatusProbes, runOpenCodeStatusProbes } from './opencodeStatusProbes';
+import { guardProjectStartCommandSource, openCodeTrust } from './opencodeTrust';
 import { configureProjectStartCommandSource, openCodeProjectStartCommandSource } from '../../web/server/lib/opencode/project-start-command.js';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
@@ -141,14 +143,14 @@ export async function activate(context: vscode.ExtensionContext) {
   openCodeManager = createOpenCodeManager(context);
   configureOpenCodeCredentials(openCodeCredentialSource(openCodeManager));
   const manager = openCodeManager;
-  configureProjectStartCommandSource(openCodeProjectStartCommandSource({
+  configureProjectStartCommandSource(guardProjectStartCommandSource(openCodeProjectStartCommandSource({
     buildOpenCodeUrl: () => {
       const apiUrl = manager.getApiUrl();
       if (!apiUrl) throw new Error('OpenCode API URL is not available');
       return apiUrl;
     },
     getOpenCodeAuthHeaders: () => manager.getOpenCodeAuthHeaders(),
-  }));
+  }), openCodeTrust));
 
   chatViewProvider = new ChatViewProvider(context, context.extensionUri, openCodeManager);
 
@@ -270,20 +272,20 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  const openSessionInChat = async (sessionId: string) => {
+    if (await revealChatViewForPayload()) chatViewProvider?.openSession(sessionId);
+  };
   const showSessionNotification = createSessionNotifier({
     isChatAttended: () => vscode.window.state.focused
       && Boolean(chatViewProvider?.isVisible() || sessionEditorProvider?.hasVisiblePanel()),
     show: (message, ...actions) => vscode.window.showInformationMessage(message, ...actions),
-    openSession: async (sessionId) => {
-      if (await revealChatViewForPayload()) {
-        chatViewProvider?.openSession(sessionId);
-      }
-    },
+    openSession: openSessionInChat,
     openSessionLabel: t('Open Session'),
   });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.internal.showNotification', showSessionNotification)
+    vscode.commands.registerCommand('openchamber.internal.showNotification', showSessionNotification),
+    vscode.commands.registerCommand('openchamber.internal.openSession', (sessionId: unknown) => typeof sessionId === 'string' && sessionId ? openSessionInChat(sessionId) : undefined),
   );
 
   context.subscriptions.push(
@@ -653,87 +655,12 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      const safeFetch = async (input: string, timeoutMs = 6000) => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        const startedAt = Date.now();
-        const openCodeAuthHeaders = openCodeManager?.getOpenCodeAuthHeaders() || {};
-        try {
-          const resp = await fetch(input, {
-            method: 'GET',
-            headers: { Accept: 'application/json', ...openCodeAuthHeaders },
-            signal: controller.signal,
-          });
-          const elapsedMs = Date.now() - startedAt;
-          const contentType = resp.headers.get('content-type') || '';
-          const isJson = contentType.toLowerCase().includes('json') && !contentType.toLowerCase().includes('text/html');
-
-          let summary = '';
-          if (isJson) {
-            const json = await resp.json().catch(() => null);
-            if (Array.isArray(json)) {
-              summary = `json[array] len=${json.length}`;
-            } else if (json && typeof json === 'object') {
-              const keys = Object.keys(json).slice(0, 8);
-              summary = `json[object] keys=${keys.join(',')}${Object.keys(json).length > keys.length ? ',…' : ''}`;
-            } else {
-              summary = `json[${typeof json}]`;
-            }
-          } else {
-            summary = contentType ? `content-type=${contentType}` : 'no content-type';
-          }
-
-          return { ok: resp.ok && isJson, status: resp.status, elapsedMs, summary };
-        } catch (error) {
-          const elapsedMs = Date.now() - startedAt;
-          const isAbort =
-            controller.signal.aborted ||
-            (error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('aborted')));
-          const message = isAbort
-            ? `timeout after ${timeoutMs}ms`
-            : error instanceof Error
-              ? error.message
-              : String(error);
-          return { ok: false, status: 0, elapsedMs, summary: `error=${message}` };
-        } finally {
-          clearTimeout(timeout);
-        }
-      };
-
-      const buildProbeUrl = (pathname: string, includeDirectory = true) => {
-        if (!resolvedApiUrl) return null;
-        const base = `${resolvedApiUrl.replace(/\/+$/, '')}/`;
-        const url = new URL(pathname.replace(/^\/+/, ''), base);
-        if (includeDirectory && workingDirectory) {
-          url.searchParams.set('directory', workingDirectory);
-        }
-        return url.toString();
-      };
-
-      const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-        { label: 'health', path: '/api/info', includeDirectory: false },
-        { label: 'config', path: '/api/config', includeDirectory: true },
-        { label: 'providers', path: '/api/provider', includeDirectory: true },
-        { label: 'agents', path: '/api/agent', includeDirectory: true, timeoutMs: 12000 },
-        { label: 'commands', path: '/api/command', includeDirectory: true, timeoutMs: 10000 },
-        { label: 'project', path: '/api/project', includeDirectory: false },
-        { label: 'location', path: '/api/location', includeDirectory: true },
-        { label: 'sessions', path: '/api/session', includeDirectory: true, timeoutMs: 12000 },
-        { label: 'sessionStatus', path: '/api/session/active', includeDirectory: false },
-      ];
-
-      const probes = resolvedApiUrl
-        ? await Promise.all(
-            probeTargets.map(async (entry) => {
-              const url = buildProbeUrl(entry.path, entry.includeDirectory !== false);
-              if (!url) {
-                return { label: entry.label, url: '(none)', result: null as null };
-              }
-              const result = await safeFetch(url, typeof entry.timeoutMs === 'number' ? entry.timeoutMs : undefined);
-              return { label: entry.label, url, result };
-            })
-          )
-        : [];
+      const probes = await runOpenCodeStatusProbes({
+        resolvedApiUrl,
+        workingDirectory: primaryWorkspace ? workingDirectory : '',
+        authHeaders: openCodeManager?.getOpenCodeAuthHeaders() || {},
+        trust: openCodeTrust,
+      });
 
       const storedSettings = context.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {};
       const settingsKeys = Object.keys(storedSettings).filter((key) => key !== 'lastDirectory');
@@ -793,17 +720,7 @@ export async function activate(context: vscode.ExtensionContext) {
         debug?.lastError ? `Last error: ${debug.lastError}` : `Last error: (none)`,
         `Settings keys (stored): ${settingsKeys.length ? settingsKeys.join(', ') : '(none)'}`,
         probes.length ? '' : '',
-        ...(probes.length
-          ? [
-              'OpenCode API probes:',
-              ...probes.map((probe) => {
-                if (!probe.result) return `- ${probe.label}: (no url)`;
-                const { ok, status, elapsedMs, summary } = probe.result;
-                const suffix = ok ? '' : ` url=${probe.url}`;
-                return `- ${probe.label}: ${ok ? 'ok' : 'fail'} status=${status} time=${elapsedMs}ms ${summary}${suffix}`;
-              }),
-            ]
-          : []),
+        ...formatOpenCodeStatusProbes(probes),
         '',
       ];
 

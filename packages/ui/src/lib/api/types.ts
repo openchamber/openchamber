@@ -1,16 +1,22 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { NotificationPayload } from '@/lib/notifications/notificationShapes';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
+import type { GitWorktreeValidationResult } from './worktree-validation';
+import type { GitWorktreeInfo } from './git-worktree-info';
+export type { GitWorktreeInfo } from './git-worktree-info';
+export type { GitWorktreeValidationResult };
 import type { PushAPI } from './push';
-import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
+import type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+import type { RepositoryReferenceDetail } from './repository-reference-detail';
+import type { SetAssigneesInput, SetIssueStateInput } from '../source-control/mutation-writes';
+import type { SourceControlBranchWrites } from './source-control-branch-writes';
+export { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from './source-control-errors';
 export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -19,7 +25,6 @@ import type {
   IssueComment,
   MergeChangeRequestInput,
   PageResult,
-  PullRequestStack,
   ProjectUpstream,
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
@@ -30,10 +35,7 @@ import type {
   DiscussionCommentInput,
   ChangeRequestReviewStateResult,
   ReviewChangeRequestInput,
-  ReviewCommentDeleteInput,
-  ReviewCommentInput,
-  ReviewCommentUpdateInput,
-  ReviewDiscardInput,
+  SourceControlReviewWrites,
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
   SetStateInput,
@@ -74,6 +76,7 @@ import type { SourceControlProviderDescriptor } from '../source-control/provider
 import type { TrackerAPI } from '../trackers/types';
 
 export type * from '../source-control/types';
+export type { IssueCloseReason, SetAssigneesInput, SetIssueStateInput } from '../source-control/mutation-writes';
 export type * from '../trackers/types';
 export type {
   GitIdentityProfile,
@@ -879,17 +882,6 @@ export interface CommitFileDiffResponse {
   isBinary: boolean;
 }
 
-export interface GitWorktreeInfo {
-  head: string;
-  name: string;
-  branch: string;
-  path: string;
-  title?: string;
-  pinnedAt?: number;
-  pinList?: string;
-  provenance?: GitContributorWorktreeProvenance;
-}
-
 export interface GitWorktreeTitleResult {
   title: string;
   branch: string;
@@ -906,20 +898,6 @@ export interface GitContributorWorktreeProvenance {
   trust: 'untrusted';
   push: 'destination-selection-required';
   prunable?: boolean;
-}
-
-export interface GitWorktreeValidationError {
-  code: string;
-  message: string;
-}
-
-export interface GitWorktreeValidationResult {
-  ok: boolean;
-  errors: GitWorktreeValidationError[];
-  resolved?: {
-    mode?: 'new' | 'existing';
-    localBranch?: string | null;
-  };
 }
 
 export class GitWorktreeRequestError extends Error {
@@ -1086,7 +1064,7 @@ interface GitWorktreeAPI {
   create?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
   teardown?(directory: string, payload: TeardownGitWorktreePayload): Promise<{ success: boolean }>;
-  setTitle?(directory: string, title: string, by?: 'user' | 'agent'): Promise<GitWorktreeTitleResult>;
+  setTitle?(directory: string, title: string, by?: 'user' | 'agent', session?: string): Promise<GitWorktreeTitleResult>;
   setPinned?(directory: string, pinned: boolean, list?: string | null): Promise<GitWorktreePinResult>;
   snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
   archive?(directory: string, payload: ArchiveGitWorktreePayload): Promise<GitWorktreeArchive>;
@@ -1374,18 +1352,7 @@ export interface PermissionsAPI {
   stopAccessingDirectory(path: string): Promise<StartAccessingResult>;
 }
 
-export interface NotificationPayload {
-  title?: string;
-  body?: string;
-
-  tag?: string;
-  kind?: string;
-  sessionId?: string;
-  directory?: string;
-  runtimeKey?: string;
-  requireHidden?: boolean;
-  showWhenFocused?: boolean;
-}
+export type { NotificationPayload };
 
 export interface NotificationsAPI {
   notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean>;
@@ -1547,56 +1514,9 @@ export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   revisionNumber?: number;
 };
 
-export type ReviewCommentExcerpt = { startLine: number; lines: string[] };
+export type { RepositoryReferenceComment, ReviewCommentExcerpt } from './repositoryReferenceTypes';
 
-export type RepositoryReferenceComment = {
-  author: { login: string; avatarUrl?: string } | null;
-  body: string;
-  createdAt: string | null;
-  url: string;
-  id?: string;
-  canUpdate?: boolean;
-  canDelete?: boolean;
-  path: string | null;
-  line: number | null;
-  review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
-  excerpt?: ReviewCommentExcerpt;
-  thread?: RepositoryReferenceThread;
-  answer?: { chosen: boolean; canChange: boolean };
-};
-
-export type RepositoryReferenceThread = {
-  id: string;
-  resolved: boolean;
-  canResolve: boolean;
-  canReply: boolean;
-  replies: RepositoryReferenceComment[];
-};
-
-export type RepositoryReferenceDetail = {
-  number: number;
-  body?: string;
-  viewerCanUpdate?: boolean;
-  comments: RepositoryReferenceComment[];
-  commentTotal: number;
-  pull: {
-    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
-    reviewers: RepositoryReferenceReviewer[];
-    reviewerStates?: RepositoryReferenceReviewerState[];
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    checks?: CISummary | null;
-    commits: RepositoryReferenceCommit[];
-    commitTotal: number | null;
-    stack?: PullRequestStack | null;
-    voteLabels?: ChangeRequestVoteLabel[];
-    submitRequirements?: ChangeRequestSubmitRequirement[];
-    revisions?: ChangeRequestRevision[];
-  } | null;
-  references?: ChangeRequestContext['references'];
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
-};
+export type { RepositoryReferenceDetail } from './repository-reference-detail';
 
 export type RepositoryReferenceDetailResult =
   | { connected: false }
@@ -1638,29 +1558,7 @@ export type RepositoryReferencesAcrossResult = {
   >;
 };
 
-export class SourceControlInstanceOtherProviderError extends Error {
-  readonly provider: string;
-
-  constructor(message: string, provider: string) {
-    super(message);
-    this.name = 'SourceControlInstanceOtherProviderError';
-    this.provider = provider;
-  }
-}
-
-export class SourceControlInstanceAliasError extends Error {
-  readonly reason: 'invalid' | 'taken';
-  readonly alias: string;
-
-  constructor(message: string, reason: 'invalid' | 'taken', alias: string) {
-    super(message);
-    this.name = 'SourceControlInstanceAliasError';
-    this.reason = reason;
-    this.alias = alias;
-  }
-}
-
-export interface SourceControlAPI {
+export interface SourceControlAPI extends SourceControlBranchWrites, SourceControlReviewWrites {
   providers(): Promise<SourceControlProviderDescriptor[]>;
   repositoryContext(directory: string): Promise<SourceControlRepositoryContext>;
   repositoryBinding(directory: string): Promise<SourceControlBindingRead>;
@@ -1697,15 +1595,11 @@ export interface SourceControlAPI {
   changeRequestResolveThread(payload: ThreadResolveInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestReview(payload: ReviewChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlReviewMutationResult>>;
   changeRequestReviewState(context: SourceControlReadContext, ref: { owner: string; repo: string; number: number }): Promise<ChangeRequestReviewStateResult>;
-  changeRequestReviewComment(payload: ReviewCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
-  changeRequestReviewCommentUpdate(payload: ReviewCommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
-  changeRequestReviewCommentDelete(payload: ReviewCommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
-  changeRequestReviewDiscard(payload: ReviewDiscardInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
-  issueSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
+  issueSetState(payload: SetIssueStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
   changeRequestSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   issueSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionComment(payload: DiscussionCommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
@@ -1716,9 +1610,10 @@ export interface SourceControlAPI {
   discussionCommentUpdate(payload: CommentUpdateInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   discussionCommentDelete(payload: CommentDeleteInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestSetReviewers(payload: SetReviewersInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  issueSetAssignees(payload: SetAssigneesInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
   referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
-  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
+  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector, role?: 'assignee' | 'reviewer'): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
     options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },

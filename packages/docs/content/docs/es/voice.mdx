@@ -13,7 +13,7 @@ Elige cómo se pronuncian las respuestas:
 
 - **browser** usa las voces disponibles en tu navegador. En Linux de escritorio, instala `speech-dispatcher`, su biblioteca cliente `libspeechd` y un motor de voz como `espeak-ng`. Activa el servicio speech-dispatcher si tu distribución no lo inicia automáticamente y reinicia OpenChamber.
 - **OpenAI** — las voces de OpenAI; pega tu clave de API y elige una voz
-- **compatible con OpenAI** — cualquier servicio que hable el formato de OpenAI; introduce su URL y, si la necesita, una clave de API
+- **compatible con OpenAI** — cualquier servicio que hable el formato de OpenAI; introduce su URL y, si la necesita, una clave de API. Si el servicio publica la lista de sus voces, **Voz** es un desplegable que termina en **Personalizada…** para cualquier otro nombre de voz; si no, escribe el nombre
 - **macOS say** — el comando `say` integrado, en los Mac que lo tienen
 
 Una vez activado, obtienes un botón de reproducción en los mensajes para escucharlos en voz alta.
@@ -38,6 +38,8 @@ Los modelos Whisper y Qwen3-ASR detectan el idioma por su cuenta, y con una fras
 Activa **Corregir palabras mal entendidas** para que tu Small Model (Configuración → Sesiones → Small Model) repase el texto cuando terminas de dictar. Sustituye las palabras que el modelo de voz entendió mal y quita muletillas como "eh". Después el texto va al proveedor del Small Model y aparece uno o dos segundos más tarde. Sin Small Model, el texto se inserta tal como se oyó.
 
 Las API keys que introduces para estos servicios las guarda el servidor de OpenChamber, no tu navegador. Escribe una clave y pulsa Enter para guardarla; después el campo indica que hay una clave guardada, y la cruz la elimina.
+
+**Clave de un proveedor de OpenCode** aparece debajo del campo de la clave de API. Permite que el servicio use la clave de un proveedor que ya configuraste en OpenCode, para no escribirla otra vez. OpenChamber elige un proveedor por ti solo cuando exactamente un proveedor con clave tiene la misma dirección (esquema, host y puerto) que el servicio; si dos la tienen, o ninguno, no se elige nada. Elegirlo no envía todavía ninguna clave. Elige un proveedor, o **Ninguna**, para decidir tú. Una clave que escribiste en el campo de la clave de API se usa primero. El servidor de OpenChamber lee la clave del proveedor cuando la necesita y nunca la envía al navegador. Solo envía la clave a un servidor después de que pulses **Enviar clave** para ese proveedor y esa dirección, también cuando es la dirección que OpenCode usa para ese proveedor. Una aprobación cubre la clave que el proveedor tiene en ese momento: si cambias de cuenta o la clave cambia, incluso con el mismo nombre, vuelves a pulsar **Enviar clave**.
 
 ## Una nota para teléfonos
 

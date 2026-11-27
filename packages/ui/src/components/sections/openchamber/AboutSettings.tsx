@@ -23,6 +23,7 @@ import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
+import { DesktopAutoUpdateRow } from './DesktopAutoUpdateRow';
 import { AboutReleaseNotes } from './AboutReleaseNotes';
 import { AboutUpdateBanners } from './AboutUpdateBanners';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -160,12 +161,12 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     error: s.error,
     downloading: s.downloading,
     downloaded: s.downloaded,
-    installing: s.installing,
+    installing: s.installing, idlePhase: s.idlePhase, idleReason: s.idleReason, idleRemainingMs: s.idleRemainingMs,
     progress: s.progress,
     runtimeType: s.runtimeType,
     checkForUpdates: s.checkForUpdates,
     downloadUpdate: s.downloadUpdate,
-    restartToUpdate: s.restartToUpdate,
+    restartToUpdate: s.restartToUpdate, queueIdleInstall: s.queueIdleInstall, cancelIdleInstall: s.cancelIdleInstall,
   })));
   const { isMobile } = useDeviceInfo();
   const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
@@ -315,7 +316,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     }
     void update.checkForUpdates();
   };
-  const CANARY_COLOURS = 'bg-[var(--brand-canary)] text-[var(--brand-canary-foreground)] hover:bg-[var(--brand-canary)] hover:text-[var(--brand-canary-foreground)]';
   const updateChannelControl = updateChannel && (
     <SettingsChipGroup
       value={updateChannel}
@@ -324,11 +324,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       className="flex-nowrap"
       options={[
         { value: 'stable', label: t('settings.openchamber.about.option.updateChannel.stable') },
-        {
-          value: 'canary',
-          label: t('settings.openchamber.about.option.updateChannel.canary'),
-          selectedClassName: CANARY_COLOURS,
-        },
+        { value: 'canary', label: t('settings.openchamber.about.option.updateChannel.canary'), selectedClassName: 'bg-[var(--brand-canary)] text-[var(--brand-canary-foreground)] hover:bg-[var(--brand-canary)] hover:text-[var(--brand-canary-foreground)]' },
       ]}
     />
   );
@@ -682,11 +678,11 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           info={update.info}
           downloading={updateStore.downloading}
           downloaded={updateStore.downloaded}
-          installing={updateStore.installing}
+          installing={updateStore.installing} idlePhase={updateStore.idlePhase} idleReason={updateStore.idleReason} idleRemainingMs={updateStore.idleRemainingMs}
           progress={updateStore.progress}
           error={update.error}
           onDownload={updateStore.downloadUpdate}
-          onRestart={updateStore.restartToUpdate}
+          onRestart={updateStore.restartToUpdate} onInstallWhenIdle={updateStore.queueIdleInstall} onCancelIdleInstall={updateStore.cancelIdleInstall}
           runtimeType={update.runtimeType}
         />
         {remoteHostUpdateDialog}
@@ -799,6 +795,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               {t('settings.openchamber.about.actions.checkForUpdates')}
             </Button>
           </SettingsFieldRow>
+          <DesktopAutoUpdateRow enabled={isDesktopApp} onEnabled={() => void update.checkForUpdates()} />
           <SettingsFieldRow label={t('settings.openchamber.about.field.openCodeVersion')} {...valueRow}>
             {versionValue(openCodeVersion || t('settings.openchamber.about.state.unknown'))}
             {openCodeUpdate?.action}
@@ -816,11 +813,11 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         info={update.info}
         downloading={updateStore.downloading}
         downloaded={updateStore.downloaded}
-        installing={updateStore.installing}
+        installing={updateStore.installing} idlePhase={updateStore.idlePhase} idleReason={updateStore.idleReason} idleRemainingMs={updateStore.idleRemainingMs}
         progress={updateStore.progress}
         error={update.error}
         onDownload={updateStore.downloadUpdate}
-        onRestart={updateStore.restartToUpdate}
+        onRestart={updateStore.restartToUpdate} onInstallWhenIdle={updateStore.queueIdleInstall} onCancelIdleInstall={updateStore.cancelIdleInstall}
         runtimeType={update.runtimeType}
       />
       {remoteHostUpdateDialog}

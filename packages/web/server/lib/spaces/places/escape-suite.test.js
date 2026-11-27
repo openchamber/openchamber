@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { parseListenerAddresses, parseUpstreamLog } from './docker-live-support.js';
-import { parseIntegrationConnections, parseProbeAnswers, parseTunnelCounts, parseWindowSeen, sessionCookieOf } from './escape-suite.js';
+import { parseIntegrationConnections, parsePluginList, sessionCookieOf } from './escape-answers.js';
+import { parseProbeAnswers, parseTunnelCounts, parseWindowSeen } from './escape-suite.js';
 
 const seen = { method: 'GET', path: '/v1/messages', authorization: 'none', apiKey: 'sha256:00', team: 'none', headerNames: ['host'] };
 
@@ -32,6 +33,12 @@ describe('answers the escape suite reads from inside a space', () => {
     expect(parseIntegrationConnections('{"data":[{"id":"openai","connections":[{"type":"credential"}]}]}')).toEqual([{ id: 'openai', connections: [{ type: 'credential' }] }]);
     expect(() => parseIntegrationConnections('{"data":[{"id":"openai","connections":{"type":"credential"}}]}')).toThrow();
     expect(() => parseIntegrationConnections('{"data":{}}')).toThrow();
+  });
+
+  it('refuses a plugin list that is not a list, so a wrong answer never counts as loaded', () => {
+    expect(parsePluginList('{"data":[{"id":"a"}]}')).toHaveLength(1);
+    expect(parsePluginList('{"data":[]}')).toEqual([]);
+    expect(() => parsePluginList('{"data":"plugins"}')).toThrow();
   });
 
   it('needs the session cookie the login answer sets', () => {

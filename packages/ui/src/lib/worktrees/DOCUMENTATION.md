@@ -14,6 +14,8 @@ This module owns worktree topology, creation and bootstrap, archive recovery, re
 
 ### Topology and caches
 
+- A listed row with `integrateCheckout` is the temporary checkout of an open integration. It never enters the worktree lists; `integrateCheckouts.ts` keeps it only to place its sessions under their project's root group and to admit them. The set is remembered per server, as the topology is, so a link to such a session opens before the first listing. A change of that set republishes the topology map, because ownership and admission read it outside React.
+- A resolver draft pins its directory: the checkout is in no picker, and an unpinned draft falls back to the project. After a finished or aborted integration the server moves its sessions to the project.
 - Prunable worktrees remain in topology as `missing`, so their sessions keep a sidebar group and remain available for relocation.
 - A repository's topology belongs to its configured primary checkout, or its first configured checkout when the primary is absent. Configured checkouts and checkouts containing configured project folders stay out of removable worktree lists, because deleting them deletes the project's folder.
 - Discovery equality compares metadata values because every read creates fresh objects. Branch, task title and pin changes must trigger publication even when paths stay unchanged; status changes are compared too.
@@ -22,6 +24,7 @@ This module owns worktree topology, creation and bootstrap, archive recovery, re
 - Root and listing caches reduce repeated Git calls. Creation and removal invalidate root resolutions because topology changes can change a directory's primary root. Invalidation retires in-flight root entries and prevents their results from reseeding the cache; recency updates retain the original expiry time.
 - A known branch can answer a root-branch lookup only when the project directory is the primary root. A linked checkout can have a different branch.
 - A newly created session's directory proves project ownership only through an exact registered root or known worktree. Mere containment can conceal an undiscovered checkout belonging to another project and requires full discovery.
+- For a session in an external checkout of a nested repository, OpenCode's project ID selects the repository to ask. Git must list the nested repository first and the session's exact directory as a non-prunable linked checkout. A pending refresh retains previously confirmed sessions; a rejected read grants no access and can be retried on the next snapshot. A successful listing that omits a checkout removes its association. The result never enters the manageable worktree list.
 
 ### Creation and directories
 

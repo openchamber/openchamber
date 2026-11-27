@@ -1,41 +1,53 @@
 import { NOTIFICATION_EMIT_PATH } from '../notifications/emit-route.js';
+import { FREE_PORT_PATH } from './free-port-route.js';
 import type { Request, RequestHandler } from '../shared/http-contracts.js';
 import type { createUiAuth } from '../ui-auth/ui-auth.js';
 import type { createTunnelAuth } from '../tunnels/tunnel-auth.js';
 
 const selfAuthenticatedApiPaths = new Set(['/api/git/repository-credential']);
 
-const isGuestOauthCallback = (req: Request) => (
+const requestPathname = (req: Request) => (req.originalUrl || '').split('?', 1).join('');
+
+const routedApiPathname = (req: Request) => (req.baseUrl ? `/api${req.path}` : req.path);
+
+const isGuestOauthCallback = (req: Request, pathname: string) => (
   req.method === 'GET'
-  && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(req.path || '')
+  && /^\/api\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(pathname)
 );
 
-const isMcpOauthCallback = (req: Request) => (
+const isMcpOauthCallback = (req: Request, pathname: string) => (
   req.method === 'GET'
-  && /^\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(req.path || '')
+  && /^\/api\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(pathname)
 );
 
-const isFilePreviewRead = (req: Request) => (
+const isFilePreviewRead = (req: Request, pathname: string) => (
   req.method === 'GET'
-  && /^\/fs\/preview\/[^/]+\/./.test(req.path || '')
+  && /^\/api\/fs\/preview\/[^/]+\/./.test(pathname)
 );
 
-const isGuestFrameFileRead = (req: Request) => (
+const isGuestFrameFileRead = (req: Request, pathname: string) => (
   req.method === 'GET'
-  && /^\/guest-files\/[^/]+\/./.test(req.path || '')
+  && /^\/api\/guest-files\/[^/]+\/./.test(pathname)
 );
 
-export const isRouteGatedApiRequest = (req: Request) => (
-  req.method === 'POST' && (req.originalUrl || '').split('?', 1).join('') === NOTIFICATION_EMIT_PATH
+const isFreePortRouteRequest = (req: Request, pathname: string) => (
+  (req.method === 'GET' || req.method === 'HEAD')
+  && pathname.replace(/\/$/, '').toLowerCase() === FREE_PORT_PATH
 );
+
+export const isRouteGatedApiRequest = (req: Request) => {
+  const pathname = requestPathname(req);
+  return (req.method === 'POST' && pathname === NOTIFICATION_EMIT_PATH)
+    || isFreePortRouteRequest(req, pathname);
+};
 
 export const createApiAuthGate = ({ tunnelAuthController, uiAuthController }: {
   tunnelAuthController: ReturnType<typeof createTunnelAuth>;
   uiAuthController: ReturnType<typeof createUiAuth>;
 }): RequestHandler => async (req, res, next) => {
-  const pathname = (req.originalUrl || '').split('?', 1).join('');
-  if (selfAuthenticatedApiPaths.has(pathname)) return next();
-  if (isGuestOauthCallback(req) || isMcpOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
+  if (selfAuthenticatedApiPaths.has(requestPathname(req))) return next();
+  const pathname = routedApiPathname(req);
+  if (isGuestOauthCallback(req, pathname) || isMcpOauthCallback(req, pathname) || isFilePreviewRead(req, pathname) || isGuestFrameFileRead(req, pathname)) {
     return next();
   }
   const requestScope = tunnelAuthController.classifyRequestScope(req);

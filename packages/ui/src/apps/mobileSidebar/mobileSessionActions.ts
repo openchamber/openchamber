@@ -13,6 +13,7 @@ import { getSessionPinList } from '@/lib/sessionPins';
 import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
 import { requestPinTo } from '@/components/session/sidebar/sections/sectionActions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { nestedLineageProject } from '@/sync/session-admission';
 import { getSessionDirectory } from '../mobileSessionFields';
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
@@ -26,11 +27,15 @@ const childrenOfActiveSessions = (): Map<string, Session[]> => {
   return children;
 };
 
-export const selectMobileSession = (session: Session, projectId: string | null, close: () => void): void => {
+export const openMobileSession = (sessionId: string, directory: string | null, projectId: string | null, close: () => void): void => {
   useUIStore.getState().closeMainSurfaces();
-  if (projectId) useProjectsStore.getState().setActiveProjectIdOnly(projectId);
-  void useSessionUIStore.getState().setCurrentSession(session.id, getSessionDirectory(session) || null);
+  if (projectId && !(directory && nestedLineageProject(sessionId, directory))) useProjectsStore.getState().setActiveProjectIdOnly(projectId);
+  void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
   close();
+};
+
+export const selectMobileSession = (session: Session, projectId: string | null, close: () => void): void => {
+  openMobileSession(session.id, getSessionDirectory(session) || null, projectId, close);
 };
 
 export const runMobileSubtreeAction = (action: SessionSubtreeAction, session: Session, t: Translate): ReturnType<typeof runSessionSubtreeAction> => {

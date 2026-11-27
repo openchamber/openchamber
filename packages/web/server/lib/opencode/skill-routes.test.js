@@ -49,6 +49,7 @@ const startSkillsApp = async ({ projectRoot, overrides = {} }) => {
     buildOpenCodeUrl: () => 'http://127.0.0.1:9/',
     getOpenCodeAuthHeaders: () => ({}),
     getOpenCodePort: () => 0,
+    getManagedOpenCodeProcessEnv: () => ({}),
     getSkillSources,
     discoverSkills,
     mergeDiscoveredSkills,
@@ -519,11 +520,29 @@ describe('skill-routes directory soft fallback', () => {
       }],
       externalSkills: {
         claudeDisabled: false,
-        allDisabled: false,
       },
       openCodeSkillsUnavailable: true,
     };
     expect(await response.text()).toBe(JSON.stringify(expected));
+  });
+
+  it('reports the external-skill switches the managed OpenCode was started with, and none for an external one', async () => {
+    projectRoot = createTempProject();
+    let managedEnv = { OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: '1' };
+    appHandle = await startSkillsApp({
+      projectRoot,
+      overrides: { getManagedOpenCodeProcessEnv: () => managedEnv },
+    });
+    const read = async () => (await (await fetch(`${appHandle.baseUrl}/api/config/skills`)).json()).externalSkills;
+    expect(await read()).toEqual({ claudeDisabled: true });
+
+    for (const value of ['TRUE', 'yes', ' true ', '0']) {
+      managedEnv = { OPENCODE_DISABLE_CLAUDE_CODE: value };
+      expect(await read()).toEqual({ claudeDisabled: value === 'TRUE' });
+    }
+
+    managedEnv = null;
+    expect(await read()).toBeUndefined();
   });
 
   it('reuses the parsed copy at OpenCode\'s path when local discovery selects another root', async () => {

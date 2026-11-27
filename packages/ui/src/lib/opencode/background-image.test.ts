@@ -13,6 +13,7 @@ describe('background image jobs', () => {
     const notice = (source: string) => ({ id: 'm', sessionID: 's', role: 'synthetic' as const, text: '', time: { created: 1 }, metadata: { source, jobID: 'image_1' } });
     expect(readImageJobEnd(notice('experimental_image_generate'))).toBe('image_1');
     expect(readImageJobEnd(notice('image_generate'))).toBe('image_1');
+    expect(readImageJobEnd(notice('generate_image'))).toBe('image_1');
     expect(readImageJobEnd(notice('shell'))).toBeUndefined();
   });
 

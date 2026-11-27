@@ -146,12 +146,19 @@ export function normalizeGitCredentialEndpoint<Endpoint>(endpoint: Endpoint) {
 
 const GIT_LFS_ENDPOINT_SUFFIX = '/info/lfs';
 
-export function gitLfsCredentialEndpointAliases<Endpoint>(endpoint: Endpoint) {
+export function gitLfsCredentialEndpointAliases<Endpoint>(endpoint: Endpoint, derivedFromRemote?: string) {
   const normalized = normalizeGitCredentialEndpoint(endpoint);
   if (!normalized.path.endsWith(GIT_LFS_ENDPOINT_SUFFIX)) return Object.freeze([]);
   const repositoryPath = normalized.path.slice(0, -GIT_LFS_ENDPOINT_SUFFIX.length);
   if (!repositoryPath) return Object.freeze([]);
-  return Object.freeze([Object.freeze({ ...normalized, path: repositoryPath })]);
+  const aliases = [Object.freeze({ ...normalized, path: repositoryPath })];
+  if (derivedFromRemote !== undefined && /^https:\/\//i.test(derivedFromRemote)) {
+    const parsed = new URL(derivedFromRemote);
+    const remote = normalizeGitCredentialEndpoint({ protocol: parsed.protocol, host: parsed.hostname, port: parsed.port, path: parsed.pathname });
+    if (remote.protocol === normalized.protocol && remote.host === normalized.host && remote.port === normalized.port
+      && `${remote.path}.git` === repositoryPath) aliases.push(Object.freeze({ ...normalized, path: remote.path }));
+  }
+  return Object.freeze(aliases);
 }
 
 export function normalizeGitRemoteEndpoint<RemoteUrl>(remoteUrl: RemoteUrl) {
@@ -453,12 +460,14 @@ export const endpointIsInstanceOrigin = (descriptor: ProviderDescriptor | null |
     && Number(origin.port || (https ? 443 : 80)) === endpoint.port;
 };
 
+export const allowsManagedHttpsInstance = (descriptor: ProviderDescriptor, instance: string) => {
+  const policy = descriptor.transport.managedHttpsInstances;
+  return policy === 'any' || policy(instance);
+};
+
 const assertHttpsEndpoint = (descriptor: ProviderDescriptor, reference: { instance: string }, endpoint: ReturnType<typeof normalizeGitCredentialEndpoint>) => {
   if (!['https', 'http'].includes(endpoint.protocol)) throw new Error('Managed HTTPS credentials require HTTPS');
-  if (descriptor.transport.managedHttpsInstances === 'default-only'
-    && !descriptor.instance.defaultInstances.includes(reference.instance)) {
-    throw new Error('Invalid managed provider instance');
-  }
+  if (!allowsManagedHttpsInstance(descriptor, reference.instance)) throw new Error('Invalid managed provider instance');
   let instance;
   try {
     instance = descriptor.instance.origin(reference.instance);

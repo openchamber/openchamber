@@ -29,7 +29,7 @@ Um lead mostra um pico com uma bandeira na barra lateral no lugar da seta. A set
 - **Dá nome à frente de trabalho.** Renomeia a sessão de acordo com o trabalho, para você encontrá-la pelo assunto na barra lateral, nas abas e na busca. Um nome que você mesmo deu continua.
 - **Entrega resultados, não passos.** Cada parte do trabalho vai para uma sessão separada com o resultado que ela deve alcançar, como "encontre e corrija o timeout do login", e essa sessão define os passos sozinha. Essas sessões ficam abaixo do lead na barra lateral. Você pode abri-las e lê-las, e **Assumir** no menu de uma sessão a torna sua, se quiser conversar com ela.
 - **Confere o que volta.** Um relatório que só diz "encontrei a causa" não é o resultado pedido, então o lead devolve o trabalho em vez de repassá-lo a você. Cada sessão precisa mostrar provas do que fez, como quais verificações rodou e o que elas mostraram, e um relatório sem provas também volta. O lead só confere algo pessoalmente quando falta alguma coisa nas provas.
-- **Arruma a casa.** Arquiva as sessões cujos resultados já usou.
+- **Arruma a casa.** Quando uma sessão trabalhou num worktree e o trabalho dela já chegou ao destino, remove esse worktree. A sessão continua lá para você ler.
 - **Pergunta só o que importa.** Decide sozinho, a menos que a resposta mude o que você veria no seu projeto ou que duas opções razoáveis sejam de fato diferentes. Uma mudança grande, por si só, não é motivo para perguntar. As perguntas das sessões dele vão para o lead e só chegam a você se passarem pelo mesmo critério.
 
 ## O resumo
@@ -61,7 +61,7 @@ O lead muda só as partes do brief que mudaram, e o OpenChamber coloca o brief i
 
 ## Leads em repouso
 
-Um lead pode esperar horas enquanto as sessões dele trabalham. Quando ele acorda, o modelo normalmente precisa ler a conversa inteira de novo do zero, porque os provedores guardam a conversa em cache só por alguns minutos. Em uma conversa longa, essa leitura sozinha custa tanto quanto muito trabalho, e em uma assinatura consome seu limite de uso.
+Um lead pode esperar horas enquanto as sessões dele trabalham. Quando ele acorda, o modelo normalmente precisa ler a conversa inteira de novo do zero, porque os provedores guardam a conversa em cache só por tempo limitado, muitas vezes de alguns minutos a uma hora. Em uma conversa longa, essa leitura sozinha custa tanto quanto muito trabalho, e em uma assinatura consome seu limite de uso.
 
 Por isso, quando um lead fica ocioso por mais tempo do que o provedor mantém o cache e a conversa é longa, o OpenChamber a encurta antes de ele acordar. A parte mais antiga da conversa é trocada por uma nota curta: o resumo do lead e o estado das sessões dele. Nenhum modelo é chamado para escrever a nota, então isso não custa nada. O brief e as mensagens mais recentes ficam como estão, e o lead ainda pode ler a conversa anterior completa sempre que precisar.
 
@@ -73,7 +73,7 @@ Um lead pode dividir um trabalho grande em um [workflow](/pt-br/workflows/). Em 
 
 ## Onde os leads funcionam
 
-Leads precisam da [Ferramenta de controle para agentes](/pt-br/agent-control-tool/), que vem ativada por padrão, e do servidor OpenCode do próprio OpenChamber. Eles funcionam no desktop, no navegador e no celular. A extensão do VS Code mostra os leads existentes com a marca e o resumo, mas não consegue criar um.
+Leads precisam da [Ferramenta de controle para agentes](/pt-br/agent-control-tool/), que vem ativada por padrão. Em um servidor OpenCode que você mesmo executa, eles também precisam do [plugin do OpenChamber registrado](/pt-br/opencode-server/#ativar-as-ferramentas-do-openchamber-em-um-servidor-local-externo). Eles funcionam no desktop, no navegador e no celular. A extensão do VS Code mostra os leads existentes com a marca e o resumo, mas não consegue criar um.
 
 ## Relacionado
 

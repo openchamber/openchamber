@@ -32,6 +32,8 @@ export const giteaDescriptor = Object.freeze({
     labels: true,
     reviewers: true,
     reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),
+    reviewDismiss: 'others',
+    reviewUndismiss: true,
     reviewDrafts: Object.freeze({ fileComments: false }),
     uploads: false,
     stacks: false,
@@ -89,7 +91,7 @@ export const giteaDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: true, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-      issueEdit: true, changeRequestEdit: true, commentEdit: true,
+      issueAssignees: true, issueEdit: true, baseChange: true, updateBranch: true, rebase: false, changeRequestEdit: true, commentEdit: true,
       changeRequestTemplates: Object.freeze([
         '.gitea/pull_request_template.md',
         '.gitea/PULL_REQUEST_TEMPLATE.md',

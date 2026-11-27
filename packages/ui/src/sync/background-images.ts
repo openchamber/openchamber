@@ -28,6 +28,7 @@ let appliedRead = 0;
 let expiryTimer: ReturnType<typeof setTimeout> | null = null;
 const touchedAt = new Map<string, number>();
 const ended = new Set<string>();
+const endedKey = (sessionID: string, id: string): string => `${sessionID}\u0000${id}`;
 
 const remember = (set: Set<string> | Map<string, number>, id: string): void => {
   if (set.size <= MAX_TOUCHED) return;
@@ -83,22 +84,33 @@ export const applyBackgroundImageEvents = (directory: string, payloads: readonly
       const { transition, sessionID } = payload.properties;
       if (transition.kind !== 'success') continue;
       const started = readImageJobStart(transition.metadata);
-      if (!started || ended.has(started.id) || current().has(started.id)) continue;
+      if (!started || ended.has(endedKey(sessionID, started.id)) || current().has(started.id)) continue;
       touch(started.id);
       draft ??= new Map(current());
       draft.set(started.id, { ...started, sessionID, startedAt: transition.end, inSpace: isSpaceDirectory(directory) });
       continue;
     }
-    if (payload.type === 'message.updated') {
-      const jobID = readImageJobEnd(payload.properties.info);
-      if (jobID === undefined) continue;
-      touch(jobID);
-      ended.add(jobID);
-      remember(ended, jobID);
-      if (!current().has(jobID)) continue;
+    if (payload.type === 'image.job.updated' && payload.properties.job) {
+      const { job } = payload.properties;
+      if (ended.has(endedKey(job.sessionID, job.id)) || current().has(job.id)) continue;
+      touch(job.id);
       draft ??= new Map(current());
-      draft.delete(jobID);
+      draft.set(job.id, { ...job, inSpace: isSpaceDirectory(directory) });
+      continue;
     }
+    const end = payload.type === 'image.job.updated'
+      ? payload.properties
+      : payload.type === 'message.updated' ? { id: readImageJobEnd(payload.properties.info), sessionID: payload.properties.info.sessionID } : undefined;
+    if (end?.id === undefined) continue;
+    const tracked = current().get(end.id);
+    if (tracked && tracked.sessionID !== end.sessionID) continue;
+    touch(end.id);
+    const key = endedKey(end.sessionID, end.id);
+    ended.add(key);
+    remember(ended, key);
+    if (!tracked) continue;
+    draft ??= new Map(current());
+    draft.delete(end.id);
   }
   if (draft) publish(draft);
 };
@@ -113,7 +125,7 @@ export const replaceImageJobs = (jobs: readonly RunningImageJob[], since: number
     draft.delete(id);
   }
   for (const job of jobs) {
-    if (touchedSince(job.id, since) || ended.has(job.id) || state.byId.has(job.id)) continue;
+    if (touchedSince(job.id, since) || ended.has(endedKey(job.sessionID, job.id)) || state.byId.has(job.id)) continue;
     draft ??= new Map(state.byId);
     draft.set(job.id, { ...job, inSpace: false });
   }
@@ -133,10 +145,6 @@ export const refreshBackgroundImages = async (
 };
 
 export const backgroundImageRevision = (): number => revision;
-
-export const hasRunningImage = (sessionId: string): boolean => (
-  useBackgroundImagesStore.getState().sessionIds.has(sessionId)
-);
 
 export const resetBackgroundImages = (): void => {
   generation += 1;

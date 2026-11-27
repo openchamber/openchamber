@@ -12,7 +12,8 @@ import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
 import { WorkStatusSectionList } from './WorkStatusSectionList';
-import { getWorkStatusPanelPresentation } from './sections';
+import { getWorkStatusPanelPresentation, isWorkStatusSectionVisible } from './sections';
+import { useLoadSessionTodos } from './useLoadSessionTodos';
 import { useWorkStatusSectionLayout } from './useWorkStatusSectionLayout';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
@@ -37,6 +38,11 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const sectionLayout = useWorkStatusSectionLayout();
   const { allSectionsHidden } = sectionLayout;
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
+  useLoadSessionTodos(
+    sessionId,
+    directory,
+    sectionsDialogOpen || (visible && isWorkStatusSectionVisible(sectionLayout.hiddenSections, 'tasks')),
+  );
   const [renderedSections, setRenderedSections] = React.useState(1);
   const frameRef = React.useRef<number | null>(null);
 

@@ -103,6 +103,72 @@ describe('lead actions', () => {
     expect(await briefs.read('ses_lead')).toContain('by Friday');
   });
 
+  it('sets, replaces and closes a strand by its id and leaves the rest of the brief as it is', async () => {
+    const { actions, briefs } = await setup();
+    const legacy = '# Goal\n\nShip it\n\n## Strands\n\n### old heading\n\n- notes\n';
+    await briefs.write('ses_lead', legacy);
+    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({ brief: legacy, strands: [] });
+    const added = await actions.execute('lead.brief', { strands: [{ id: 'relay', text: 'Land the relay\n(ses_a)' }, { id: 'ci', text: 'Green main' }] }, 'ses_lead');
+    expect(added.strands).toEqual({ added: ['relay', 'ci'], replaced: [], closed: [] });
+    expect(await fs.readFile(added.file, 'utf8')).toContain('### relay\n\nLand the relay\n(ses_a)');
+    const changed = await actions.execute('lead.brief', { edits: [{ find: 'Ship it', replace: 'Ship it whole' }], strands: '[{"id":"ci","text":"Green, waits on the VM"},{"id":"relay","close":true}]' }, 'ses_lead');
+    expect(changed.strands).toEqual({ added: [], replaced: ['ci'], closed: ['relay'] });
+    expect(await actions.execute('lead.brief', {}, 'ses_lead')).toMatchObject({
+      brief: expect.stringContaining(legacy.trim().replace('Ship it', 'Ship it whole')),
+      strands: [{ id: 'ci', text: 'Green, waits on the VM' }],
+    });
+    await actions.execute('lead.brief', { edits: [{ find: '- notes\n', replace: '- no notes\n' }] }, 'ses_lead');
+    await actions.execute('lead.brief', { brief: '# New goal' }, 'ses_lead');
+    expect((await actions.execute('lead.brief', {}, 'ses_lead')).strands).toEqual([{ id: 'ci', text: 'Green, waits on the VM' }]);
+    await actions.execute('lead.brief', { strands: [{ id: 'ci', close: true }] }, 'ses_lead');
+    expect(await briefs.read('ses_lead')).toBe('# New goal\n');
+  });
+
+  it('refuses a strand that is a history, a heading, unknown or named twice, and saves nothing of the call', async () => {
+    const { actions, briefs } = await setup();
+    await actions.execute('lead.brief', { brief: '# Goal', strands: [{ id: 'ci', text: 'Green main' }] }, 'ses_lead');
+    const before = await briefs.read('ses_lead');
+    for (const strands of [
+      [{ id: 'ci', text: 'x'.repeat(601) }], [{ id: 'ci', text: 'a\n### other\nb' }], [{ id: 'CI run', text: 'a' }], [{ id: 'ci', text: ' ' }],
+      [{ id: 'new', text: 'a' }, { id: 'typo', close: true }], [{ id: 'ci', text: 'a' }, { id: 'ci', close: true }],
+    ]) {
+      await expect(actions.execute('lead.brief', { strands }, 'ses_lead')).rejects.toMatchObject({ status: 409 });
+    }
+    await expect(actions.execute('lead.brief', { brief: before }, 'ses_lead')).rejects.toThrow('Leave the Strands section out');
+    expect(await briefs.read('ses_lead')).toBe(before);
+  });
+
+  it('keeps what the user wrote by hand into the strands of the file', async () => {
+    const { actions, briefs } = await setup();
+    await actions.execute('lead.brief', { brief: '# Goal', strands: [{ id: 'ci', text: 'Green main' }] }, 'ses_lead');
+    const stored = await briefs.read('ses_lead');
+    await briefs.write('ses_lead', stored.replace('## Strands\n', '## Strands\n\nFirst CI\n') + '\n### My note\nby hand\n');
+    await actions.execute('lead.brief', { strands: [{ id: 'relay', text: 'Land it' }] }, 'ses_lead');
+    const read = await actions.execute('lead.brief', {}, 'ses_lead');
+    expect(read.strands).toEqual([{ id: 'ci', text: 'Green main' }, { id: 'relay', text: 'Land it' }]);
+    expect(read.brief).toMatch(/^# Goal\s+First CI\s+### My note\nby hand\s*$/);
+    await actions.execute('lead.brief', { strands: [{ id: 'ci', close: true }] }, 'ses_lead');
+    expect(await briefs.read('ses_lead')).toContain('### My note\nby hand');
+  });
+
+  it('says how full the brief is on every write, and asks to condense well before the limit', async () => {
+    const { actions } = await setup();
+    const small = await actions.execute('lead.brief', { brief: '# Goal', strands: [{ id: 'a', text: 'x' }, { id: 'b', text: 'xxx' }] }, 'ses_lead');
+    expect(small).toMatchObject({ full: '1%', largestStrands: [{ id: 'b', length: 3 }, { id: 'a', length: 1 }] });
+    expect(small).not.toHaveProperty('note');
+    expect((await actions.execute('lead.brief', { brief: 'x'.repeat(9_000) }, 'ses_lead')).note).toContain('Condense it now');
+  });
+
+  it('refuses a field it does not have, names it, and saves nothing', async () => {
+    const { actions, briefs, writes } = await setup();
+    await expect(actions.execute('lead.brief', { text: '# Goal' }, 'ses_lead')).rejects.toThrow('lead.brief has no text; it takes brief, edits, strands.');
+    await expect(actions.execute('lead.brief', { brief: '# Goal', body: 'more' }, 'ses_lead')).rejects.toMatchObject({ status: 400 });
+    expect(await briefs.read('ses_lead')).toBeNull();
+    await actions.execute('lead.brief', { action: 'lead.brief', brief: '# Goal', sessionId: 'ses_lead', directory: '/repo', title: '', all: false, args: {}, carry: [] }, 'ses_lead');
+    await expect(actions.execute('lead.digest', { now: ['x'], summary: 'y' }, 'ses_lead')).rejects.toThrow('lead.digest has no summary');
+    expect(writes).toEqual([]);
+  });
+
   it('hands a session to a lead only for the user, never for an agent', async () => {
     const { actions, handOver } = await setup();
     await expect(actions.execute('lead.handover', { sessionId: 'ses_old', leadId: 'ses_lead' }, 'ses_agent')).rejects.toMatchObject({ status: 403 });
@@ -153,7 +219,7 @@ describe('lead actions', () => {
 });
 
 describe('sleep compaction', () => {
-  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, brief = '# Goal\n', onContext = () => {} } = {}) => {
+  const setup = ({ metadata = LEAD, tokens = SLEEP_COMPACTION_MIN_TOKENS, busy = false, warm = false, revert = undefined, model = { id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window: 1_000_000 }, brief = '# Goal\n', onContext = () => {}, turnEndedAt = undefined, trailing = [], failing = {} } = {}) => {
     const timers = [];
     const requests = [];
     const fetchImpl = vi.fn(async (url, init = {}) => {
@@ -162,23 +228,27 @@ describe('sleep compaction', () => {
       const json = (data) => new Response(JSON.stringify({ data }), { status: 200 });
       if (route === '/api/session/active') return json(busy ? { ses_lead: {} } : {});
       if (route === '/api/session/ses_lead') return json({ id: 'ses_lead', revert });
+      if (route.endsWith('/context') && failing.context) return new Response('{}', { status: 503 });
       if (route.endsWith('/context')) await onContext();
-      if (route.endsWith('/context')) return json([{ type: 'user' }, { type: 'assistant', tokens: { input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }]);
+      if (route.endsWith('/context')) return json([{ type: 'user' }, { type: 'assistant', time: { created: 1, completed: turnEndedAt }, tokens: { input: tokens, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, ...trailing]);
       if (route.endsWith('/compact')) return json({ id: 'msg_1' });
       return new Response('{}', { status: 404 });
     });
     const briefs = { read: async () => (brief instanceof Error ? Promise.reject(brief) : brief), remove: vi.fn(async () => undefined) };
     const clearInherited = vi.fn(async () => ({ changed: true }));
+    const quiet = { mark: vi.fn(), unmark: vi.fn() };
     let clock = 1_000;
     let reads = 0;
     const runtime = createSessionLeadRuntime({
       briefs,
-      readSessionMetadata: async () => (reads += 1, { openchamber: { ...metadata.openchamber, lead: metadata.openchamber?.lead && { ...metadata.openchamber.lead, digest: { needsYou: ['Keep it? Yes'], now: ['git: green'], news: [], updatedAt: 1 } } } }),
+      readSessionMetadata: async () => (reads += 1, failing.metadata ? Promise.reject(new Error('503')) : { openchamber: { ...metadata.openchamber, lead: metadata.openchamber?.lead && { ...metadata.openchamber.lead, digest: { needsYou: ['Keep it? Yes'], now: ['git: green'], news: [], updatedAt: 1 } } } }),
       buildOpenCodeUrl: (route) => `http://opencode${route}`,
       getOpenCodeAuthHeaders: () => ({}),
-      readCacheLifetime: async () => 60_000,
+      readModel: async () => (typeof model === 'function' ? model() : model),
       isSessionWarm: () => warm,
       listChildren: async () => [{ id: 'ses_child', title: 'Migrate git', status: { type: 'busy' } }],
+      listLeads: async () => [{ id: 'ses_lead', directory: '/repo' }],
+      quiet,
       clearInherited,
       fetchImpl,
       now: () => clock,
@@ -193,8 +263,72 @@ describe('sleep compaction', () => {
       clock += 90_000;
       await timers.at(-1).run();
     };
-    return { runtime, requests, briefs, timers, idle, fire, clearInherited, metadataReads: () => reads };
+    const resume = async () => {
+      await runtime.resumeSleep();
+      await vi.waitFor(() => expect(timers.length).toBeGreaterThan(0));
+    };
+    return { runtime, requests, briefs, timers, idle, resume, fire, tick: (ms) => { clock += ms; }, clearInherited, quiet, metadataReads: () => reads };
   };
+
+  it('picks up after a restart from when the last turn ended, through the same checks', async () => {
+    const sleeper = setup({ turnEndedAt: 1_000 - 60_000 });
+    await sleeper.resume();
+    expect(sleeper.timers[0].delay).toBe(30_000);
+    await sleeper.fire();
+    expect(sleeper.requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+
+    const longAsleep = setup({ turnEndedAt: 1_000 - 24 * 60 * 60_000 });
+    await longAsleep.resume();
+    expect(longAsleep.timers[0].delay).toBe(0);
+
+    for (const options of [{ tokens: SLEEP_COMPACTION_MIN_TOKENS - 1 }, { warm: true }, { busy: true }, { revert: { messageID: 'msg_1' } }]) {
+      const { requests, resume, fire } = setup({ ...options, turnEndedAt: 1 });
+      await resume();
+      await fire();
+      expect(requests.some((request) => request.route.endsWith('/compact'))).toBe(false);
+    }
+  });
+
+  it('counts from the newest of the idle it saw and the last answer, also one that has no tokens', async () => {
+    const seen = setup({ turnEndedAt: 1 });
+    await seen.idle();
+    seen.tick(30_000);
+    await seen.runtime.resumeSleep();
+    await vi.waitFor(() => expect(seen.timers).toHaveLength(2));
+    expect(seen.timers[1].delay).toBe(60_000);
+
+    const missed = setup({ turnEndedAt: 31_000 });
+    await missed.idle();
+    missed.tick(30_000);
+    await missed.runtime.resumeSleep();
+    await vi.waitFor(() => expect(missed.timers).toHaveLength(2));
+    expect(missed.timers[1].delay).toBe(90_000);
+
+    const failedStep = setup({ turnEndedAt: 1, trailing: [{ type: 'assistant', time: { created: 900, completed: 1_000 } }] });
+    await failedStep.resume();
+    expect(failedStep.timers[0].delay).toBe(90_000);
+  });
+
+  it('keeps a timer it cannot replace, and waits a full cache when the last answer cannot be read', async () => {
+    const failing = {};
+    const run = setup({ turnEndedAt: 1, failing });
+    await run.idle();
+    run.tick(30_000);
+    failing.metadata = true;
+    await run.runtime.resumeSleep();
+    await vi.waitFor(() => expect(run.metadataReads()).toBe(2));
+    failing.metadata = false;
+    expect(run.timers).toHaveLength(1);
+    await run.fire();
+    expect(run.requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+
+    const unreadable = setup({ turnEndedAt: 1, failing: { context: true } });
+    await unreadable.idle();
+    unreadable.tick(30_000);
+    await unreadable.runtime.resumeSleep();
+    await vi.waitFor(() => expect(unreadable.timers).toHaveLength(2));
+    expect(unreadable.timers[1].delay).toBe(90_000);
+  });
 
   it('asks to clear what a new child copied from its parent, and leaves a session without a parent or linked by metadata alone', async () => {
     const { runtime, clearInherited } = setup();
@@ -208,11 +342,13 @@ describe('sleep compaction', () => {
   });
 
   it('compacts an idle lead past its cache and answers the hook with its own note once', async () => {
-    const { runtime, requests, timers, idle, fire } = setup();
+    const { runtime, requests, timers, idle, fire, quiet } = setup();
     await idle();
     expect(timers[0].delay).toBe(90_000);
     await fire();
     expect(requests).toContainEqual({ route: '/api/session/ses_lead/compact', method: 'POST' });
+    expect(quiet.mark).toHaveBeenCalledWith('ses_lead');
+    expect(quiet.unmark).not.toHaveBeenCalled();
 
     const summary = await runtime.sleepSummary('ses_lead');
     expect(summary).toContain('session.messages for sessionId ses_lead');
@@ -244,6 +380,41 @@ describe('sleep compaction', () => {
     await vi.waitFor(() => expect(plain.metadataReads()).toBe(1));
     await Promise.resolve();
     expect(plain.timers).toEqual([]);
+  });
+
+  it('waits an hour for a cache nobody describes and five minutes for a Claude one', async () => {
+    const minutes = async (model) => {
+      const { timers, idle } = setup({ model });
+      await idle();
+      return timers[0].delay / 60_000;
+    };
+    const unknown = { cacheLifetimeMs: null, window: null };
+    expect(await minutes({ ...unknown, id: 'gpt-6', providerID: 'openai' })).toBe(60.5);
+    expect(await minutes(null)).toBe(60.5);
+    expect(await minutes({ ...unknown, id: 'anthropic/claude-opus', providerID: 'openrouter' })).toBe(5.5);
+    expect(await minutes({ ...unknown, id: 'sonnet', family: 'claude-sonnet', providerID: 'gateway' })).toBe(5.5);
+    expect(await minutes({ ...unknown, id: 'workhorse', modelID: 'claude-sonnet', providerID: 'gateway' })).toBe(5.5);
+    expect(await minutes({ ...unknown, id: 'opus', providerID: 'claude-agent' })).toBe(5.5);
+  });
+
+  it('compacts a model with a small window at three quarters of it', async () => {
+    const model = { id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window: 128_000 };
+    for (const [tokens, compacts] of [[95_999, false], [96_000, true]]) {
+      const { requests, idle, fire } = setup({ model, tokens });
+      await idle();
+      await fire();
+      expect(requests.some((request) => request.route.endsWith('/compact'))).toBe(compacts);
+    }
+  });
+
+  it('measures against the model the lead will wake up on', async () => {
+    const at = (window) => ({ id: 'm', providerID: 'p', cacheLifetimeMs: 60_000, window });
+    let current = at(128_000);
+    const { requests, idle, fire } = setup({ model: () => current, tokens: 150_000 });
+    await idle();
+    current = at(1_000_000);
+    await fire();
+    expect(requests.some((request) => request.route.endsWith('/compact'))).toBe(false);
   });
 
   it('stands down when a turn starts while it is checking', async () => {

@@ -19,6 +19,7 @@ import { type QueuedContextPart, type QueuedMessageGoal } from '@/stores/message
 import { withOriginalAttachment } from '@/stores/messageQueueAttachments';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSelectionStore } from '@/sync/selection-store';
+import { isSessionModelChosen } from '@/sync/session-selection';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { attachedFilesForModel, AttachmentPathSaveError } from '@/sync/model-attachment-paths';
 import { useInputStore, type SyntheticContextPart } from '@/sync/input-store';
@@ -122,6 +123,8 @@ export function useComposerQueueActions({
         const isQueueRuntime = captureRuntimeInstance();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
+        const keepSessionAgent = !(currentAgentName && useSelectionStore.getState().getSessionAgentPick(queueSessionId) === currentAgentName);
+        const keepSessionModel = keepSessionAgent && !(currentProviderId && currentModelId && isSessionModelChosen(queueSessionId, currentProviderId, currentModelId));
         const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(
             queueSessionId, currentProviderId, currentModelId, queueRuntimeKey,
         );
@@ -225,6 +228,8 @@ export function useComposerQueueActions({
                     modelID: currentModelId,
                     agent: currentAgentName ?? undefined,
                     variant: currentVariant ?? undefined,
+                    ...(keepSessionModel && { keepSessionModel: true }),
+                    ...(keepSessionAgent && { keepSessionAgent: true }),
                 } : undefined,
                 goal,
             });

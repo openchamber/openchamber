@@ -1,6 +1,6 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 import { spawn, spawnSync } from 'node:child_process';
-import { accessSync, constants as fsConstants, statSync } from 'node:fs';
+import { createDefaultDirectory } from './default-directory.js';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
@@ -12,6 +12,7 @@ import { recordStartupPerformance } from '../diagnostics/startup-performance.js'
 import { topUpV1Migration } from './v1-migration-topup.js';
 import { attachSharedService, restoreSharedServiceState, type SharedOpenCodeServiceConnector } from './shared-service.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
+import { stopWindowsProcessesListeningOnPort } from './windows-port-processes.js';
 import type { ChildProcess } from 'node:child_process';
 import type { Application } from '../shared/http-contracts.js';
 import type { DiagnosticJournal } from '../diagnostics/contracts.js';
@@ -79,7 +80,7 @@ export interface OpenCodeLifecycleState {
   openCodePort: number | null;
   openCodeBaseUrl: string | null;
   openCodeWorkingDirectory: string;
-  currentRestartPromise: Promise<void> | null;
+  currentRestartPromise: Promise<boolean> | null;
   isRestartingOpenCode: boolean;
   openCodeApiPrefix: string;
   openCodeApiPrefixDetected: boolean;
@@ -305,43 +306,12 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
   let managedPreflight: Promise<boolean> | null = null;
   let managedProcessEnv: ProcessEnvironment | null = null;
-  let connectedViaSharedService = false, sharedServiceReplaced = false;
+  let connectedViaSharedService = false;
 
-  const killProcessOnPortWin32 = (port: number) => {
-    try {
-      const result = spawnSync(
-        'powershell',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          `Get-NetTCPConnection -State Listen -LocalPort ${Number.parseInt(String(port), 10)} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`,
-        ],
-        { encoding: 'utf8', timeout: 5000, windowsHide: true }
-      );
-      const output = result.stdout || '';
-      const myPid = process.pid;
-      const pids = new Set<number>();
-      for (const line of output.split(/\r?\n/)) {
-        const pid = Number.parseInt(line.trim(), 10);
-        if (pid && pid !== myPid) pids.add(pid);
-      }
-      for (const pid of pids) {
-        try {
-          spawnSync('taskkill', ['/PID', String(pid), '/F'], { stdio: 'ignore', timeout: 3000, windowsHide: true });
-        } catch {
-          void 0;
-        }
-      }
-    } catch {
-      void 0;
-    }
-  };
-
-  const killProcessOnPort = (port: number | null) => {
+  const killProcessOnPort = async (port: number | null) => {
     if (!port) return;
     if (process.platform === 'win32') {
-      killProcessOnPortWin32(port);
+      await stopWindowsProcessesListeningOnPort(port);
       return;
     }
     try {
@@ -1015,21 +985,19 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
   const sharedServiceTarget = () => ({ state, setOpenCodePort, recordDiagnostic: (event: string) => diagnosticJournal.record(event), syncToHmrState, killProcessOnPort, waitForPortRelease, setupProxy: () => state.expressApp && setupProxy(state.expressApp), ensureOpenCodeApiPrefix, onOpenCodeRestarted });
 
-  const restartOpenCode = async (reason = 'managed-restart', { whileStopped }: { whileStopped?: () => Promise<void> } = {}) => {
-    if (state.isShuttingDown) return;
-    if (whileStopped && state.isExternalOpenCode) throw new Error('An external OpenCode server cannot be stopped by OpenChamber.');
-    if (state.currentRestartPromise) {
-      if (!whileStopped) {
-        await state.currentRestartPromise;
-        return;
-      }
-      await state.currentRestartPromise.catch(() => {});
-      if (state.isShuttingDown) return;
+  const restartOpenCode = async (reason = 'managed-restart', { whileStopped }: { whileStopped?: () => Promise<void> } = {}): Promise<boolean> => {
+    if (state.isShuttingDown) return false;
+    while (state.currentRestartPromise || bootstrapRetryRun) {
+      if (state.currentRestartPromise && !whileStopped) return state.currentRestartPromise;
+      await (state.currentRestartPromise ?? bootstrapRetryRun)?.catch(() => {});
     }
-    while (bootstrapRetryRun) await bootstrapRetryRun;
-    if (state.isShuttingDown) return;
+    if (state.isShuttingDown) return false;
+    if (whileStopped && state.isExternalOpenCode) throw new Error('An external OpenCode server cannot be stopped by OpenChamber.');
 
     const whileStoppedError: LifecycleFailure = { cause: null };
+    const runWhileStopped = async () => {
+      try { await whileStopped?.(); } catch (error) { whileStoppedError.cause = error; }
+    };
     state.currentRestartPromise = (async () => {
       managedPreflight = null;
       state.isRestartingOpenCode = true;
@@ -1040,7 +1008,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
       const canUseSharedService = !env.ENV_SKIP_OPENCODE_START && !env.ENV_CONFIGURED_OPENCODE_HOST && !env.ENV_EFFECTIVE_PORT;
       const wantSharedService = canUseSharedService && Boolean(await sharedService?.isEnabled());
-      if (wantSharedService && sharedService) { sharedServiceReplaced = await attachSharedService(sharedService, sharedServiceTarget(), { stopManaged: !state.isExternalOpenCode }); connectedViaSharedService = true; return; }
+      if (wantSharedService && sharedService) { const replaced = await attachSharedService(sharedService, sharedServiceTarget(), { stopManaged: !state.isExternalOpenCode }); connectedViaSharedService = true; await runWhileStopped(); return replaced; }
 
       const leavingShared = connectedViaSharedService && !wantSharedService;
       if (state.isExternalOpenCode && !leavingShared) {
@@ -1058,7 +1026,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
         state.openCodeBaseUrl = probeOrigin ?? null; setOpenCodePort(probePort); state.isOpenCodeReady = true;
         diagnosticJournal.record('external connected'); state.lastOpenCodeError = null; state.openCodeNotReadySince = 0; syncToHmrState();
         if (state.expressApp) { setupProxy(state.expressApp); ensureOpenCodeApiPrefix(); }
-        return;
+        return false;
       }
       const prevShared = leavingShared ? { origin: state.openCodeBaseUrl, port: state.openCodePort } : null;
       if (leavingShared) {
@@ -1074,17 +1042,11 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
           await state.openCodeProcess.close().catch((error) => console.warn('Error closing OpenCode process:', error));
           state.openCodeProcess = null; syncToHmrState();
         }
-        killProcessOnPort(portToKill);
+        await killProcessOnPort(portToKill);
         if (!(await waitForPortRelease(portToKill, 5000))) console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
       }
 
-      if (whileStopped) {
-        try {
-          await whileStopped();
-        } catch (error) {
-          whileStoppedError.cause = error;
-        }
-      }
+      await runWhileStopped();
 
       if (env.ENV_CONFIGURED_OPENCODE_PORT) {
         console.log(`Using OpenCode port from environment: ${env.ENV_CONFIGURED_OPENCODE_PORT}`);
@@ -1119,10 +1081,12 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       } catch (error) {
         console.warn('Failed to rebind event stream after OpenCode restart:', optionalErrorFields(error)?.message ?? error);
       }
+      return false;
     })();
 
+    let result: boolean;
     try {
-      await state.currentRestartPromise;
+      result = await state.currentRestartPromise;
     } catch (error) {
       if (!state.isExternalOpenCode) diagnosticJournal.record('managed restart failed');
       console.error(`Failed to restart OpenCode: ${errorFields(error).message}`);
@@ -1139,6 +1103,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       state.isRestartingOpenCode = false;
     }
     if (whileStoppedError.cause) throw whileStoppedError.cause;
+    return result;
   };
 
   const waitForOpenCodeReady = async (timeoutMs = 20000, intervalMs = 400) => {
@@ -1204,7 +1169,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     while (Date.now() < deadline) {
       try {
         const headers: AgentPresenceHeaders = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-        const scopedDirectory = getValidatedDefaultDirectory();
+        const scopedDirectory = await defaultDirectory.get();
         if (scopedDirectory) headers['x-opencode-directory'] = encodeURIComponent(scopedDirectory);
         const response = await fetch(buildOpenCodeUrl('/api/agent'), { method: 'GET', headers });
 
@@ -1233,9 +1198,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     clearResolvedOpenCodeBinary();
     await applyOpencodeBinaryFromSettings();
 
-    await restartOpenCode(reason || 'config-change');
-
-    const external = state.isExternalOpenCode === true, replacedShared = connectedViaSharedService && sharedServiceReplaced;
+    const replaced = await restartOpenCode(reason || 'config-change');
+    const external = state.isExternalOpenCode === true;
 
     try {
       await waitForOpenCodeReady();
@@ -1255,7 +1219,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       throw error;
     }
 
-    const manualRestart = external && wasExternal && !replacedShared;
+    const manualRestart = external && wasExternal && !replaced;
     return { reloaded: !manualRestart, external: manualRestart };
   };
 
@@ -1364,7 +1328,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
         syncToHmrState();
         throw new UnsupportedOpenCodeVersionError(unsupportedExternalVersion);
       } else if (!env.ENV_EFFECTIVE_PORT && sharedService && await sharedService.isEnabled()) {
-        sharedServiceReplaced = await attachSharedService(sharedService, sharedServiceTarget()); connectedViaSharedService = true;
+        await attachSharedService(sharedService, sharedServiceTarget()); connectedViaSharedService = true;
       } else {
         if (env.ENV_EFFECTIVE_PORT) {
           console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
@@ -1440,71 +1404,10 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     return true;
   };
 
-  let defaultOpenCodeDirectory: string | null = null;
-  let warmedOpenCodeDirectories: string[] = [];
-  let defaultDirectoryRefresh: Promise<void> | null = null;
-  let defaultDirectoryRefreshAt = 0;
-  const DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS = 5000;
-
-  const isUsableDirectory = (directory: string | null): directory is string => {
-    if (!directory) return false;
-    try {
-      if (!statSync(directory).isDirectory()) return false;
-      accessSync(directory, fsConstants.R_OK | fsConstants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const usableDirectories = (directories: Array<string | null>) => (
-    Array.isArray(directories) ? directories.filter((directory) => isUsableDirectory(directory)) : []
-  );
-
-  const selectUsableDirectory = (directories: Array<string | null>) => usableDirectories(directories)[0] || null;
-
-  const refreshDefaultDirectories = () => {
-    if (defaultDirectoryRefresh) return defaultDirectoryRefresh;
-    defaultDirectoryRefresh = (async () => {
-      try {
-        const directories = await getWarmupDirectories();
-        warmedOpenCodeDirectories = usableDirectories(directories);
-        const usable = selectUsableDirectory(warmedOpenCodeDirectories);
-        if (usable) defaultOpenCodeDirectory = usable;
-      } catch {
-        void 0;
-      } finally {
-        defaultDirectoryRefresh = null;
-      }
-    })();
-    return defaultDirectoryRefresh;
-  };
-
-  const getValidatedDefaultDirectory = () => {
-    if (isUsableDirectory(defaultOpenCodeDirectory)) return defaultOpenCodeDirectory;
-    const alternate = selectUsableDirectory(warmedOpenCodeDirectories);
-    if (alternate) {
-      defaultOpenCodeDirectory = alternate;
-      return alternate;
-    }
-    const checkedAt = now();
-    if (!defaultDirectoryRefresh && checkedAt - defaultDirectoryRefreshAt >= DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS) {
-      defaultDirectoryRefreshAt = checkedAt;
-      void refreshDefaultDirectories();
-    }
-    return isUsableDirectory(noProjectDirectory) ? noProjectDirectory : null;
-  };
+  const defaultDirectory = createDefaultDirectory({ getWarmupDirectories: () => getWarmupDirectories(), noProjectDirectory, now });
 
   const warmOpenCodeDirectories = async () => {
-    let directories: Array<string | null> = [];
-    try {
-      directories = await getWarmupDirectories();
-    } catch {
-      return;
-    }
-    if (!Array.isArray(directories) || directories.length === 0) return;
-    warmedOpenCodeDirectories = usableDirectories(directories);
-    defaultOpenCodeDirectory = warmedOpenCodeDirectories[0] || null;
+    const directories = await defaultDirectory.warm();
 
     const warmedPort = state.openCodePort;
     for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
@@ -1677,12 +1580,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
   return {
     isConnectedViaSharedService: () => connectedViaSharedService,
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
-    getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
-    noteCurrentDirectory: (directory: string | null) => {
-      if (!isUsableDirectory(directory)) return;
-      defaultOpenCodeDirectory = directory;
-      warmedOpenCodeDirectories = [directory, ...warmedOpenCodeDirectories.filter((entry) => entry !== directory)];
-    },
+    getDefaultOpenCodeDirectory: defaultDirectory.get,
+    noteCurrentDirectory: defaultDirectory.note,
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

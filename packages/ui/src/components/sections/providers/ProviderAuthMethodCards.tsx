@@ -44,6 +44,7 @@ interface ProviderAuthMethodCardsProps {
   accounts?: ProviderAuthAccounts;
   inUseWithoutCredential?: CredentialMethod | null;
   canAdd: boolean;
+  directory: string | null;
   connectKey: (request: IntegrationKeyRequest) => Promise<void>;
   onKeySaved: () => void;
   onSignedIn: () => void | Promise<void>;
@@ -59,6 +60,7 @@ export const ProviderAuthMethodCards: React.FC<ProviderAuthMethodCardsProps> = (
   accounts,
   inUseWithoutCredential = null,
   canAdd,
+  directory,
   connectKey,
   onKeySaved,
   onSignedIn,
@@ -143,6 +145,7 @@ export const ProviderAuthMethodCards: React.FC<ProviderAuthMethodCardsProps> = (
         key={`${signInIntegrationId}:${kind}`}
         integrationId={signInIntegrationId}
         methods={methods}
+        directory={directory}
         onConnected={() => {
           stopAdding(kind);
           return onSignedIn();

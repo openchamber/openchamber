@@ -3,6 +3,14 @@ import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import express from 'express';
+import { createUiAuth } from '../ui-auth/ui-auth.js';
+import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createSettingsRuntime } from './settings-runtime.js';
 
@@ -11,11 +19,15 @@ const createRuntime = async ({
   onManagedPluginSettingsChanged = undefined,
   onPermissionDefaultModeChanged = undefined,
   onLastDirectoryChanged = undefined,
+  onMessageSearchEnabledChanged = undefined,
   chatRoots = undefined,
   fs = fsPromises,
+  syncManagedRemoteTunnelConfigWithPresets = async () => {},
+  settingsFilePath: sharedSettingsFilePath = undefined,
+  refreshCanonicalPaths = undefined,
 } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
-  const settingsFilePath = path.join(tempRoot, 'settings.json');
+  const settingsFilePath = sharedSettingsFilePath ?? path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
     fsPromises: fs,
     path,
@@ -31,12 +43,14 @@ const createRuntime = async ({
     normalizeManagedRemoteTunnelHostname: (value) => value,
     normalizeManagedRemoteTunnelPresets: (value) => value,
     normalizeManagedRemoteTunnelPresetTokens: (value) => value,
-    syncManagedRemoteTunnelConfigWithPresets: async () => {},
+    syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken: async () => {},
     chatRoots,
+    refreshCanonicalPaths,
     onManagedPluginSettingsChanged,
     onPermissionDefaultModeChanged,
     onLastDirectoryChanged,
+    onMessageSearchEnabledChanged,
   });
 
   return {
@@ -50,6 +64,721 @@ const createRuntime = async ({
 };
 
 describe('settings runtime', () => {
+  it('restores default-enabled search when a save or external edit removes its opt-out', async () => {
+    const changed = vi.fn();
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      onMessageSearchEnabledChanged: changed,
+    });
+    try {
+      await runtime.persistSettings({ messageSearchEnabled: false });
+      await runtime.persistSettings({ messageSearchEnabled: undefined });
+      expect(changed.mock.calls.map(([enabled]) => enabled)).toEqual([false, true]);
+      await runtime.persistSettings({ messageSearchEnabled: false });
+      changed.mockClear();
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      delete settings.messageSearchEnabled;
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(settings));
+      await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['messageSearchEnabled'] });
+      expect(changed).toHaveBeenCalledExactlyOnceWith(true);
+    } finally { await cleanup(); }
+  });
+  it('delivers reconciled filesystem changes over the authenticated control stream', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    const clients = new Set();
+    const auth = createUiAuth({
+      requireClientAuth: true,
+      clientAuthController: {
+        authenticateBearerToken: async (token) => token === 'fixture-client' ? { ok: true, clientId: 'fixture' } : null,
+      },
+    });
+    const emitter = createNotificationEmitterRuntime({
+      process,
+      getDesktopNotifyEnabled: () => false,
+      desktopNotifyPrefix: '',
+      getUiNotificationClients: () => new Set(),
+      getOpenChamberEventClients: () => clients,
+    });
+    const app = express();
+    app.use('/api', auth.requireAuth);
+    registerScheduledTaskRoutes(app, {
+      getOpenChamberEventClients: () => clients,
+      writeSseEvent: emitter.writeSseEvent,
+    });
+    const server = createServer(app);
+    const abort = new AbortController();
+    const announced = [];
+    let watch;
+    try {
+      await runtime.persistSettings({ lightThemeId: 'initial', themeId: 'selected' });
+      watch = runtime.watchSettingsFiles({ pollMs: 20, onChange: async (properties) => {
+        const changes = await runtime.reconcileExternalSettings(properties);
+        announced.push(...changes);
+        for (const change of changes) {
+          for (const client of clients) emitter.writeSseEvent(client, { type: 'openchamber:settings-changed', properties: change });
+        }
+      } });
+      await watch.ready;
+      await new Promise((resolve) => server.listen(0, 'localhost', resolve));
+      const base = `http://localhost:${server.address().port}`;
+      expect((await fetch(`${base}/api/openchamber/events`)).status).toBe(401);
+      const response = await fetch(`${base}/api/openchamber/events`, {
+        headers: { Authorization: 'Bearer fixture-client' }, signal: abort.signal,
+      });
+      expect(response.status).toBe(200);
+      const reader = response.body.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('openchamber:event-stream-ready');
+      const events = [];
+      const collect = (async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          events.push(new TextDecoder().decode(value));
+        }
+      })();
+      await runtime.persistSettings({ lastDirectory: '/own' });
+      await watch.check();
+      await watch.check();
+      expect(announced).toEqual([]);
+      expect(events).toEqual([]);
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, '{');
+      await watch.check();
+      await watch.check();
+      expect(announced).toEqual([]);
+      expect(events).toEqual([]);
+      expect((await runtime.readSettingsFromDisk()).themeId).toBe('selected');
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, lightThemeId: 'external' }));
+      await vi.waitFor(() => expect(events.join('')).toContain('"source":"settings"'));
+      expect(events.join('')).toContain('"changedKeys":["lightThemeId"]');
+      expect(events.join('')).not.toContain('"external"');
+      expect((await runtime.readSettingsFromDisk()).lightThemeId).toBe('external');
+      expect((await runtime.readSettingsFromDisk()).themeId).toBeUndefined();
+      events.length = 0;
+      const preferencesFilePath = path.join(tempRoot, 'preferences.json');
+      const preferences = JSON.parse(await fsPromises.readFile(preferencesFilePath, 'utf8'));
+      preferences.fields.lightThemeId.value = 'preference-edit';
+      await fsPromises.writeFile(preferencesFilePath, JSON.stringify(preferences));
+      await vi.waitFor(() => expect(events.join('')).toContain('"source":"preferences"'));
+      expect((await runtime.readSettingsFromDisk()).lightThemeId).toBe('preference-edit');
+      await reader.cancel();
+      await collect;
+    } finally {
+      watch?.stop();
+      abort.abort();
+      server.closeAllConnections();
+      if (server.listening) await new Promise((resolve) => server.close(resolve));
+      auth.dispose();
+      await cleanup();
+    }
+  });
+  it('retains an explicit selection when a legacy palette key is omitted', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    const events = [];
+    let watch;
+    const retained = {
+      themeId: 'openchamber-dark', useSystemTheme: false, themeVariant: 'light',
+      lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
+    };
+    try {
+      await runtime.persistSettings(retained);
+      const preferencesBefore = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
+      watch = runtime.watchSettingsFiles({ onChange: async (change) => { await runtime.reconcileExternalSettings(change); events.push(change); } });
+      await watch.ready;
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      delete settings.lightThemeId;
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(settings));
+      await watch.check();
+      await watch.check();
+      expect(events).toEqual([{ source: 'settings', changedKeys: ['lightThemeId'] }]);
+      expect(await runtime.readSettingsFromDisk()).toMatchObject(retained);
+      const preferencesAfter = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
+      expect(preferencesAfter.fields.themeId).toEqual(preferencesBefore.fields.themeId);
+    } finally { watch?.stop(); await cleanup(); }
+  });
+
+  describe('a save through the app while the files change outside', () => {
+    const merging = (options = {}) => createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }), ...options });
+    const read = async (file) => JSON.parse(await fsPromises.readFile(file, 'utf8'));
+    const write = (file, document) => fsPromises.writeFile(file, JSON.stringify(document));
+    const editPreference = async (file, key, value) => {
+      const document = await read(file);
+      document.fields[key] = { value, updatedAt: 2 };
+      await write(file, document);
+    };
+
+    it('takes in edits of both files, applies the user change on top and announces the edits', async () => {
+      const changed = vi.fn();
+      const announced = [];
+      const { runtime, settingsFilePath, tempRoot, cleanup } = await merging({ onMessageSearchEnabledChanged: changed });
+      const preferencesFile = path.join(tempRoot, 'preferences.json');
+      try {
+        await runtime.persistSettings({ messageSearchEnabled: false, lightThemeId: 'old', darkThemeId: 'old', fontSize: 100 });
+        changed.mockClear();
+        runtime.subscribeTakenInSettings((changes) => announced.push(...changes));
+        await editPreference(preferencesFile, 'lightThemeId', 'outside-light');
+        await write(settingsFilePath, { ...await read(settingsFilePath), darkThemeId: 'outside-dark', desktopLocalPort: 4321 });
+        await runtime.persistSettings({ messageSearchEnabled: true, fontSize: 120 });
+        const expected = { messageSearchEnabled: true, fontSize: 120, lightThemeId: 'outside-light', darkThemeId: 'outside-dark', desktopLocalPort: 4321 };
+        expect(await runtime.readSettingsFromDisk()).toMatchObject(expected);
+        expect(await read(settingsFilePath)).toMatchObject(expected);
+        expect(changed).toHaveBeenCalledExactlyOnceWith(true);
+        expect(announced).toEqual(expect.arrayContaining([
+          expect.objectContaining({ source: 'settings', changedKeys: ['darkThemeId'] }),
+          expect.objectContaining({ source: 'preferences', changedKeys: ['lightThemeId'] }),
+        ]));
+      } finally { await cleanup(); }
+    });
+
+    it('keeps a project added outside while folders are checked at startup', async () => {
+      let settingsFile;
+      const created = await createRuntime({
+        refreshCanonicalPaths: async () => {
+          if (!settingsFile) return;
+          const file = settingsFile;
+          settingsFile = undefined;
+          await write(file, { ...await read(file), projects: [{ id: 'outside', path: os.tmpdir() }] });
+        },
+      });
+      try {
+        await write(created.settingsFilePath, { approvedDirectories: ['/tmp'], projects: [] });
+        settingsFile = created.settingsFilePath;
+        await created.runtime.readSettingsFromDiskMigrated();
+        const saved = await read(created.settingsFilePath);
+        expect(saved.projects).toHaveLength(1);
+        expect(saved.approvedDirectories).toBeUndefined();
+      } finally {
+        await created.cleanup();
+      }
+    });
+
+    it('keeps the user key when the legacy copy is edited outside before the profile is published', async () => {
+      let intercept = false;
+      const created = await merging({ fs: { ...fsPromises, writeFile: async (file, text, options) => {
+        await fsPromises.writeFile(file, text, options);
+        if (intercept && path.basename(file).startsWith('preferences.json.tmp-')) {
+          intercept = false;
+          await write(created.settingsFilePath, { ...await read(created.settingsFilePath), lightThemeId: 'outside' });
+        }
+      } } });
+      try {
+        await created.runtime.persistSettings({ lightThemeId: 'old' });
+        intercept = true;
+        await created.runtime.persistSettings({ lightThemeId: 'mine' });
+        await created.runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['lightThemeId'] });
+        expect((await created.runtime.readSettingsFromDisk()).lightThemeId).toBe('mine');
+      } finally { await created.cleanup(); }
+    });
+
+    it('keeps a surface override when another server changes the base and this one saves something else', async () => {
+      const first = await merging();
+      const second = await merging({ settingsFilePath: first.settingsFilePath });
+      try {
+        await first.runtime.persistSettings({ lightThemeId: 'base', lastDirectory: '/one' });
+        await first.runtime.persistSettings({ lightThemeId: 'desktop' }, { surface: 'desktop' });
+        await second.runtime.persistSettings({ lastDirectory: '/two' });
+        await second.runtime.persistSettings({ messageSearchEnabled: false });
+        await first.runtime.persistSettings({ lightThemeId: 'new-base' });
+        await second.runtime.persistSettings({ lastDirectory: '/three' });
+        expect((await second.runtime.readSettingsFromDisk({ surface: 'desktop' })).lightThemeId).toBe('desktop');
+        expect((await second.runtime.readSettingsFromDisk()).lightThemeId).toBe('new-base');
+      } finally { await first.cleanup(); await second.cleanup(); }
+    });
+
+    it.each(['preferences.json', 'settings.json'])('names the refused keys and applies the instance change when the profile breaks while %s is written', async (written) => {
+      const changed = vi.fn();
+      let intercept = false;
+      const created = await merging({ onPermissionDefaultModeChanged: changed, fs: { ...fsPromises, writeFile: async (file, text, options) => {
+        await fsPromises.writeFile(file, text, options);
+        if (intercept && path.basename(file).startsWith(`${written}.tmp-`)) {
+          intercept = false;
+          await fsPromises.writeFile(path.join(created.tempRoot, 'preferences.json'), '{broken');
+        }
+      } } });
+      try {
+        await created.runtime.persistSettings({ lightThemeId: 'old', permissionDefaultMode: 'ask' });
+        changed.mockClear();
+        intercept = true;
+        await expect(created.runtime.persistSettings({ lightThemeId: 'mine', permissionDefaultMode: 'auto', lastDirectory: '/mine' })).rejects.toThrow('not saved: lightThemeId');
+        expect(changed).toHaveBeenCalledExactlyOnceWith('auto');
+        expect(await read(created.settingsFilePath)).toMatchObject({ lightThemeId: 'old', permissionDefaultMode: 'auto', lastDirectory: '/mine' });
+        expect(await fsPromises.readFile(path.join(created.tempRoot, 'preferences.json'), 'utf8')).toBe('{broken');
+      } finally { await created.cleanup(); }
+    });
+
+    it.each(['missing', 'broken'])('does not report a save as done when settings.json is %s by the time the profile is published', async (state) => {
+      let intercept = false;
+      const created = await merging({ fs: { ...fsPromises, writeFile: async (file, text, options) => {
+        await fsPromises.writeFile(file, text, options);
+        if (intercept && path.basename(file).startsWith('preferences.json.tmp-')) {
+          intercept = false;
+          if (state === 'missing') await fsPromises.rm(created.settingsFilePath);
+          else await fsPromises.writeFile(created.settingsFilePath, '{broken');
+        }
+      } } });
+      try {
+        await created.runtime.persistSettings({ lightThemeId: 'old', lastDirectory: '/old' });
+        intercept = true;
+        const save = created.runtime.persistSettings({ lightThemeId: 'mine', lastDirectory: '/mine' });
+        if (state === 'missing') {
+          await save;
+          expect(await read(created.settingsFilePath)).toMatchObject({ lightThemeId: 'mine', lastDirectory: '/mine' });
+        } else {
+          await expect(save).rejects.toThrow('unreadable settings.json');
+          expect(await fsPromises.readFile(created.settingsFilePath, 'utf8')).toBe('{broken');
+        }
+      } finally { await created.cleanup(); }
+    });
+
+    it('does not drop a profile change when another read finds the profile broken during the save', async () => {
+      const created = await merging({ syncManagedRemoteTunnelConfigWithPresets: async () => {
+        await fsPromises.writeFile(path.join(created.tempRoot, 'preferences.json'), '{broken');
+        await created.runtime.readSettingsFromDisk();
+      } });
+      try {
+        await created.runtime.persistSettings({ lightThemeId: 'old' });
+        await expect(created.runtime.persistSettings({ lightThemeId: 'mine', managedRemoteTunnelPresets: [] })).rejects.toThrow('not saved: lightThemeId');
+      } finally { await created.cleanup(); }
+    });
+
+    it('does not remove the temporary file of a save another server is making', async () => {
+      const { runtime, tempRoot, cleanup } = await merging();
+      try {
+        const active = path.join(tempRoot, `settings.json.tmp-1-${Date.now()}-active`);
+        const abandoned = path.join(tempRoot, `settings.json.tmp-1-${Date.now() - 120_000}-old`);
+        await Promise.all([active, abandoned].map((file) => fsPromises.writeFile(file, '{}')));
+        await runtime.readSettingsFromDiskMigrated();
+        expect((await fsPromises.readdir(tempRoot)).filter((name) => name.includes('.tmp-'))).toEqual([path.basename(active)]);
+      } finally { await cleanup(); }
+    });
+
+    it('lets the user key win over an outside edit of the same key', async () => {
+      const { runtime, tempRoot, cleanup } = await merging();
+      try {
+        await runtime.persistSettings({ lightThemeId: 'old' });
+        await editPreference(path.join(tempRoot, 'preferences.json'), 'lightThemeId', 'outside');
+        await runtime.persistSettings({ lightThemeId: 'mine' });
+        expect((await runtime.readSettingsFromDisk()).lightThemeId).toBe('mine');
+      } finally { await cleanup(); }
+    });
+
+    it.each(['settings.json', 'preferences.json'])('starts over when the profile is edited outside while %s is being written', async (written) => {
+      let intercept = false;
+      const created = await merging({ fs: { ...fsPromises, writeFile: async (file, text, options) => {
+        await fsPromises.writeFile(file, text, options);
+        if (intercept && path.basename(file).startsWith(`${written}.tmp-`)) {
+          intercept = false;
+          await editPreference(path.join(created.tempRoot, 'preferences.json'), 'darkThemeId', 'outside-dark');
+        }
+      } } });
+      try {
+        await created.runtime.persistSettings({ lightThemeId: 'old', darkThemeId: 'old' });
+        intercept = true;
+        await created.runtime.persistSettings({ lightThemeId: 'mine' });
+        const expected = { lightThemeId: 'mine', darkThemeId: 'outside-dark' };
+        expect(intercept).toBe(false);
+        expect(await created.runtime.readSettingsFromDisk()).toMatchObject(expected);
+        expect(await read(created.settingsFilePath)).toMatchObject(expected);
+      } finally { await created.cleanup(); }
+    });
+
+    it.each(['preferences.json', 'settings.json'])('restores a missing %s from its last valid content with the user change', async (missing) => {
+      const { runtime, settingsFilePath, tempRoot, cleanup } = await merging();
+      const preferencesFile = path.join(tempRoot, 'preferences.json');
+      try {
+        await runtime.persistSettings({ lightThemeId: 'kept', lastDirectory: '/kept' });
+        await runtime.persistSettings({ themeId: 'desktop-kept' }, { surface: 'desktop' });
+        await fsPromises.rm(path.join(tempRoot, missing));
+        await runtime.persistSettings({ darkThemeId: 'mine', desktopKeepAwakeEnabled: true });
+        expect((await read(preferencesFile)).fields).toMatchObject({ lightThemeId: { value: 'kept' }, darkThemeId: { value: 'mine' }, themeId: { surfaces: { desktop: { value: 'desktop-kept' } } } });
+        expect(await read(settingsFilePath)).toMatchObject({ lastDirectory: '/kept', desktopKeepAwakeEnabled: true, darkThemeId: 'mine' });
+      } finally { await cleanup(); }
+    });
+
+    it('registers a project without losing settings while settings.json is missing or just edited', async () => {
+      const { runtime, settingsFilePath, cleanup } = await merging();
+      try {
+        await runtime.persistSettings({ lastDirectory: '/kept' });
+        await fsPromises.rm(settingsFilePath);
+        await runtime.registerSessionProject(async () => ({ id: 'one', path: '/one' }));
+        await write(settingsFilePath, { ...await read(settingsFilePath), messageSearchEnabled: false });
+        await runtime.registerSessionProject(async () => ({ id: 'two', path: '/two' }));
+        await runtime.updateSettingsFromDisk((current) => ({ ...current, lastDirectory: '/new' }));
+        expect(await read(settingsFilePath)).toMatchObject({ lastDirectory: '/new', messageSearchEnabled: false, projects: [{ path: '/one' }, { path: '/two' }] });
+      } finally { await cleanup(); }
+    });
+
+    it('reports a save it cannot write and leaves a broken file as it is', async () => {
+      const { runtime, settingsFilePath, tempRoot, cleanup } = await merging();
+      const preferencesFile = path.join(tempRoot, 'preferences.json');
+      try {
+        await runtime.persistSettings({ lightThemeId: 'kept', lastDirectory: '/kept' });
+        const valid = await fsPromises.readFile(preferencesFile, 'utf8');
+        await fsPromises.writeFile(preferencesFile, '{broken');
+        await expect(runtime.persistSettings({ lightThemeId: 'lost' })).rejects.toThrow('unreadable preferences.json');
+        expect(await fsPromises.readFile(preferencesFile, 'utf8')).toBe('{broken');
+        expect(await runtime.readSettingsFromDisk()).toMatchObject({ lightThemeId: 'kept' });
+        await fsPromises.writeFile(preferencesFile, valid);
+        await fsPromises.writeFile(settingsFilePath, '{broken');
+        await expect(runtime.persistSettings({ lastDirectory: '/lost' })).rejects.toThrow('unreadable settings.json');
+        expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe('{broken');
+      } finally { await cleanup(); }
+    });
+
+    it('keeps every key when two processes save to one directory at once', async () => {
+      const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-processes-'));
+      const run = (name) => promisify(execFile)('bun', [fileURLToPath(new URL('./settings-process.fixture.js', import.meta.url)), tempRoot, name]);
+      try {
+        await Promise.all(['one', 'two'].map(run));
+        const settings = await read(path.join(tempRoot, 'settings.json'));
+        const { fields } = await read(path.join(tempRoot, 'preferences.json'));
+        const keys = ['one', 'two'].flatMap((name) => Array.from({ length: 20 }, (_, index) => `${name}-${index}`));
+        expect(fields.lightThemeId.value).toBe('one-19');
+        expect(fields.darkThemeId.value).toBe('two-19');
+        for (const key of keys) expect(settings).toHaveProperty([key], true);
+      } finally { await fsPromises.rm(tempRoot, { recursive: true, force: true }); }
+    });
+  });
+
+  it('retries from a new snapshot when a preference is edited while a reconciliation temporary file is being written', async () => {
+    let intercept = false;
+    let preferencesFile;
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      fs: { ...fsPromises, writeFile: async (file, text, options) => {
+        await fsPromises.writeFile(file, text, options);
+        if (intercept && file.startsWith(`${preferencesFile}.tmp-`)) {
+          intercept = false;
+          const preferences = JSON.parse(await fsPromises.readFile(preferencesFile, 'utf8'));
+          preferences.fields.darkThemeId.value = 'late-dark';
+          await fsPromises.writeFile(preferencesFile, JSON.stringify(preferences));
+        }
+      } },
+    });
+    preferencesFile = path.join(tempRoot, 'preferences.json');
+    try {
+      await runtime.persistSettings({ lightThemeId: 'old-light', darkThemeId: 'old-dark' });
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, lightThemeId: 'outside-light' }));
+      intercept = true;
+      expect(await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['lightThemeId'] })).toEqual([
+        { source: 'settings', changedKeys: ['lightThemeId'] },
+        { source: 'preferences', changedKeys: ['darkThemeId'] },
+      ]);
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ lightThemeId: 'outside-light', darkThemeId: 'late-dark' });
+    } finally { await cleanup(); }
+  });
+
+  it('reconciles a second legacy save made while the first waits in the settings queue', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    const events = [];
+    let watch;
+    let releaseQueue;
+    let markDetected;
+    const detected = new Promise((resolve) => { markDetected = resolve; });
+    try {
+      await runtime.persistSettings({ lightThemeId: 'old-light', darkThemeId: 'old-dark' });
+      watch = runtime.watchSettingsFiles({ onChange: async (change) => {
+        markDetected();
+        events.push(...await runtime.reconcileExternalSettings(change));
+      } });
+      await watch.ready;
+      let markHeld;
+      const queueHeld = new Promise((resolve) => { markHeld = resolve; });
+      const held = runtime.updateSettingsFromDisk(async (current) => {
+        await new Promise((resolve) => { releaseQueue = resolve; markHeld(); });
+        return current;
+      });
+      await queueHeld;
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, lightThemeId: 'outside-light' }));
+      await watch.check();
+      const reconciling = watch.check();
+      await detected;
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, lightThemeId: 'outside-light', darkThemeId: 'outside-dark' }));
+      releaseQueue();
+      await held;
+      await reconciling;
+      expect(events).toEqual([{ source: 'settings', changedKeys: ['lightThemeId', 'darkThemeId'] }]);
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ lightThemeId: 'outside-light', darkThemeId: 'outside-dark' });
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toMatchObject({ lightThemeId: 'outside-light', darkThemeId: 'outside-dark' });
+      await watch.check();
+      await watch.check();
+      expect(events).toHaveLength(1);
+    } finally { watch?.stop(); await cleanup(); }
+  });
+
+  it('keeps a legacy save made after a preference edit woke the reconciler', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ lightThemeId: 'old-light', darkThemeId: 'old-dark' });
+      const file = path.join(tempRoot, 'preferences.json');
+      const preferences = JSON.parse(await fsPromises.readFile(file, 'utf8'));
+      preferences.fields.darkThemeId.value = 'outside-dark';
+      await fsPromises.writeFile(file, JSON.stringify(preferences));
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, lightThemeId: 'outside-light' }));
+      expect(await runtime.reconcileExternalSettings({ source: 'preferences', changedKeys: ['darkThemeId'] })).toEqual([
+        { source: 'preferences', changedKeys: ['darkThemeId'] },
+        { source: 'settings', changedKeys: ['lightThemeId'] },
+      ]);
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ lightThemeId: 'outside-light', darkThemeId: 'outside-dark' });
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toMatchObject({ lightThemeId: 'outside-light', darkThemeId: 'outside-dark' });
+    } finally { await cleanup(); }
+  });
+
+  it('keeps a surface theme when an external edit to the base theme was reverted before reconciliation', async () => {
+    const { runtime, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ themeId: 'base' });
+      await runtime.persistSettings({ themeId: 'desktop' }, { surface: 'desktop' });
+      expect(await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['themeId'] })).toEqual([]);
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).themeId).toBe('desktop');
+    } finally { await cleanup(); }
+  });
+
+  it('leaves the selected theme alone when a surface edits the palette of the inactive variant', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ themeId: 'base-light', lightThemeId: 'base-light', darkThemeId: 'base-dark', useSystemTheme: false, themeVariant: 'light' });
+      await runtime.persistSettings({ themeId: 'desktop-light', darkThemeId: 'desktop-dark' }, { surface: 'desktop' });
+      const file = path.join(tempRoot, 'preferences.json');
+      const preferences = JSON.parse(await fsPromises.readFile(file, 'utf8'));
+      preferences.fields.darkThemeId.surfaces.desktop.value = 'outside-dark';
+      await fsPromises.writeFile(file, JSON.stringify(preferences));
+      await runtime.reconcileExternalSettings({ source: 'preferences', changedKeys: ['darkThemeId'] });
+      expect(await runtime.readSettingsFromDisk({ surface: 'desktop' })).toMatchObject({ themeId: 'desktop-light', darkThemeId: 'outside-dark' });
+    } finally { await cleanup(); }
+  });
+
+  it('runs the live callback for an instance save while preferences.json is edited during publication', async () => {
+    const changed = vi.fn();
+    let intercept = false;
+    let settingsFile;
+    let preferencesFile;
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }), onMessageSearchEnabledChanged: changed,
+      fs: { ...fsPromises, writeFile: async (file, text, options) => {
+        await fsPromises.writeFile(file, text, options);
+        if (intercept && file.startsWith(`${settingsFile}.tmp-`)) {
+          intercept = false;
+          const preferences = JSON.parse(await fsPromises.readFile(preferencesFile, 'utf8'));
+          preferences.fields.lightThemeId.value = 'outside';
+          await fsPromises.writeFile(preferencesFile, JSON.stringify(preferences));
+        }
+      } },
+    });
+    settingsFile = settingsFilePath;
+    preferencesFile = path.join(tempRoot, 'preferences.json');
+    try {
+      await runtime.persistSettings({ messageSearchEnabled: false, lightThemeId: 'old' });
+      changed.mockClear();
+      intercept = true;
+      await runtime.persistSettings({ messageSearchEnabled: true });
+      expect(changed).toHaveBeenCalledWith(true);
+      expect(JSON.parse(await fsPromises.readFile(preferencesFile, 'utf8')).fields.lightThemeId.value).toBe('outside');
+    } finally { await cleanup(); }
+  });
+
+  it('serves a migration in memory while an external edit waits for reconciliation', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ lastDirectory: '/kept' });
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      const external = JSON.stringify({ ...settings, agentControlToolEnabled: false });
+      await fsPromises.writeFile(settingsFilePath, external);
+      await expect(runtime.readSettingsFromDiskMigrated()).resolves.toMatchObject({ agentControlToolEnabled: false, agentScheduleToolEnabled: false });
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe(external);
+    } finally { await cleanup(); }
+  });
+
+  it('serves the last valid settings and defers their migration while settings.json is unreadable', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ lastDirectory: '/kept' }));
+      await runtime.readSettingsFromDisk();
+      await fsPromises.writeFile(settingsFilePath, '{"lastDirectory":');
+      await expect(runtime.readSettingsFromDiskMigrated()).resolves.toMatchObject({ lastDirectory: '/kept', notifyOnCompletion: true });
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe('{"lastDirectory":');
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ lastDirectory: '/replaced' }));
+      await expect(runtime.readSettingsFromDiskMigrated()).resolves.toMatchObject({ lastDirectory: '/replaced', notifyOnCompletion: true });
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toMatchObject({ lastDirectory: '/replaced', notifyOnCompletion: true });
+    } finally { await cleanup(); }
+  });
+
+  it('does not regenerate legacy profile data from unreadable startup preferences', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    let watch;
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{"themeId":"kept","messageSearchEnabled":true}');
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), '{');
+      watch = runtime.watchSettingsFiles({ onChange: () => {} });
+      await watch.ready;
+      await fsPromises.writeFile(settingsFilePath, '{"themeId":"kept","messageSearchEnabled":false}');
+      await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['messageSearchEnabled'] });
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8')).themeId).toBe('kept');
+    } finally { watch?.stop(); await cleanup(); }
+  });
+
+  it('gives an edited surface its new selection without removing the inherited selection of another surface', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ themeId: 'base-selected', lightThemeId: 'base-light', useSystemTheme: false, themeVariant: 'light' });
+      const file = path.join(tempRoot, 'preferences.json');
+      const preferences = JSON.parse(await fsPromises.readFile(file, 'utf8'));
+      preferences.fields.lightThemeId.surfaces = { desktop: { value: 'new-desktop-light', updatedAt: 2 } };
+      await fsPromises.writeFile(file, JSON.stringify(preferences));
+      await runtime.reconcileExternalSettings({ source: 'preferences', changedKeys: ['lightThemeId'] });
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).themeId).toBe('new-desktop-light');
+      expect((await runtime.readSettingsFromDisk({ surface: 'web' })).themeId).toBe('base-selected');
+    } finally { await cleanup(); }
+  });
+
+  it('reconciles a simultaneous preference delta before acknowledging a legacy file edit', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ useSystemTheme: true, lightThemeId: 'old-light', themeVariant: 'light' });
+      await runtime.persistSettings({ themeId: 'old-desktop', lightThemeId: 'old-light' }, { surface: 'desktop' });
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      const file = path.join(tempRoot, 'preferences.json');
+      const preferences = JSON.parse(await fsPromises.readFile(file, 'utf8'));
+      preferences.fields.lightThemeId.surfaces.desktop.value = 'outside-desktop';
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, useSystemTheme: false }));
+      await fsPromises.writeFile(file, JSON.stringify(preferences));
+      expect(await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['useSystemTheme'] })).toEqual([
+        { source: 'settings', changedKeys: ['useSystemTheme'] },
+        { source: 'preferences', changedKeys: ['lightThemeId'] },
+      ]);
+      expect(await runtime.readSettingsFromDisk({ surface: 'desktop' })).toMatchObject({ themeId: 'outside-desktop', useSystemTheme: false });
+    } finally { await cleanup(); }
+  });
+  it('honors a global explicit selection with system following off despite an existing surface override', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ themeId: 'old', useSystemTheme: false });
+      await runtime.persistSettings({ useSystemTheme: true }, { surface: 'desktop' });
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, themeId: 'outside' }));
+      await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['themeId'] });
+      expect(await runtime.readSettingsFromDisk({ surface: 'desktop' })).toMatchObject({ themeId: 'outside', useSystemTheme: false });
+    } finally { await cleanup(); }
+  });
+  it.each(['settings', 'preferences'])('announces an external %s edit once when an unrelated save takes it in', async (source) => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    const events = [];
+    let watch;
+    try {
+      await runtime.persistSettings({ themeId: 'old', lightThemeId: 'old' });
+      watch = runtime.watchSettingsFiles({ onChange: async (change) => { await runtime.reconcileExternalSettings(change); events.push(change); } });
+      await watch.ready;
+      if (source === 'settings') {
+        const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+        await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, lightThemeId: 'outside' }));
+      } else {
+        const file = path.join(tempRoot, 'preferences.json');
+        const preferences = JSON.parse(await fsPromises.readFile(file, 'utf8'));
+        preferences.fields.lightThemeId.value = 'outside';
+        await fsPromises.writeFile(file, JSON.stringify(preferences));
+      }
+      runtime.subscribeTakenInSettings((changes) => events.push(...changes));
+      await runtime.persistSettings({ lastDirectory: '/unrelated' });
+      await watch.check();
+      await watch.check();
+      expect(events).toEqual([{ source, changedKeys: ['lightThemeId'] }]);
+      expect((await runtime.readSettingsFromDisk()).lightThemeId).toBe('outside');
+      await runtime.persistSettings({ lastDirectory: '/after-reconciliation' });
+      expect((await runtime.readSettingsFromDisk()).lightThemeId).toBe('outside');
+    } finally { watch?.stop(); await cleanup(); }
+  });
+
+  it.each(['settings.json', 'preferences.json'])('retries external selection without resurrecting a stale hint after a failed %s publication', async (target) => {
+    let fail = false;
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      fs: { ...fsPromises, rename: async (from, to) => {
+        if (fail && path.basename(to) === target) { fail = false; throw new Error('Publication failed'); }
+        await fsPromises.rename(from, to);
+      } },
+    });
+    let watch;
+    try {
+      await runtime.persistSettings({ themeId: 'stale-hint', lightThemeId: 'old-light' });
+      watch = runtime.watchSettingsFiles({ onChange: runtime.reconcileExternalSettings });
+      await watch.ready;
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...settings, lightThemeId: 'outside-light' }));
+      fail = true;
+      await expect(runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['lightThemeId'] })).rejects.toThrow('Publication failed');
+      await watch.check();
+      await watch.check();
+      expect((await runtime.readSettingsFromDisk()).lightThemeId).toBe('outside-light');
+      expect((await runtime.readSettingsFromDisk()).themeId).toBeUndefined();
+    } finally { watch?.stop(); await cleanup(); }
+  });
+
+  it('applies the server search transition after an external instance edit', async () => {
+    const changed = vi.fn();
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ onMessageSearchEnabledChanged: changed });
+    try {
+      await runtime.persistSettings({ messageSearchEnabled: false });
+      changed.mockClear();
+      await fsPromises.writeFile(settingsFilePath, '{"messageSearchEnabled":true}');
+      await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['messageSearchEnabled'] });
+      expect(changed).toHaveBeenCalledWith(true);
+    } finally { await cleanup(); }
+  });
+  it('adopts changed legacy profile keys without stale surface overrides and preserves unrelated preferences', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ themeId: 'old', lightThemeId: 'old-light', darkThemeId: 'old-dark', useSystemTheme: false }, { surface: 'desktop' });
+      await runtime.persistSettings({ darkThemeId: 'web-dark' }, { surface: 'web' });
+      const instance = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...instance, lightThemeId: 'outside-light' }));
+      await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['lightThemeId'] });
+      expect(await runtime.readSettingsFromDisk({ surface: 'desktop' })).toMatchObject({ lightThemeId: 'outside-light', darkThemeId: 'old-dark', useSystemTheme: false });
+      expect(await runtime.readSettingsFromDisk({ surface: 'web' })).toMatchObject({ lightThemeId: 'outside-light', darkThemeId: 'web-dark' });
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).themeId).toBeUndefined();
+    } finally { await cleanup(); }
+  });
+
+  it('retains valid profile and instance state while either settings file is malformed', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ themeId: 'kept', lastDirectory: '/kept' }, { surface: 'desktop' });
+      await runtime.readSettingsFromDisk({ surface: 'desktop' });
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), '{broken');
+      expect(await runtime.readSettingsFromDisk({ surface: 'desktop' })).toMatchObject({ themeId: 'kept', lastDirectory: '/kept' });
+      const legacy = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ ...legacy, themeId: 'outside' }));
+      await expect(runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['themeId'] })).rejects.toThrow('unreadable');
+      expect(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8')).toBe('{broken');
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(legacy));
+      await runtime.readSettingsFromDisk({ surface: 'desktop' });
+      await fsPromises.writeFile(settingsFilePath, '{broken');
+      expect(await runtime.readSettingsFromDisk({ surface: 'desktop' })).toMatchObject({ themeId: 'kept', lastDirectory: '/kept' });
+      await expect(runtime.writeSettingsToDisk({ lastDirectory: '/not-written' })).rejects.toThrow('unreadable');
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe('{broken');
+    } finally { await cleanup(); }
+  });
+
+  it('keeps direct per-surface preference edits scoped and clears only the redundant selected-theme hint', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ themeId: 'old', lightThemeId: 'desktop-light' }, { surface: 'desktop' });
+      await runtime.persistSettings({ lightThemeId: 'web-light', themeId: 'web-selected' }, { surface: 'web' });
+      const file = path.join(tempRoot, 'preferences.json');
+      const preferences = JSON.parse(await fsPromises.readFile(file, 'utf8'));
+      preferences.fields.lightThemeId.surfaces.desktop.value = 'outside-desktop';
+      await fsPromises.writeFile(file, JSON.stringify(preferences));
+      await runtime.reconcileExternalSettings({ source: 'preferences', changedKeys: ['lightThemeId'] });
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).lightThemeId).toBe('outside-desktop');
+      expect((await runtime.readSettingsFromDisk({ surface: 'web' })).lightThemeId).toBe('web-light');
+      expect((await runtime.readSettingsFromDisk({ surface: 'web' })).themeId).toBe('web-selected');
+    } finally { await cleanup(); }
+  });
+
   it('serializes a feature update with a user save through one write lock', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime({
       mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
@@ -95,6 +824,55 @@ describe('settings runtime', () => {
     } finally { await cleanup(); }
   });
 
+  it('keeps a save made while a read is writing a migration', async () => {
+    let hold = false;
+    let release;
+    const released = new Promise((resolve) => { release = resolve; });
+    let reached;
+    const held = new Promise((resolve) => { reached = resolve; });
+    const fs = { ...fsPromises, rename: async (from, to) => {
+      if (hold && path.basename(to) === 'settings.json') {
+        hold = false;
+        reached();
+        await released;
+      }
+      return fsPromises.rename(from, to);
+    } };
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }), fs,
+    });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ approvedDirectories: ['/old'] }));
+      hold = true;
+      const read = runtime.readSettingsFromDiskMigrated();
+      await held;
+      const save = runtime.persistSettings({ lightThemeId: 'saved' });
+      for (let turn = 0; turn < 30; turn += 1) await runtime.readSettingsFromDisk();
+      release();
+      await read;
+      await expect(save).resolves.toMatchObject({ lightThemeId: 'saved' });
+      const after = await runtime.readSettingsFromDisk();
+      expect(after.lightThemeId).toBe('saved');
+      expect(after).not.toHaveProperty('approvedDirectories');
+    } finally { release(); await cleanup(); }
+  });
+  it('does not wait on itself when a save reads settings that need a migration', async () => {
+    let runtime;
+    let reads = 0;
+    const created = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      onManagedPluginSettingsChanged: async () => {
+        expect(await runtime.readSettingsFromDiskMigrated({ surface: 'web' })).toMatchObject({ agentScheduleToolEnabled: false });
+        reads += 1;
+      },
+    });
+    runtime = created.runtime;
+    try {
+      await expect(runtime.persistSettings({ agentControlToolEnabled: false })).resolves.toMatchObject({ agentControlToolEnabled: false });
+      expect(reads).toBe(1);
+      expect(await runtime.readSettingsFromDiskMigrated()).toMatchObject({ agentScheduleToolEnabled: false });
+    } finally { await created.cleanup(); }
+  });
   it('resolves changes against the settings left by the save queued before them', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
     try {
@@ -763,6 +1541,49 @@ describe('settings runtime: preferences.json split', () => {
     }
   });
 
+  it.each([
+    ['NUL bytes', '\0'.repeat(2048)],
+    ['nothing', ''],
+    ['whitespace', ' \r\n'],
+  ])('moves aside a preferences.json holding only %s, reseeds it and saves profile keys again', async (_label, blank) => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      const preferencesPath = path.join(tempRoot, 'preferences.json');
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ projects: [], fontSize: 115 }));
+      await fsPromises.writeFile(preferencesPath, blank);
+
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ fontSize: 115 });
+      await runtime.persistSettings({ notifyOnCompletion: false });
+
+      expect((await readJson(preferencesPath)).fields).toMatchObject({ fontSize: { value: 115 }, notifyOnCompletion: { value: false } });
+      const [backup, ...others] = runtime.takeSetAsideSettingsFiles();
+      expect(others).toEqual([]);
+      expect(backup).toMatch(/^preferences\.json\.damaged-/);
+      expect(await fsPromises.readFile(path.join(tempRoot, backup), 'utf8')).toBe(blank);
+      expect(runtime.takeSetAsideSettingsFiles()).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('moves aside a settings.json holding only NUL bytes and saves again', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '\0'.repeat(512));
+
+      await runtime.readSettingsFromDiskMigrated();
+      await runtime.persistSettings({ desktopKeepAwakeEnabled: true, fontSize: 120 });
+
+      expect(await readJson(settingsFilePath)).toMatchObject({ desktopKeepAwakeEnabled: true, fontSize: 120 });
+      const setAside = runtime.takeSetAsideSettingsFiles();
+      expect(setAside).toHaveLength(1);
+      expect(setAside[0]).toMatch(/^settings\.json\.damaged-/);
+      expect(await fsPromises.readdir(tempRoot)).toContain(setAside[0]);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('treats an unreadable preferences.json as failure: no seed, no overwrite, profile writes refused, instance still served', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {
@@ -772,13 +1593,114 @@ describe('settings runtime: preferences.json split', () => {
 
       expect(await runtime.readSettingsFromDisk()).toEqual({ desktopLanAccessEnabled: true });
 
-      await runtime.persistSettings({ fontSize: 130, desktopKeepAwakeEnabled: true });
+      await expect(runtime.persistSettings({ fontSize: 130, desktopKeepAwakeEnabled: true })).rejects.toThrow('not saved: fontSize');
 
       expect(await fsPromises.readFile(preferencesPath, 'utf8')).toBe('{ not json');
       const settings = await readJson(settingsFilePath);
       expect(settings.desktopKeepAwakeEnabled).toBe(true);
       // The refused profile write must not land in the legacy copy either.
       expect(settings).not.toHaveProperty('fontSize');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps a copy of legacy profile values that an already seeded empty preferences.json hides', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const projectPath = path.join(tempRoot, 'project');
+      await fsPromises.mkdir(projectPath);
+      const legacy = { queueModeEnabled: false, fontSize: 120, approvedDirectories: ['/tmp'], projects: [{ id: 'legacy', path: projectPath }], activeProjectId: 'legacy' };
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(legacy));
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), JSON.stringify({ version: 1, fields: {} }));
+
+      const first = await runtime.readSettingsFromDiskMigrated();
+      expect(first.projects).toEqual([expect.objectContaining({ path: projectPath })]);
+      expect(first.fontSize).toBeUndefined();
+      await runtime.persistSettings({ lastDirectory: projectPath });
+
+      expect((await runtime.readSettingsFromDiskMigrated()).projects).toEqual([expect.objectContaining({ path: projectPath })]);
+      expect(await readJson(settingsFilePath)).not.toHaveProperty('fontSize');
+      const backup = await readJson(path.join(tempRoot, 'settings.legacy-profile.json'));
+      expect(backup).toMatchObject({ fontSize: 120, queueModeEnabled: false });
+      expect(backup).not.toHaveProperty('projects');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps a legacy global value that preferences.json holds only as a surface override', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 120, approvedDirectories: ['/tmp'] }));
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), JSON.stringify({
+        version: 1,
+        fields: { fontSize: { updatedAt: 1, surfaces: { desktop: { value: 105, updatedAt: 1 } } } },
+      }));
+
+      await runtime.readSettingsFromDiskMigrated();
+      await runtime.persistSettings({ lastDirectory: '/tmp' });
+
+      expect(await readJson(path.join(tempRoot, 'settings.legacy-profile.json'))).toEqual({ fontSize: 120 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the legacy profile copy when its first write fails partway', async () => {
+    let failBackup = true;
+    const fs = {
+      ...fsPromises,
+      writeFile: async (target, data, options) => {
+        if (failBackup && String(target).includes('settings.legacy-profile.json')) {
+          failBackup = false;
+          await fsPromises.writeFile(target, String(data).slice(0, 5), options);
+          throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+        }
+        return fsPromises.writeFile(target, data, options);
+      },
+    };
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ fs });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 120, approvedDirectories: ['/tmp'] }));
+      await fsPromises.writeFile(path.join(tempRoot, 'preferences.json'), JSON.stringify({ version: 1, fields: {} }));
+
+      await expect(runtime.persistSettings({ lastDirectory: '/tmp' })).rejects.toThrow('no space left');
+      expect(await readJson(settingsFilePath)).toHaveProperty('fontSize', 120);
+
+      await runtime.persistSettings({ lastDirectory: '/tmp' });
+      expect(await readJson(settingsFilePath)).not.toHaveProperty('fontSize');
+      expect(await readJson(path.join(tempRoot, 'settings.legacy-profile.json'))).toEqual({ fontSize: 120 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('writes no legacy profile copy when settings.json seeds preferences.json', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 120, approvedDirectories: ['/tmp'] }));
+      await runtime.readSettingsFromDiskMigrated();
+      await runtime.persistSettings({ fontSize: 110 });
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ fontSize: 110 });
+      await expect(fsPromises.access(path.join(tempRoot, 'settings.legacy-profile.json'))).rejects.toThrow();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('does not seed preferences.json while settings.json is unreadable, so its profile survives the repair', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const preferencesPath = path.join(tempRoot, 'preferences.json');
+      await fsPromises.writeFile(settingsFilePath, '{ not json');
+
+      await runtime.readSettingsFromDisk();
+      await expect(fsPromises.access(preferencesPath)).rejects.toThrow();
+
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ fontSize: 110 }));
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ fontSize: 110 });
+      expect((await readJson(preferencesPath)).fields.fontSize.value).toBe(110);
     } finally {
       await cleanup();
     }

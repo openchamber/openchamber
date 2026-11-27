@@ -15,9 +15,11 @@ import {
 } from '@/components/ui/dialog';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useSpaceCatalogDirectory } from '@/lib/spaces/useSpaceCatalogDirectory';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isAutoReviewAvailable } from '@/stores/useAutoReviewStore';
+import { modelForSpaceOffer, spaceOfferAllows, useSpaceModelOffer } from '@/lib/spaces/space-model-offer';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 export type ReviewFlowExecution = {
@@ -62,7 +64,8 @@ function ReviewFlowDialogView({
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadConfigAgents = useConfigStore((state) => state.loadAgents);
   const loadAgentsStoreAgents = useAgentsStore((state) => state.loadAgents);
-  const providers = useConfigStore((state) => state.providers);
+  const spaceCatalog = useSpaceCatalogDirectory(projectDirectory);
+  const providers = useConfigStore((state) => selectProvidersForDirectory(state, spaceCatalog));
   const currentProviderID = useConfigStore((state) => state.currentProviderId);
   const currentModelID = useConfigStore((state) => state.currentModelId);
   const currentVariant = useConfigStore((state) => state.currentVariant || '');
@@ -74,6 +77,9 @@ function ReviewFlowDialogView({
     variant: currentVariant,
     agent: currentAgentName,
   }));
+
+  const spaceTarget = React.useMemo(() => ({ requestId: null, directory: projectDirectory }), [projectDirectory]);
+  const offer = useSpaceModelOffer(spaceTarget);
 
   React.useEffect(() => {
     if (!open) return;
@@ -94,6 +100,13 @@ function ReviewFlowDialogView({
 
   React.useEffect(() => {
     if (!open || providers.length === 0) return;
+    if (offer?.held && !spaceOfferAllows(offer, execution.providerID)) {
+      const usable = modelForSpaceOffer(offer, providers);
+      if (!usable && !execution.providerID) return;
+      setExecution((prev) => ({ ...prev, providerID: usable?.providerId ?? '', modelID: usable?.modelId ?? '', variant: '' }));
+      return;
+    }
+    if (execution.providerID && execution.modelID) return;
 
     const provider = providers.find((item) => item.id === execution.providerID) ?? providers[0];
     const models = Array.isArray(provider?.models) ? provider.models : [];
@@ -108,7 +121,7 @@ function ReviewFlowDialogView({
       modelID: hasModel ? prev.modelID : fallbackModelID,
       variant: '',
     }));
-  }, [open, providers, execution.providerID, execution.modelID]);
+  }, [offer, open, providers, execution.providerID, execution.modelID]);
 
   const agentFilter = React.useCallback((agent: { mode?: string }) => isPrimaryMode(agent.mode), []);
 
@@ -188,6 +201,7 @@ function ReviewFlowDialogView({
               modelId={execution.modelID}
               className="max-w-[320px] justify-between"
               dropdownPortalToBody
+              spaceDirectory={projectDirectory}
               onChange={(providerID, modelID) => {
                 setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
               }}

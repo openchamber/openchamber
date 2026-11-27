@@ -1,5 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   buildPreferencesFields,
@@ -10,6 +12,7 @@ import {
   isProfileSettingsKey,
   parsePreferencesDocument,
   preferencesFilePathFor,
+  readSettingsFileTextSync,
   seedPreferencesFrom,
   serializePreferencesDocument,
 } from './settings-files';
@@ -182,5 +185,39 @@ describe('per-surface keys', () => {
   test('rejects an unknown surface in the file', () => {
     const result = parsePreferencesDocument(JSON.stringify({ version: 1, fields: { x: { surfaces: { toaster: { value: 1 } } } } }));
     assert.equal(result.ok, false);
+  });
+});
+
+describe('readSettingsFileTextSync', () => {
+  const withFile = (text: string, run: (filePath: string, directory: string) => void) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-vscode-settings-text-'));
+    try {
+      const filePath = path.join(directory, 'preferences.json');
+      fs.writeFileSync(filePath, text);
+      run(filePath, directory);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  for (const [label, blank] of [['NUL bytes', '\0'.repeat(2048)], ['nothing', ''], ['whitespace', ' \r\n']]) {
+    test(`moves aside a file holding only ${label} and reads it as missing`, () => {
+      withFile(blank, (filePath, directory) => {
+        const setAside: string[] = [];
+        assert.throws(() => readSettingsFileTextSync(filePath, (name) => setAside.push(name)), { code: 'ENOENT' });
+        assert.equal(fs.existsSync(filePath), false);
+        assert.equal(setAside.length, 1);
+        assert.match(setAside[0], /^preferences\.json\.damaged-/);
+        assert.equal(fs.readFileSync(path.join(directory, setAside[0]), 'utf8'), blank);
+      });
+    });
+  }
+
+  test('leaves a file with broken JSON where it is', () => {
+    withFile('{ "version": 1, "fields": {', (filePath) => {
+      const setAside: string[] = [];
+      assert.equal(readSettingsFileTextSync(filePath, (name) => setAside.push(name)), '{ "version": 1, "fields": {');
+      assert.deepEqual(setAside, []);
+    });
   });
 });

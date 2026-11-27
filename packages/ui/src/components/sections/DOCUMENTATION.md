@@ -92,6 +92,32 @@ location, which nobody had read yet: it booted there and answered
 "Integration not found", so every first connect failed and the retry worked.
 `credential.*` routes are not location-bound and stay unscoped.
 
+On the Providers page that location is the project selected in Settings
+(`useSettingsDirectory`), the same one `PUT /api/provider` writes a custom
+provider's config for; elsewhere it is the chat's project. A provider kept in a
+project's own config exists only in that project, so a key sent to the chat's
+project answered "Integration not found" on every retry, and a list read there
+showed the provider as not connected. The API key form, the OAuth and external
+sign-ins and the custom provider form all take that project.
+
+The Settings project may be one OpenCode has not opened yet. Since 2.4 such a
+location answers `integration.list` with an empty list until its plugins load,
+which showed "Connect provider" with only the custom provider card; the read
+first waits for the location's plugins (`requireLocationPlugins`, up to 5 s)
+and fails rather than returning an empty catalog.
+
+After saving a custom provider, OpenCode accepts its key only once that location
+has loaded the new provider, and a location nobody opened yet first waits for
+its plugins to start: 5.6 s with a plugin that takes 5 s, past the old 3.75 s of
+retries. `storeKeyAfterConfigWrite` in `providers/provider-key-writes.ts`
+retries "Integration not found" for up to 30 s.
+
+### Why retry the key and not wait for an event
+
+The reload announces itself with `config.updated`, `integration.updated` and
+`provider.updated`, but for every location at once and without naming the
+provider, so a retry after each event is the same as retrying on a timer.
+
 An integration method can declare a `form` (an Azure resource name, a
 Cloudflare account id). OAuth, external and API key methods render it through
 the same `ProviderFormFields`, check required fields with the helpers in
@@ -142,6 +168,26 @@ serves), `usesMachineCredentials` counts that as credentials: the card shows
 "From environment" and the models section stays open. A provider listed in the
 OpenCode config is switched on (`activation: "enabled"`) even without a key, so
 activation alone is not a sign-in signal.
+
+A provider page offers Remove when a config layer defines the provider (any
+of user, project, `OPENCODE_CONFIG`) and enterprise mode is off. After a
+confirmation that names the files, it reads the integration list again (a key
+saved while the dialog was open goes too, and a failed read stops before
+anything changes), deletes the provider's stored credentials, then sends `DELETE /api/provider/:id/auth?scope=all`, which takes
+the entry out of every layer, and clears the custom icon and logo so a provider
+added again under that ID starts clean. Disable stays the way to keep a
+catalog provider but hide it; Disconnect removes credentials and keeps the
+entry. Only the provider's own integration loses credentials: a custom provider
+that borrows another integration's key through `canonical` leaves that account
+alone.
+
+### Why credentials go before the config entry
+
+When the config write fails after the credentials are gone, the provider is
+still listed and Remove runs again; the page refreshes its sources and
+integrations after every attempt for that reason. In the other order a failed credential
+delete leaves OpenCode holding a key for a provider no page shows, with no
+control left to delete it.
 
 The custom-provider form can discover models before save through
 `POST /api/provider/discover-models`. Discovery is a one-time prefill the user
@@ -304,6 +350,19 @@ OpenCode can discover OAuth without an explicit config entry. The lookup is
 scoped to the selected server's directory and stops after 9 reads spaced
 750 ms apart, including when a header/token-auth remote server has no OAuth
 integration. Leaving the selection discards the result.
+
+### Why opening an OAuth server can retry the connection
+
+A separate OpenCode process can save an OAuth credential without updating
+the running app's MCP status. The detail page retries once per selection
+when an enabled remote reports `failed` or `needs_auth` and its matching
+integration has a saved OAuth credential. It waits for the directory's
+policy and checks live status again before reconnecting, so a cached
+failure cannot restart a disconnected server. Switching the server off, or
+any other change that makes it ineligible, while that status read is
+pending cancels the attempt. Sign-in and manual retry
+remain available if the connection still fails. The grid and other
+directories do not retry.
 
 ### Why a failed OAuth server's header says "Sign in again"
 
@@ -914,6 +973,7 @@ the browser, and a second meaning there confuses both.
 - Retention fields remain editable with automatic cleanup off because manual cleanup uses them too. The In work block never includes archived sessions.
 - Message-search status reads continue beyond an initially settled answer after a switch because the debounced save can start indexing later.
 - Voice keys stay on the server. Dictation cleanup starts off because it sends text to the small-model provider, and without that model the server retains the transcription. Voice pickers share install state and list installed models plus the default; dictation displays the server's choice when no saved model is available.
+- A custom speech server that lists its voices gets a voice dropdown ending in Custom…; a server without a list keeps the text field. The saved voice changes only when the user picks or types one, so a voice missing from the list shows as Custom… with its value. Typing in the field keeps it in Custom mode until a listed voice is picked, and a list that arrives while the cursor is in the field keeps the field, its text and the focus; the dropdown appears beside it. A failed read names its reason in the line reserved under the field, and a Retry that clears the line hands focus to the voice control. The list is read for a finished address only (on open, when the URL field loses focus, on Enter); whether the stored key goes along is the server's decision (`packages/web/server/lib/tts/DOCUMENTATION.md`). A list longer than 100 voices uses `LongVoicePicker`, with search and rows mounted as it scrolls; its Custom… item stays in view.
 - Usage panels show only their provider's error, so Console budgets survive a failed Go usage read. Balance-only windows omit percentage bars and used captions because they report no usage share.
 - Settings names the Go credential next to its meters and the Console workspace next to its budgets. The two reads can use different accounts when the Go reader falls back to a key.
 - About separates app, connected-server and OpenCode updates. A latest-version toast waits for every relevant check; failed checks keep prior status, and authoritative running versions replace temporary installed-but-not-running state.
@@ -977,3 +1037,11 @@ Jev answers OpenChamber classification requests and the server owns its selectio
 ### Why settings links use text color and not the accent
 
 Underlining identifies links while the accent remains reserved for primary actions. Hover and focus strengthen the underline.
+
+### Why a custom voice is a Custom… item and not a combobox
+
+No combobox primitive exists. A Custom… item keeps blends like `af_bella+af_sky`, voice profiles and servers without a list working, beside a plain dropdown for everyone else.
+
+### Why the voice-list line wraps instead of truncating
+
+The line has a reserved one-line slot, so the common messages move nothing below it. It wraps because a phone has no tooltips and two of its messages are the fix itself (an environment variable, the address form); a longer message appears only after the user typed that address, below the field they typed into.

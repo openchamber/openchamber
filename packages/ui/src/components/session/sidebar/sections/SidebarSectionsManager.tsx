@@ -22,6 +22,7 @@ import {
 import { SettingsChipGroup } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { setPinnedInWork } from '@/lib/pinnedInWork';
 import { projectPathFromId } from '@/lib/projectId';
 import {
   createSidebarSectionFromTemplate,
@@ -106,6 +107,7 @@ const WORK_KEY = {
 } as const satisfies Record<SidebarSectionFilter['work'][number], I18nKey>;
 const KIND_KEY = {
   session: 'sessions.sidebar.sections.kind.session',
+  lead: 'sessions.sidebar.session.leadMark',
   worktree: 'sessions.sidebar.sections.kind.worktree',
   space: 'sessions.sidebar.sections.kind.space',
   run: 'sessions.sidebar.sections.kind.run',
@@ -167,7 +169,7 @@ export const SidebarSectionsManager: React.FC<{
         <Popover.Positioner anchor={anchor} side="inline-end" align="start" sideOffset={8} collisionPadding={8} className="z-50">
           <Popover.Popup
             aria-label={t('sessions.sidebar.sections.title')}
-            className={cn(SECTIONS_PANEL_CLASS, 'flex max-h-[min(40rem,calc(100vh-4rem))] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden')}
+            className={cn(SECTIONS_PANEL_CLASS, 'flex max-h-[min(40rem,calc(100vh-4rem))] w-[26rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden')}
             initialFocus={false}
           >
             {view}
@@ -273,6 +275,26 @@ const SessionBatchSizeRow: React.FC = () => {
   );
 };
 
+const SectionChip: React.FC<{ on: boolean; set: (on: boolean) => void; label: string; hint: string }> = ({ on, set, label, hint }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        aria-pressed={on}
+        onClick={() => set(!on)}
+        className={cn(
+          'inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 typography-micro focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+          on ? 'oc-tile-inset text-foreground' : 'oc-tile text-muted-foreground hover:text-foreground',
+        )}
+      >
+        <Icon name={on ? 'check' : 'add'} className="size-3" />
+        {label}
+      </button>
+    </TooltipTrigger>
+    <TooltipContent side="top">{hint}</TooltipContent>
+  </Tooltip>
+);
+
 const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   const { t } = useI18n();
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id, transition: ROW_SORT_TRANSITION });
@@ -282,6 +304,7 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   const showWork = useSessionDisplayStore((state) => state.showWorkSection);
   const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
   const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
+  const pinnedInWork = useSessionDisplayStore((state) => state.pinnedInWork);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const name = entry.kind === 'builtin' ? t(BUILTIN_TITLE_KEY[entry.id]) : entry.name;
   let visibility: { shown: boolean; set: (shown: boolean) => void } | null = null;
@@ -301,6 +324,9 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   } else if (entry.kind === 'builtin' && entry.id === 'pinned' && showPinned) {
     inPlace = { keep: keepPinnedInPlace, set: (keep) => { useSessionDisplayStore.getState().setKeepPinnedInPlace(keep); void updateDesktopSettings({ sidebarKeepPinnedInPlace: keep }); } };
   }
+  const inWork = entry.kind === 'builtin' && entry.id === 'pinned' && sessionWorkEnabled
+    ? { keep: pinnedInWork, set: (keep: boolean) => { void setPinnedInWork(keep); } }
+    : null;
   return (
     <div
       ref={setNodeRef}
@@ -325,24 +351,11 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
             </Button>
           </>
         ) : null}
+        {inWork ? (
+          <SectionChip on={inWork.keep} set={inWork.set} label={t('sessions.sidebar.sections.alsoInWorkShort')} hint={t('sessions.sidebar.sections.alsoInWork')} />
+        ) : null}
         {inPlace ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-pressed={inPlace.keep}
-                onClick={() => inPlace.set(!inPlace.keep)}
-                className={cn(
-                  'inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 typography-micro focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                  inPlace.keep ? 'oc-tile-inset text-foreground' : 'oc-tile text-muted-foreground hover:text-foreground',
-                )}
-              >
-                <Icon name={inPlace.keep ? 'check' : 'add'} className="size-3" />
-                {t('sessions.sidebar.sections.alsoInProjectsShort')}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">{t('sessions.sidebar.sections.alsoInProjects')}</TooltipContent>
-          </Tooltip>
+          <SectionChip on={inPlace.keep} set={inPlace.set} label={t('sessions.sidebar.sections.alsoInProjectsShort')} hint={t('sessions.sidebar.sections.alsoInProjects')} />
         ) : null}
         {visibility ? (
           <Switch size="sm" checked={visibility.shown} onCheckedChange={visibility.set} aria-label={t('sessions.sidebar.sections.show', { name })} />

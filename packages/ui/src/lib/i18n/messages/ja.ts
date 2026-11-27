@@ -15,7 +15,7 @@ import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { uiBlocksI18n } from './ui-blocks.i18n';
-import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
+import { updateDialogCanaryI18n } from './update-dialog-canary.i18n'; import { updateIdleI18n } from './update-idle.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
@@ -25,6 +25,7 @@ import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { sessionCostI18n } from './session-cost.i18n';
 import { connectionHeartbeatI18n } from './connection-heartbeat.i18n';
 import { workStatusAccountsI18n } from './work-status-accounts.i18n';
 import { compactionSettingsI18n } from './compaction-settings.i18n';
@@ -63,10 +64,13 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { diffReviewedI18n } from './diff-reviewed.i18n';
 import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { chatExchangeI18n } from './chat-exchange.i18n';
+import { integrateConflictI18n } from './integrate-conflict.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { subagentsI18n } from './subagents.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
@@ -117,21 +121,24 @@ export const dict: Record<I18nKey, string> = {
   'sessions.aiRename.noSmallModel': 'Small Model が必要です。モデルプロバイダーにサインインするか、設定 → セッションで選択してください。',
   'commitComparison.mode': 'コミット',
   'pullRequestComparison.select': 'プルリクエストを選択',
+  'pullRequestComparison.searchShort': 'プルリクエストを検索',
   'pullRequestComparison.pickAbove': '上でプルリクエストを選択してください',
   'pullRequestComparison.diffUnavailable': "{provider} はプルリクエストの差分を提供していないため、ここでは表示もウォークスルーもできません",
   'pullRequestComparison.partial': '一部のプルリクエストを読み込めませんでした',
   'commitComparison.select': 'コミットを選択',
+  'commitComparison.branchDividerSingle': '上: {branch} にだけあるコミット。下: すでに {base} にあります。',
+  'commitComparison.branchDividerPlural': '上: {branch} にだけある {count} 件のコミット。下: すでに {base} にあります。',
+  'commitComparison.backToList': 'コミット一覧に戻る',
   'commitComparison.search': 'コミットを検索...',
   'commitComparison.loadError': 'コミットを読み込めませんでした',
   'commitComparison.noCommits': 'コミットが見つかりません',
   'commitComparison.emptyDiff': 'このコミットに変更はありません',
-  'chat.liveActivity.title': 'アクティビティ',
-  'chat.liveActivity.moreRows': 'さらに {count} 件',
   'chat.liveActivity.changedFile': '{count} ファイルを変更',
   'chat.liveActivity.changedFiles': '{count} ファイルを変更',
-  'chat.liveActivity.explored': 'コードベースを調査',
+  'chat.liveActivity.working': '作業中…',
   'chat.liveActivity.ranCommand': '{count} コマンドを実行',
   'chat.liveActivity.ranCommands': '{count} コマンドを実行',
+  'chat.liveActivity.explored': 'コードベースを調査',
   'chat.liveActivity.researched': 'ウェブを調査',
   'chat.liveActivity.usedSubagent': '{count} サブエージェントを使用',
   'chat.liveActivity.usedSubagents': '{count} サブエージェントを使用',
@@ -214,7 +221,7 @@ export const dict: Record<I18nKey, string> = {
   ...htmlRenderI18n.ja,
   ...documentToolbarI18n.ja,
   ...uiBlocksI18n.ja,
-  ...updateDialogCanaryI18n.ja,
+  ...updateDialogCanaryI18n.ja, ...updateIdleI18n.ja,
   ...aboutReleaseNotesI18n.ja,
   ...updateCheckErrorsI18n.ja,
   ...secretRequestI18n.ja,
@@ -224,6 +231,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
   ...sessionWarmingI18n.ja,
+  ...sessionCostI18n.ja,
   ...connectionHeartbeatI18n.ja,
   ...workStatusAccountsI18n.ja,
   ...compactionSettingsI18n.ja,
@@ -261,10 +269,13 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ja,
   ...integrationsCatalogI18n['ja'],
   ...diffFindI18n['ja'],
+  ...diffReviewedI18n['ja'],
   ...contextWindowI18n['ja'],
   ...markdownOutlineI18n['ja'],
   ...markdownGithubI18n['ja'],
   ...autocompleteScopeI18n['ja'],
+  ...chatExchangeI18n['ja'],
+  ...integrateConflictI18n['ja'],
   ...workflowsI18n['ja'],
   ...subagentsI18n['ja'],
   ...sessionReferencesI18n['ja'],
@@ -424,10 +435,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.update': '更新',
   'mobile.menu.settings': '設定',
   'mobile.sessions.newChatCta': '{project}で新しいチャット',
-  'mobile.sessions.dateGroup.today': '今日',
-  'mobile.sessions.dateGroup.yesterday': '昨日',
-  'mobile.sessions.dateGroup.thisWeek': '今週',
-  'mobile.sessions.dateGroup.older': '以前',
   'mobile.sessions.section.worktrees': 'ワークツリー',
   'mobile.sessions.section.otherProjects': 'プロジェクトを切り替え',
   'mobile.sessions.section.projects': 'プロジェクト',
@@ -704,6 +711,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.minimal': 'ミニマル',
   'sessions.sidebar.header.displayMode.showWork': '作業中セクションを表示',
   'sessions.sidebar.header.displayMode.showPinned': 'ピン留めセクションを表示',
+  'sessions.sidebar.header.displayMode.showSubagents': 'サブエージェントのセッションを表示',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細な行',
   'sessions.sidebar.header.displayMode.worktreeNameByBranch': 'worktree をブランチ名で表示',
   'sessions.sidebar.activity.pinnedTitle': 'ピン留め',
@@ -732,6 +740,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': '別のタイトルまたはブランチをお試しください。',
   'sessions.sidebar.activity.chatsTitle': 'チャット',
   'sessions.sidebar.activity.chatsEmpty': 'まだチャットはありません。',
+  'sessions.sidebar.timeline.noSessionsYet': 'まだセッションがありません',
   'chat.chatInput.chooseProject': 'プロジェクトを選択',
   'sessions.sidebar.header.projectDisplay.label': 'プロジェクト表示',
   'sessions.sidebar.header.projectDisplay.all': 'すべてのプロジェクト',
@@ -880,6 +889,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.movingToWorktree': 'セッションを新しいworktreeへ移動中',
   'sessions.sidebar.session.status.permissionRequired': '権限が必要です',
   'sessions.sidebar.session.status.questionPending': '保留中の質問',
+  'sessions.sidebar.session.status.permissionRequiredOpen': '権限が必要です。要求しているセッションを開きます',
+  'sessions.sidebar.session.status.questionPendingOpen': '保留中の質問。要求しているセッションを開きます',
   'sessions.sidebar.session.status.activeFor': 'アクティブ時間 {duration}',
   'sessions.sidebar.session.status.lastTurnDuration': '前回のターンの所要時間 {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'サブセッションを折りたたむ',
@@ -1599,6 +1610,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.emptyDiff.description': 'この範囲にはまだ変更がありません。',
   'walkthrough.blocked.contextTooSmall.title': 'この差分は現在のモデルには大きすぎます',
   'walkthrough.blocked.contextTooSmall.description': '{model} が扱えるのは約 {available} 千文字ですが、この差分には約 {required} 千文字が必要です。切り詰めは行いません。コンテキストの大きいモデルを選んでください。',
+  'walkthrough.blocked.contextTooSmall.descriptionRefused': 'この差分は長すぎるため、{model} に拒否されました。コンテキストの大きいモデルを選ぶか、対象範囲を絞ってください。',
   'walkthrough.blocked.structuredOutput.title': 'このモデルは構造化出力に対応していません',
   'walkthrough.blocked.structuredOutput.description': '{model} はウォークスルーに必要な構造化応答をサポートしていません。',
   'walkthrough.blocked.chooseModel': 'スモールモデルを選択',
@@ -1675,6 +1687,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.intro': 'これはアプリ内ブラウザで注釈を付けた選択範囲です。',
   'contextPanel.browser.annotate.attached': '注釈をチャットに添付しました',
   'contextPanel.browser.annotate.noSession': '注釈を添付する前にチャットセッションを開いてください',
+  'contextPanel.browser.annotate.readOnly': 'このチャットは読み取り専用のため、注釈を添付できません',
   'contextPanel.browser.annotate.noPage': '注釈を付ける前にページを読み込んでください',
   'contextPanel.browser.annotate.failed': 'このページに注釈を付けられませんでした',
   'contextPanel.browser.annotate.tool.element': '要素',
@@ -1996,6 +2009,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.loadingDiff': '差分を読み込み中...',
   'diffView.state.loadingChanges': '変更を読み込み中...',
   'diffView.state.largeDiff': '大きな差分（{count}行変更）',
+  'diffView.state.largeDiffLongLines': '大きな差分（非常に長い行）',
+  'diffView.state.largeFile': '大きなファイル',
   'diffView.state.largeDiffDescription': 'レンダリングが遅くなる可能性があります。以下をクリックして差分を表示できます。',
   'diffView.summary.changedFilesSingle': '{count}ファイルが変更されました',
   'diffView.summary.changedFilesPlural': '{count}ファイルが変更されました',
@@ -2020,6 +2035,10 @@ export const dict: Record<I18nKey, string> = {
   'diffView.layout.sideBySide': '左右に並べた表示',
   'diffView.actions.wrapLines': '行の折り返し',
   'diffView.actions.moreActions': 'その他の操作',
+  'diffView.actions.viewOptions': '差分表示オプション',
+  'gitView.sidebar.resizeAria': 'Git サイドバーのサイズを変更',
+  'gitView.commit.stagedCountSummary': '{count}件ステージ済み',
+  'gitView.commit.collapseAria': 'コミットフォームを折りたたむ',
   'diffView.actions.openFileInEditorAtChange': '変更箇所でファイルをエディターで開く',
   'diffView.actions.openFileAtFirstChangedLine': '最初の変更行でファイルを開く',
   'diffView.actions.reviewAria': '変更をレビュー',
@@ -2415,6 +2434,9 @@ export const dict: Record<I18nKey, string> = {
   'session.githubPrPicker.empty.noPullRequestsFound': 'プルリクエストが見つかりません',
   'session.githubPrPicker.loading.pullRequests': 'プルリクエストを読み込み中...',
   'session.githubPrPicker.actions.loadMore': 'さらに読み込む',
+  'session.githubPrPicker.filter.group.repository': 'リポジトリ',
+  'session.githubPrPicker.filter.group.author': '作成者',
+  'session.githubPrPicker.filter.clearAll': 'フィルターをクリア',
   'session.newWorktree.title': '新しいワークツリー',
   'session.newWorktree.mode.newBranch': '新しいブランチ',
   'session.newWorktree.mode.existingBranch': '既存のブランチ',
@@ -2557,6 +2579,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': '{preview}に元に戻しました',
   'chat.revert.toast.redo': 'やり直しました',
   'chat.revert.toast.restored': 'すべてのメッセージを復元しました',
+  'chat.revert.toast.filesUnchanged': 'チャットを元に戻しました。ファイルは変更されていません。',
   'chat.toast.opencodeRestartInterrupted.title': 'チャットが中断されました',
   'chat.toast.opencodeRestartInterrupted.description': '応答の生成中に OpenCode が再起動しました。続行するにはメッセージを送信してください。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '応答の生成中に OpenCode が再起動しました。チャットは自動的に再開されます。再開しない場合はメッセージを送信してください。',
@@ -2689,6 +2712,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.title.saveInsightToNotes': '選択テキストをメモに保存',
   'chat.messageBody.actions.revertAria': 'このメッセージに戻す',
   'chat.messageBody.actions.revert': 'ここから元に戻す',
+  'chat.messageBody.status.waitingForAgent': 'エージェント待ち',
   'chat.messageBody.actions.forkAria': 'このメッセージからフォーク',
   'chat.messageBody.actions.fork': 'ここからフォーク',
   'chat.messageBody.actions.copyMessageAria': 'メッセージテキストをコピー',
@@ -2789,6 +2813,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.sendAttachmentsFailed': '添付ファイルの送信に失敗しました。ファイルを減らすかサイズを小さくしてください。',
   'chat.chatInput.toast.messageSendFailed': 'メッセージの送信に失敗しました。添付ファイルは復元されました。',
   'chat.chatInput.toast.agentUnavailable': 'エージェント "{agent}" はこのセッションのフォルダーでは使用できません。別のエージェントを選んで再送信してください。',
+  'chat.chatInput.toast.skillLoadFailed': 'Skill "{skill}" を MCP サーバーから読み込めませんでした。設定でサーバーが接続されていることを確認してから、再送信してください。',
   'chat.chatInput.toast.noModelSelected': '送信する前にプロバイダーとモデルを選択してください。',
   'chat.chatInput.toast.clipboardAttachFailed': 'クリップボードからの画像添付に失敗しました',
   'chat.chatInput.toast.clipboardTextAttachFailed': '貼り付けたテキストのファイル添付に失敗しました',
@@ -3143,6 +3168,11 @@ export const dict: Record<I18nKey, string> = {
   'openInApp.actions.copyPath': 'パスをコピー',
   'openInApp.actions.refreshApps': 'アプリを更新',
   'openInApp.toast.pathCopied': 'パスをクリップボードにコピーしました',
+  'openInApp.toast.sshOpenFailed': '{app} を開けませんでした。このコンピュータにインストールされているか確認してください。',
+  'openInApp.toast.sshInstanceChanged': '{app} が開く前に、このウィンドウは別のインスタンスに切り替わりました。もう一度お試しください。',
+  'openInApp.toast.sshSettingsMismatch': '{app} はこのインスタンスと同じ方法で接続できません。SSH コマンドで {settings} が指定されていますが、{app} はそれを読み取りません。~/.ssh/config のホストのエントリに移してください。',
+  'openInApp.toast.sshUnresolved': 'このインスタンスの SSH 設定を読み取れなかったため、{app} を開きませんでした。SSH コマンドを確認してください。',
+  'openInApp.toast.sshUnsupported': '{app} はこのプロジェクトを SSH で開けません。',
   'projectActions.actions.addActionAria': 'アクションを追加',
   'projectActions.actions.addAction': 'アクションを追加',
   'projectActions.actions.addNewAction': '新しいアクションを追加',

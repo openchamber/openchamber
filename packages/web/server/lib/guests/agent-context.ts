@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 import { GUEST_BLOCK_RESERVED_NAMES, isGuestApproved, parseOpenChamberVersion, requestedGuestCapabilities } from '@openchamber/sdk';
 
+import { listInstalledGuests } from './catalog.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+import { withGuestCheckoutLock } from './persist.js';
 import type { GuestBlockContribution } from '@openchamber/sdk';
 import type { GuestRecord } from './contracts.js';
 
@@ -37,16 +39,30 @@ export const describeExtensionBlocks = (guests: GuestRecord[]) => {
 };
 
 type AgentContextOptions = {
-  listGuests: () => Promise<GuestRecord[]>;
   instructions: { forDirectory: (directory: string | null, guestIds: Set<string>) => Promise<Array<{ guestId: string; text: string }>> };
   fsPromises?: Pick<typeof fs, 'realpath' | 'stat' | 'readFile'>;
-};
+} & ({ persistPath: string; listGuests?: never } | { listGuests: () => Promise<GuestRecord[]>; persistPath?: never });
 
-export const createGuestAgentContext = ({ listGuests, instructions, fsPromises = fs }: AgentContextOptions) => {
+export const createGuestAgentContext = ({ listGuests, persistPath, instructions, fsPromises = fs }: AgentContextOptions) => {
+  const listCurrent = (underCheckoutLock: boolean): Promise<GuestRecord[]> => persistPath === undefined
+    ? listGuests()
+    : listInstalledGuests({ persistPath, underCheckoutLock });
+
+  const readContributionDirectories = async (read: (guests: GuestRecord[]) => Promise<string[]> | string[]) => {
+    const collect = async (underCheckoutLock: boolean) => read(await listCurrent(underCheckoutLock).catch((): GuestRecord[] => []));
+    if (persistPath === undefined) return collect(false);
+    try {
+      return await withGuestCheckoutLock(persistPath, () => collect(true));
+    } catch {
+      console.warn('[guests] Reading extensions without the checkout lock.');
+      return collect(false);
+    }
+  };
+
   const instructionText = async (directory: string | null) => {
     let guests;
     try {
-      guests = (await listGuests()).filter(isActive);
+      guests = (await listCurrent(false)).filter(isActive);
     } catch {
       return null;
     }
@@ -60,15 +76,11 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
     ].filter(Boolean).join('\n\n');
   };
 
-  const skillDirectories = async () => {
-    const guests = await listGuests().catch((): GuestRecord[] => []);
-    return guests
-      .filter((guest): guest is GuestRecord & { skills: string } => !!(isActive(guest) && guest.skills && guest.capabilityGrants?.includes('skills')))
-      .map((guest) => path.resolve(guest.packageRoot, guest.skills));
-  };
+  const skillDirectories = () => readContributionDirectories((guests) => guests
+    .filter((guest): guest is GuestRecord & { skills: string } => !!(isActive(guest) && guest.skills && guest.capabilityGrants?.includes('skills')))
+    .map((guest) => path.resolve(guest.packageRoot, guest.skills)));
 
-  const pluginDirectories = async () => {
-    const guests = await listGuests().catch((): GuestRecord[] => []);
+  const pluginDirectories = () => readContributionDirectories(async (guests) => {
     const directories = [];
     for (const guest of guests) {
       if (!isActive(guest) || !guest.opencodePlugin || !guest.capabilityGrants?.includes('opencodePlugin')) continue;
@@ -76,7 +88,7 @@ export const createGuestAgentContext = ({ listGuests, instructions, fsPromises =
       if (directory) directories.push(directory);
     }
     return directories;
-  };
+  });
 
   return { instructionText, skillDirectories, pluginDirectories };
 };
@@ -94,7 +106,9 @@ export const materializeAuthoringSkill = async ({ fsPromises, instanceDir, openc
   const target = path.join(directory, 'SKILL.md');
   await fsPromises.mkdir(directory, { recursive: true });
   const template = await fsPromises.readFile(AUTHORING_SKILL_SOURCE, 'utf8');
-  await fsPromises.writeFile(target, pinAuthoringSkill(template, openchamberVersion), 'utf8');
+  const skill = pinAuthoringSkill(template, openchamberVersion);
+  const current = await fsPromises.readFile(target, 'utf8').catch(() => null);
+  if (current !== skill) await fsPromises.writeFile(target, skill, 'utf8');
   return {
     skillsRoot,
     command: {

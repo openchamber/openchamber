@@ -7,7 +7,7 @@ import { Icon } from "@/components/icon/Icon";
 import { shortcutRegistry } from "@/lib/shortcuts";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
-import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
+import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuScrollClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
 import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar"
 
@@ -214,7 +214,7 @@ function DropdownMenuContent({
           }}
           className={cn(
             dropdownMenuPopupClass,
-            "overlay-scrollbar-target",
+            dropdownMenuScrollClass,
             className
           )}
           {...props}
@@ -291,6 +291,30 @@ function DropdownMenuRadioItem({
       </span>
       {children}
     </BaseMenu.RadioItem>
+  )
+}
+
+function DropdownMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof BaseMenu.CheckboxItem>) {
+  return (
+    <BaseMenu.CheckboxItem
+      data-slot="dropdown-menu-checkbox-item"
+      className={cn(
+        "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover relative flex cursor-pointer items-start gap-2 rounded-lg py-1 ps-2 pe-8 typography-ui-label outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        className
+      )}
+      {...props}
+    >
+      <span className="pointer-events-none absolute inset-e-2 flex size-3.5 items-center justify-center text-foreground">
+        <BaseMenu.CheckboxItemIndicator>
+          <Icon name="check" className="size-3" />
+        </BaseMenu.CheckboxItemIndicator>
+      </span>
+      {children}
+    </BaseMenu.CheckboxItem>
   )
 }
 
@@ -387,7 +411,7 @@ function DropdownMenuSubContent({
           }}
           className={cn(
             dropdownMenuPopupClass,
-            "overlay-scrollbar-target",
+            dropdownMenuScrollClass,
             className
           )}
           {...props}
@@ -410,6 +434,7 @@ export {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubTrigger,

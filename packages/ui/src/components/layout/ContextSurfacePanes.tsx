@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 
 import { TerminalView } from '@/components/views/TerminalView';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -11,8 +12,11 @@ import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
-import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
-import { isRightToLeft, useI18n } from '@/lib/i18n';
+import { resolvePlanRequestOwner, useProjectContextOwner } from '@/hooks/useProjectContextOwner';
+import { browserPanelKey, useFieldDictationStore, useFieldPanelOpen } from '@/lib/dictation/fieldDictation';
+import { knowledgePanelKey } from '@/hooks/useKnowledgeDraft';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useI18n } from '@/lib/i18n';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { registerBrowserCloser, registerBrowserOpener, registerBrowserTabActivity, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
@@ -28,13 +32,14 @@ import {
   type ContextZone,
 } from '@/lib/workspace/zones';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { clampContextEditorTreeWidth, normalizeContextPanelDirectoryKey, useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ReceivedPagePanel } from '@/components/chat/sharePages/received/ReceivedPagePanel';
 import { MovablePane } from './MovablePane';
+import { EditorTreeColumn } from './EditorTreeColumn';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { startZoneDragGesture } from './zoneDrag';
 import { ZoneSurfaceDragContext } from './zoneSurfaceDragContext';
@@ -47,6 +52,7 @@ import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext'
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 
+const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
@@ -57,132 +63,11 @@ type PanelBrowserTab = {
   id: string;
   targetPath: string | null;
   ownerSessionId: string | null;
+  usesUserLogins: boolean;
 };
 
 const browserTabRenderKey = (directory: string, tabId: string): string => `${directory}\u0000${tabId}`;
 const AGENT_TAB_IDLE_SWEEP_MS = 60_000;
-
-const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean; stretch?: boolean; side: 'left' | 'right' }> = ({ visible, active, fill = false, stretch = false, side }) => {
-  const { t } = useI18n();
-  const width = useUIStore((state) => state.contextEditorTreeWidth);
-  const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
-  const [isResizing, setIsResizing] = React.useState(false);
-  const startXRef = React.useRef(0);
-  const startWidthRef = React.useRef(width);
-  const liveWidthRef = React.useRef<number | null>(null);
-  const pointerIDRef = React.useRef<number | null>(null);
-  const columnRef = React.useRef<HTMLDivElement | null>(null);
-
-  const applyLiveTreeWidth = React.useCallback((nextWidth: number) => {
-    const column = columnRef.current;
-    if (!column) {
-      return;
-    }
-    column.style.width = `${nextWidth}px`;
-    column.style.setProperty('--oc-editor-tree-width', `${nextWidth}px`);
-  }, []);
-
-  const handlePointerDown = (event: React.PointerEvent) => {
-    if (!visible) {
-      return;
-    }
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // ignore
-    }
-    pointerIDRef.current = event.pointerId;
-    setIsResizing(true);
-    startXRef.current = event.clientX;
-    startWidthRef.current = width;
-    liveWidthRef.current = width;
-    event.preventDefault();
-  };
-
-  const handlePointerMove = (event: React.PointerEvent) => {
-    if (!isResizing || pointerIDRef.current !== event.pointerId) {
-      return;
-    }
-    const towardEditor = side === 'left' ? event.clientX - startXRef.current : startXRef.current - event.clientX;
-    const delta = isRightToLeft(event.currentTarget) ? -towardEditor : towardEditor;
-    const nextWidth = clampContextEditorTreeWidth(startWidthRef.current + delta);
-    if (liveWidthRef.current === nextWidth) {
-      return;
-    }
-    liveWidthRef.current = nextWidth;
-    applyLiveTreeWidth(nextWidth);
-  };
-
-  const handlePointerEnd = (event: React.PointerEvent) => {
-    if (pointerIDRef.current !== event.pointerId) {
-      return;
-    }
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // ignore
-    }
-    const finalWidth = clampContextEditorTreeWidth(liveWidthRef.current ?? width);
-    pointerIDRef.current = null;
-    liveWidthRef.current = null;
-    setIsResizing(false);
-    setWidth(finalWidth);
-  };
-
-  const appliedWidth = visible ? width : 0;
-  const stretched = fill && stretch && visible;
-
-  return (
-    <div
-      ref={columnRef}
-      className={cn(
-        'relative h-full flex-shrink-0 overflow-hidden bg-background will-change-[width] motion-reduce:transition-none',
-        fill && (side === 'left' ? 'me-auto' : 'ms-auto'),
-      )}
-      style={{
-        width: stretched ? '100%' : `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
-        maxWidth: fill ? '100%' : undefined,
-        ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
-        overflowX: 'clip',
-        transitionProperty: isResizing || stretch ? 'none' : 'width',
-        transitionDuration: '200ms',
-        transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-      aria-hidden={!visible}
-    >
-      {visible && !fill && (
-        <div aria-hidden="true" className={cn('pointer-events-none absolute inset-y-0 z-20 w-px bg-border', side === 'left' ? 'inset-e-0' : 'inset-s-0')} />
-      )}
-      {visible && !fill && (
-        <div
-          className={cn(
-            'absolute top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-            side === 'left' ? 'inset-e-0' : 'inset-s-0',
-            isResizing && 'bg-[var(--interactive-border)]'
-          )}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-          onPointerCancel={handlePointerEnd}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={t('contextPanel.actions.resizePanelAria')}
-        />
-      )}
-      <div
-        className={cn(
-          'relative z-10 h-full shrink-0 transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
-          isResizing && 'pointer-events-none',
-          !visible && 'pointer-events-none select-none opacity-0'
-        )}
-        style={{ width: stretched ? '100%' : 'var(--oc-editor-tree-width)', maxWidth: fill ? '100%' : undefined }}
-        aria-hidden={!visible}
-      >
-        <SidebarFilesTree visible={visible && active} />
-      </div>
-    </div>
-  );
-};
 
 const ZonePane: React.FC<{
   zone: ContextZone;
@@ -272,6 +157,7 @@ export const ContextSurfacePanes: React.FC = () => {
   const fileZone = zoneFor('file');
   const chatZone = zoneFor('chat');
   const browserZone = zoneFor('browser');
+  const gitZone = zoneFor('git');
   const diffZone = zoneFor('diff');
   const terminalZone = zoneFor('terminal');
   const walkthroughZone = zoneFor('walkthrough');
@@ -289,10 +175,10 @@ export const ContextSurfacePanes: React.FC = () => {
   const liveBrowserTabLimit = useUIStore((state) => state.liveBrowserTabLimit);
   const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
 
-  React.useEffect(() => registerBrowserOpener((url, context) => {
+  React.useEffect(() => registerBrowserOpener((url, context, options) => {
     const directory = context.directory ? normalizeContextPanelDirectoryKey(context.directory) : directoryKey;
     if (!directory) return null;
-    const tabId = openAgentBrowserTab(directory, url, context.sessionId);
+    const tabId = openAgentBrowserTab(directory, url, context.sessionId, options);
     if (tabId) wakeBrowserTab(directory, tabId);
     return tabId;
   }), [directoryKey, openAgentBrowserTab, wakeBrowserTab]);
@@ -384,6 +270,22 @@ export const ContextSurfacePanes: React.FC = () => {
     };
   }, [activeChatDirectory, activeChatSessionID]);
 
+  const gitTabIsGit = gitZone.activeTab?.mode === 'git';
+  const gitTabTargetPath = gitZone.activeTab?.targetPath;
+  const gitTabDiffScope = gitZone.activeTab?.diffScope;
+  const handleGitScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
+    if (!directoryKey || !gitTabIsGit || gitTabDiffScope === nextScope) {
+      return;
+    }
+
+    openContextPanelTab(directoryKey, {
+      mode: 'git',
+      targetPath: gitTabTargetPath,
+      stagedDiff: nextScope === 'staged',
+      diffScope: nextScope,
+    });
+  }, [directoryKey, gitTabDiffScope, gitTabIsGit, gitTabTargetPath, openContextPanelTab]);
+
   const diffActiveTab = diffZone.activeTab;
   const handleDiffScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
     if (!directoryKey || diffActiveTab?.mode !== 'diff') {
@@ -398,6 +300,14 @@ export const ContextSurfacePanes: React.FC = () => {
       diffScope: nextScope,
     });
   }, [diffActiveTab, directoryKey, openContextPanelTab]);
+
+  const recordingPanels = useFieldDictationStore(useShallow((state) => state.recordings.map((recording) => recording.panelKey)));
+  const notesZone = zoneFor('notes');
+  const knowledgeProject = useProjectContextOwner(useSessionUIStore((state) => state.currentSessionDirectory));
+  useFieldPanelOpen(
+    knowledgeProject ? knowledgePanelKey(knowledgeProject.path) : null,
+    notesZone.isOpen && tabs.some((tab) => tab.mode === 'notes'),
+  );
 
   const visibleBrowserTabId = browserZone.isOpen && browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
   React.useEffect(() => {
@@ -441,15 +351,16 @@ export const ContextSurfacePanes: React.FC = () => {
         const key = browserTabRenderKey(directory, tab.id);
         const isUserTab = tab.ownerSessionId === null;
         const isLoaded = (isShownDirectory && tab.id === visibleBrowserTabId)
-          || (isUserTab ? liveUserTabs.has(key) : recent.has(key));
+          || (isUserTab ? liveUserTabs.has(key) : recent.has(key))
+          || recordingPanels.includes(browserPanelKey(directory, tab.id));
         if (!isLoaded && !isShownDirectory && isUserTab) continue;
-        const entry = { directory, id: tab.id, targetPath: tab.targetPath, ownerSessionId: tab.ownerSessionId };
+        const entry = { directory, id: tab.id, targetPath: tab.targetPath, ownerSessionId: tab.ownerSessionId, usesUserLogins: tab.usesUserLogins === true };
         (isLoaded ? loaded : sleeping).push(entry);
       }
     }
     loaded.sort((a, b) => (browserTabRenderKey(a.directory, a.id) < browserTabRenderKey(b.directory, b.id) ? -1 : 1));
     return { loadedBrowserTabs: loaded, sleepingBrowserTabs: sleeping };
-  }, [contextPanelByDirectory, directoryKey, liveBrowserTabLimit, recentBrowserTabs, visibleBrowserTabId]);
+  }, [contextPanelByDirectory, directoryKey, liveBrowserTabLimit, recentBrowserTabs, recordingPanels, visibleBrowserTabId]);
   React.useEffect(() => {
     if (!window.__OPENCHAMBER_ELECTRON__) return;
     const unregister = sleepingBrowserTabs.map((tab) => registerSleepingBrowserTab({
@@ -462,6 +373,7 @@ export const ContextSurfacePanes: React.FC = () => {
     return () => unregister.forEach((release) => release());
   }, [sleepingBrowserTabs, wakeBrowserTab]);
 
+  const gitTab = React.useMemo(() => tabs.find((tab) => tab.mode === 'git') ?? null, [tabs]);
   const diffTabs = React.useMemo(() => tabs.filter((tab) => tab.mode === 'diff'), [tabs]);
   const terminalTab = React.useMemo(
     () => tabs.find((tab) => tab.mode === 'terminal') ?? null,
@@ -528,7 +440,11 @@ export const ContextSurfacePanes: React.FC = () => {
               )}
             </div>
           ) : null}
-          {spacePreparing ? null : <EditorTreeColumn visible={contextEditorTreeVisible} active={fileZone.isOpen && isFileTabActive} fill={!showsEditor} stretch={fileZone.zone === 'bottom'} side={fileTreeSide} />}
+          {spacePreparing ? null : (
+            <EditorTreeColumn visible={contextEditorTreeVisible} fill={!showsEditor} stretch={fileZone.zone === 'bottom'} side={fileTreeSide}>
+              <SidebarFilesTree visible={contextEditorTreeVisible && fileZone.isOpen && isFileTabActive} />
+            </EditorTreeColumn>
+          )}
         </ZonePane>
       ) : null}
       {chatActiveTab && activeChatSessionID && activeChatPinnedSession ? (
@@ -560,13 +476,15 @@ export const ContextSurfacePanes: React.FC = () => {
               <PauseClock paused={!shown}>
               {tab.directory === directoryKey && spacePreparing ? <SpacePreparing /> : (
                 <BrowserPane
-                  key={tab.ownerSessionId !== null && !agentBrowserSharesLogins ? `${siteDirectory}\u0000agent` : siteDirectory}
+                  key={tab.ownerSessionId !== null && !tab.usesUserLogins && !agentBrowserSharesLogins ? `${siteDirectory}\u0000agent` : siteDirectory}
                   initialUrl={tab.targetPath ?? ''}
                   directory={tab.directory}
                   siteDirectory={siteDirectory}
                   tabID={tab.id}
                   ownerSessionId={tab.ownerSessionId}
+                  usesUserLogins={tab.usesUserLogins}
                   visible={shown && browserZone.isOpen}
+                  panelOpen={tab.directory === directoryKey && browserZone.isOpen}
                 />
               )}
               </PauseClock>
@@ -574,6 +492,27 @@ export const ContextSurfacePanes: React.FC = () => {
           </ZonePane>
         );
       })}
+      {gitTab ? (
+        <ZonePane
+          key={gitTab.id}
+          zone={gitZone.zone}
+          interactive={interactive[gitZone.zone]}
+          isOpen={gitZone.isOpen}
+          hidden={contentHidden(gitZone.zone)}
+          className={cn('absolute inset-0', gitZone.activeTab?.id !== gitTab.id && 'hidden')}
+        >
+          <React.Suspense fallback={null}>
+            <ContextPanelHeaderSlotProvider value={headerSlotFor(gitZone.zone, gitZone.activeTab?.id === gitTab.id)}>
+              <GitView
+                isActive={gitZone.isOpen && gitZone.activeTab?.id === gitTab.id}
+                diffScope={gitTab.diffScope ?? (gitTab.stagedDiff ? 'staged' : null)}
+                onDiffScopeChange={handleGitScopeChange}
+                targetFilePath={gitTab.targetPath}
+              />
+            </ContextPanelHeaderSlotProvider>
+          </React.Suspense>
+        </ZonePane>
+      ) : null}
       {diffTabs.map((tab) => {
         const active = diffZone.activeTab?.id === tab.id;
         return (

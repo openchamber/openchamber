@@ -34,3 +34,9 @@ export function canUseDigitShortcut(event: KeyboardEvent): boolean {
   if (!isEditableEventTarget(event.target)) return true;
   return (event.metaKey || event.ctrlKey) && !event.getModifierState('AltGraph');
 }
+
+export function typesOutsidePrefixField(event: KeyboardEvent, prefixTarget: EventTarget | null): boolean {
+  if (event.ctrlKey || event.metaKey || event.altKey || !isEditableEventTarget(event.target)) return false;
+  if (prefixTarget === event.target) return false;
+  return !(prefixTarget instanceof HTMLElement) || prefixTarget.isConnected;
+}

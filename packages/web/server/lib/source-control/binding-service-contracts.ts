@@ -1,10 +1,12 @@
+import type { PlannedRemote } from '../git/service-contracts.js';
+export type { PlannedRemote };
 import type { SourceControlJson, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { BindingDraft } from './binding-contract.js';
 import type { createBindingStore } from './binding-storage.js';
 import type { SourceControlProviderBinding, SourceControlRepositoryContext, SourceControlRepositoryEndpoint } from './binding-types.js';
 import type { AccountIdentity, ReadContextRequest, TransportCredential } from './provider-contract.js';
 import type { AuthUser } from './auth-storage.js';
-import type { sshHostReaches } from '../git/ssh-host-alias.js';
+import type { sshHostNameOf, sshHostReaches } from '../git/ssh-host-alias.js';
 
 export interface RepositoryIdentity extends SourceControlRepositoryContext {
   supported: true;
@@ -17,7 +19,7 @@ export interface RepositoryIdentity extends SourceControlRepositoryContext {
 }
 
 export type RepositoryResolution = RepositoryIdentity | { supported: false; reason: string };
-export type RepositoryResolver = (directory: string) => Promise<RepositoryResolution>;
+export type RepositoryResolver = (directory: string, plannedRemote?: PlannedRemote) => Promise<RepositoryResolution>;
 export type BindingStore = ReturnType<typeof createBindingStore>;
 export type PresentedBinding = BindingDraft & {
   repositoryId: string;
@@ -39,8 +41,11 @@ export interface BindingServiceOptions {
   readManagedSshCredentialPresentation?: ((credentialId: string, deadline: number) => Promise<{ fingerprint: string } | null>) | undefined;
   resolveCheckoutAuxiliary?: ((input: {
     directory: string; parentEndpoint: string; parentRemoteName: string; kind: 'submodule' | 'lfs'; path: string;
-  }) => Promise<{ kind: 'submodule' | 'lfs'; path: string; endpoint: SourceControlRepositoryEndpoint } | null>) | undefined;
+  }) => Promise<{
+    kind: 'submodule' | 'lfs'; path: string; endpoint: SourceControlRepositoryEndpoint; rawEndpoint?: string; derivedFromRemote?: string;
+  } | null>) | undefined;
   sshHostReaches?: typeof sshHostReaches;
+  sshHostName?: typeof sshHostNameOf;
   readProviderSshUrl?: (identity: { provider: unknown; instance: unknown }) => Promise<string | null>;
 }
 
@@ -110,6 +115,7 @@ export interface AuxiliaryContextInput {
   kind: 'submodule' | 'lfs';
   rawEndpoint: string;
   parentRemote?: string;
+  derivedFromRemote?: string;
 }
 
 export interface TransportAuthority extends Omit<TransportContextInput, 'endpointKind'> {
@@ -122,7 +128,7 @@ export interface TransportAuthority extends Omit<TransportContextInput, 'endpoin
   primaryOf?: string[];
 }
 
-export interface AuxiliaryAuthority extends Omit<AuxiliaryContextInput, 'rawEndpoint' | 'parentRemote'> {
+export interface AuxiliaryAuthority extends Omit<AuxiliaryContextInput, 'rawEndpoint' | 'parentRemote' | 'derivedFromRemote'> {
   transportRevision: string;
   endpoint: string;
   endpointFingerprint: string;

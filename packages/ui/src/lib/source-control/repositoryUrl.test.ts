@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { GitRemote, SourceControlIdentity } from '@/lib/api/types';
-import { defaultSourceControlIdentities } from './identity';
+import { defaultSourceControlIdentities, type AliasedGitRemote } from './identity';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './providers/descriptor.fixture';
 import { repositoryLinkFromRemotes as linkFromRemotes } from './repositoryUrl';
 
 const descriptors = [githubLikeDescriptor(), gitlabLikeDescriptor(), acmeDescriptor()];
 const defaults = defaultSourceControlIdentities(descriptors);
 // Remotes are recognised on the connected instances and each provider's default one.
-const repositoryLinkFromRemotes = (remotes: GitRemote[], identities: SourceControlIdentity[]) => linkFromRemotes(remotes, [...identities, ...defaults], descriptors);
+const repositoryLinkFromRemotes = (remotes: AliasedGitRemote[], identities: SourceControlIdentity[]) => linkFromRemotes(remotes, [...identities, ...defaults], descriptors);
 
 const remote = (name: string, fetchUrl: string, pushUrl = fetchUrl): GitRemote => ({ name, fetchUrl, pushUrl });
 const link = (url: string, identities: SourceControlIdentity[] = []) => repositoryLinkFromRemotes([remote('origin', url)], identities);
@@ -49,6 +49,13 @@ test('unsupported hosts and malformed repository paths have no entry', () => {
     expect(link(url)).toBeNull();
   }
   expect(repositoryLinkFromRemotes([], [])).toBeNull();
+});
+
+test('an SSH alias remote links to the host the server resolved it to', () => {
+  const aliased = { ...remote('origin', 'git@gh-work:team/repo.git'), sshHostName: 'github.com' };
+  expect(repositoryLinkFromRemotes([aliased], [])).toEqual({ provider: 'github', url: 'https://github.com/team/repo' });
+  expect(repositoryLinkFromRemotes([{ ...aliased, sshHostName: 'example.invalid' }], [])).toBeNull();
+  expect(link('git@gh-work:team/repo.git')).toBeNull();
 });
 
 test('origin wins across providers and fetch wins over push', () => {

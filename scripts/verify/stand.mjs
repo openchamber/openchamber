@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from "node:child_process"
-import { copyFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import process from "node:process"
+import { isDeepStrictEqual } from "node:util"
 import { finished } from "node:stream/promises"
 
 import { reservePort, wait } from "../perf/cdp.mjs"
@@ -13,13 +14,15 @@ import { REPO_ROOT, startFixture } from "../perf/isolated-server.mjs"
 import { resolveBunExecutable } from "../lib/bun-executable.mjs"
 import { bundledOpenCodeServerEnv, devOpenCodeEnv } from "../lib/bundled-opencode-server.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
+import { guardEnv, guardedCommand, openCodeArmed } from "./guard.mjs"
+import { fetchRipgrep, installRipgrep } from "./ripgrep.mjs"
 import { createStandProcesses, reapStaleStands } from "./processes.mjs"
 
 export const DEFAULT_MODEL = "perf/stream-20000cps"
 const PROJECT_LABEL = "relay-desk"
-// What the server keeps of the UI's settings: the base file and the
-// per-device profile fields.
-const SETTINGS_FILES = ["settings.json", "preferences.json"]
+// What the server keeps of the UI's settings outside the profile, copied once
+// the stand is up; the reset rebuilds the profile from the stand's model.
+const SETTINGS_FILE = "settings.json"
 const SETTINGS_BASELINE = "settings-baseline"
 const GIT_ENV = {
   GIT_AUTHOR_NAME: "Relay Desk",
@@ -38,6 +41,14 @@ const BASE_ENV_KEYS = ["PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "TE
 
 const baseEnv = () => Object.fromEntries(BASE_ENV_KEYS.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]))
 
+const TOOLS_DIR = join(REPO_ROOT, "tmp/verify-tools")
+
+/** Downloads what a stand needs, while there is a network. */
+export const prepareStandTools = async () => {
+  await fetchRipgrep(TOOLS_DIR)
+  devOpenCodeEnv(process.env, () => bundledOpenCodeServerEnv(REPO_ROOT))
+}
+
 const standEnv = (info) => {
   const env = {
     ...baseEnv(),
@@ -50,6 +61,7 @@ const standEnv = (info) => {
     OPENCHAMBER_DATA_DIR: info.data,
     OPENCODE_DISABLE_MODELS_FETCH: "1",
     OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig(info.fixturePort, info.deadPort)),
+    ...guardEnv(info.guardLog),
   }
   if (process.platform === "win32") {
     env.USERPROFILE = info.home
@@ -226,12 +238,62 @@ export const PROFILE_KEYS = Object.entries(JSON.parse(readFileSync(join(REPO_ROO
   .filter(([, field]) => field.scope === "profile")
   .map(([key]) => key)
 
-const dropProfile = (dataDir) => {
-  const file = join(dataDir, "settings.json")
-  const settings = JSON.parse(readFileSync(file, "utf8"))
-  for (const key of PROFILE_KEYS) delete settings[key]
-  writeFileSync(file, JSON.stringify({ ...settings, defaultModel: DEFAULT_MODEL }, null, 2))
-  rmSync(join(dataDir, "preferences.json"), { force: true })
+// The server watches both files and treats this write as an outside edit, as
+// it would a user's: a half-written file or a `preferences.json` that vanished
+// after it read it pauses its profile writes, so each file is replaced whole
+// and the profile file is never deleted.
+// On Windows a rename over a file the server is reading fails for a moment.
+const replaceFile = async (file, text) => {
+  const tmp = join(dirname(file), `.${basename(file)}.verify-${process.pid}`)
+  writeFileSync(tmp, text)
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      renameSync(tmp, file)
+      return
+    } catch (error) {
+      if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(error.code) || attempt === 6) {
+        rmSync(tmp, { force: true })
+        throw error
+      }
+      await wait(25 * attempt)
+    }
+  }
+}
+
+const withoutProfile = (settings) => Object.fromEntries(Object.entries(settings).filter(([key]) => !PROFILE_KEYS.includes(key)))
+
+const dropProfile = async (dataDir, baseline) => {
+  await replaceFile(join(dataDir, "preferences.json"), JSON.stringify({ version: 1, fields: { defaultModel: { value: DEFAULT_MODEL, updatedAt: Date.now() } } }, null, 2))
+  await replaceFile(join(dataDir, "settings.json"), JSON.stringify({ ...withoutProfile(baseline), defaultModel: DEFAULT_MODEL }, null, 2))
+}
+
+// Whether both files already hold what the drop writes, so a scenario that
+// changed no setting costs the next one no outside edit and no wait for it.
+const holdsReset = (dataDir, baseline) => {
+  const preferencesFile = join(dataDir, "preferences.json")
+  if (!existsSync(preferencesFile)) return false
+  const settings = JSON.parse(readFileSync(join(dataDir, "settings.json"), "utf8"))
+  const profile = JSON.stringify([[["defaultModel", DEFAULT_MODEL]], [["defaultModel", DEFAULT_MODEL]]])
+  return readProfile(dataDir) === profile && isDeepStrictEqual(withoutProfile(settings), withoutProfile(baseline))
+}
+
+// The server refuses a save while an outside edit is not yet taken in: its
+// folder watcher waits for two equal readings a second apart, then reconciles.
+// Saving the profile the drop wrote is the first save that goes through, so
+// the scenario's own settings steps and the page's saves land after it.
+const saveWhenTakenIn = async (apiUrl) => {
+  const deadline = Date.now() + 15_000
+  let status
+  do {
+    status = await fetch(`${apiUrl}/api/config/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaultModel: DEFAULT_MODEL }),
+    }).then((response) => response.status, () => null)
+    if (status === 200) return
+    await wait(100)
+  } while (Date.now() < deadline)
+  throw new Error(`The server did not take in the reset settings: saving them answered ${status ?? "nothing"}`)
 }
 
 // What the profile holds in both files, in a form two reads can compare.
@@ -243,20 +305,16 @@ const readProfile = (dataDir) => {
   return JSON.stringify([values(settings, (value) => value), values(preferences, (field) => field?.value ?? field?.surfaces ?? null)])
 }
 
-// The server keeps running through the reset. A read of the settings seeds a
-// missing preferences file from what it read (the server's defaults after a
-// drop), so a read it began before the drop can write the old profile back.
-// Drop, read through the API, and repeat until two rounds leave the same
-// profile: a stale read lands in at most one of them.
-const resetProfile = async (dataDir, apiUrl) => {
-  let previous = null
+// The server keeps running through the reset, so a save the last scenario's
+// page began can still land after it. The server queues saves, so the reset's
+// own save finishes after any save begun before it; the files are checked
+// after that save, and the drop repeats until they hold it.
+const resetProfile = async (dataDir, apiUrl, baselineFile) => {
+  const baseline = JSON.parse(readFileSync(baselineFile, "utf8"))
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    dropProfile(dataDir)
-    await fetch(`${apiUrl}/api/config/settings`).catch(() => null)
-    const current = readProfile(dataDir)
-    if (current === previous) return
-    previous = current
-    await wait(100)
+    if (!holdsReset(dataDir, baseline)) await dropProfile(dataDir, baseline)
+    await saveWhenTakenIn(apiUrl)
+    if (holdsReset(dataDir, baseline)) return
   }
   throw new Error(`The profile settings in ${dataDir} kept changing during the reset`)
 }
@@ -354,6 +412,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   try {
   processes = createStandProcesses({ checkout: REPO_ROOT, root })
   for (const dir of [dirs.home, dirs.logs, join(root, "xdg"), join(root, "share"), join(root, "cache"), join(root, "state")]) mkdirSync(dir, { recursive: true })
+  await installRipgrep({ toolsDir: TOOLS_DIR, cacheDir: join(root, "cache") })
   writeProject(dirs.project)
   const projectId = writeSettings(dirs.data, dirs.home, dirs.project)
 
@@ -365,6 +424,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   const serverLog = join(dirs.logs, "dev.log")
   const info = {
     ...dirs, projectId, apiUrl, uiUrl, apiPort, uiPort, fixturePort, deadPort, serverLog,
+    guardLog: join(dirs.logs, "guard.log"),
     initialCommit: gitIn(dirs.project, ["rev-parse", "HEAD"]).trim(),
     initialBranch: "main",
     initialGitConfig: readFileSync(join(dirs.project, ".git/config"), "utf8"),
@@ -375,7 +435,8 @@ export const startStand = async ({ log, logsDir, onStop }) => {
   logStream = createWriteStream(serverLog)
   const bun = resolveBunExecutable()
   const launch = (args, cwd, extraEnv, executable = bun) => {
-    const child = processes.launch(executable, args, { cwd, env: { ...standEnv(info), ...extraEnv }, label: args.includes("server/index.js") || args.includes("dev:server") ? "API" : "Vite" })
+    const guarded = guardedCommand(executable, args)
+    const child = processes.launch(guarded.executable, guarded.args, { cwd, env: { ...standEnv(info), ...extraEnv }, label: args.includes("server/index.js") || args.includes("dev:server") ? "API" : "Vite" })
     child.stdout.pipe(logStream, { end: false })
     child.stderr.pipe(logStream, { end: false })
     return child
@@ -392,6 +453,8 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     if (!response?.ok) return false
     return JSON.stringify(await response.json()).includes("stream-20000cps")
   }
+  const waitUntilGuarded = (since) => waitUntil(() => openCodeArmed(info.guardLog, since), 180_000, "OpenCode to load the network guard", api, serverLog)
+  const launchedAt = Date.now()
   api = launchApi()
 
   {
@@ -399,6 +462,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     log(`stand at ${root}: api ${apiPort}, ui ${uiPort}, fixture ${fixturePort}`)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
     await waitUntil(() => assertIsolated(apiUrl), 120_000, "the session list", api, serverLog)
+    await waitUntilGuarded(launchedAt)
     await abortIfStopped()
     const viteArgs = ["--force", "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"]
     const windows = process.platform === "win32"
@@ -413,9 +477,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     // A scenario can change a setting the server keeps (Don't ask again on a
     // move); the reset puts this copy back so the next one starts the same.
     mkdirSync(join(root, SETTINGS_BASELINE), { recursive: true })
-    for (const file of SETTINGS_FILES) {
-      if (existsSync(join(dirs.data, file))) copyFileSync(join(dirs.data, file), join(root, SETTINGS_BASELINE, file))
-    }
+    copyFileSync(join(dirs.data, SETTINGS_FILE), join(root, SETTINGS_BASELINE, SETTINGS_FILE))
   }
   processes.remember()
   await abortIfStopped()
@@ -427,9 +489,11 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     await waitUntil(async () => !await portAnswers(`${apiUrl}/health`), 30_000, "the API to stop", null, serverLog)
   }
   const startApi = async () => {
+    const restartedAt = Date.now()
     api = launchApi()
     if (api.pid) prioritizeWindowsProcess(api.pid)
     await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
+    await waitUntilGuarded(restartedAt)
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
     apiDown = false
   }
@@ -448,6 +512,7 @@ export const startStand = async ({ log, logsDir, onStop }) => {
 export const attachKeptStand = async (info) => {
   if (!existsSync(info.project) || !existsSync(info.data)) throw new Error(`The kept stand at ${info.root} is gone; start a new one.`)
   if (!await assertIsolated(info.apiUrl)) throw new Error(`Nothing answers on ${info.apiUrl}; the kept stand has stopped.`)
+  if (!info.guardLog) throw new Error(`The kept stand at ${info.root} started without the network guard; start a new one.`)
   if (!existsSync(join(info.root, SETTINGS_BASELINE))) throw new Error(`The kept stand at ${info.root} has no settings baseline, so its reset cannot undo settings a scenario changes; start a new one.`)
   return attachStand(info)
 }
@@ -461,7 +526,8 @@ const attachStand = (info) => {
   const cli = (args, timeoutMs = 120_000, { anyDirectory = false } = {}) => {
     try {
       const scope = anyDirectory ? [] : ["--dir", info.project]
-      return JSON.parse(execFileSync(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"], {
+      const guarded = guardedCommand(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, ...scope, "--port", String(info.apiPort), "--json"])
+      return JSON.parse(execFileSync(guarded.executable, guarded.args, {
         encoding: "utf8",
         timeout: timeoutMs,
         env,
@@ -472,7 +538,8 @@ const attachStand = (info) => {
     }
   }
   const cliInBackground = (args) => {
-    const child = spawn(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"], { env, stdio: "ignore" })
+    const guarded = guardedCommand(resolveBunExecutable(), [join(REPO_ROOT, "packages/web/bin/cli.js"), "session", ...args, "--dir", info.project, "--port", String(info.apiPort), "--json"])
+    const child = spawn(guarded.executable, guarded.args, { env, stdio: "ignore" })
     const done = new Promise((resolveDone) => child.once("exit", resolveDone).once("error", resolveDone))
     return { done, stop: () => { if (child.exitCode === null) child.kill("SIGTERM") } }
   }
@@ -489,16 +556,13 @@ const attachStand = (info) => {
       if (!response.ok && response.status !== 404) throw new Error(`Deleting session ${session.id} answered ${response.status}`)
     }
     const failure = resetProject(info)
-    for (const file of SETTINGS_FILES) {
-      const baseline = join(info.root, SETTINGS_BASELINE, file)
-      if (existsSync(baseline)) copyFileSync(baseline, join(info.data, file))
-      else rmSync(join(info.data, file), { force: true })
-    }
     // Sidebar folders, which the server keeps for every window. The Detailed
     // rows switch a scenario may leave on is a profile setting, dropped below.
     rmSync(join(info.data, "sessions-directories.json"), { force: true })
     await deleteSavedDrafts(info.apiUrl)
-    await resetProfile(info.data, info.apiUrl)
+    // The settings the server keeps go back to the baseline copy, the profile
+    // to the stand's model alone.
+    await resetProfile(info.data, info.apiUrl, join(info.root, SETTINGS_BASELINE, SETTINGS_FILE))
     return { failure }
   }
   const outsideControl = async () => { throw new Error("server.stop and server.start need a stand this run started; they do not work with --attach") }

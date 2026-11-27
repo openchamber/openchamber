@@ -17,6 +17,17 @@ describe('dev server candidates', () => {
     expect(merged.find((entry) => entry.port === 4323)?.url).toBe('http://localhost:4323/__analytics');
   });
 
+  test('takes the address a running project action opened for its port', () => {
+    const merged = mergeDevServerCandidates({
+      announced: [],
+      actionUrls: ['http://dev-host:4321/'],
+      discovered,
+    });
+    expect(merged.find((entry) => entry.port === 4321)?.url).toBe('http://dev-host:4321/');
+    expect(merged.find((entry) => entry.port === 4321)?.announced).toBe(false);
+    expect(merged.find((entry) => entry.port === 3000)?.url).toBe('http://localhost:3000/');
+  });
+
   test('keeps a listening server whose announcement was mangled', () => {
     // A terminal wrapping ".../localhost:3000" mid-port yields port 300, which
     // parses fine and points nowhere.

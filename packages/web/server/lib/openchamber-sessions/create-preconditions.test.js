@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createOpenChamberSessionService } from './routes.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
 import { createOpenCodeClient } from './opencode-client.js';
+import { createSessionDirectoryCanonicalizer } from '../opencode/directory-canonicalization.js';
 
 const directory = '/fixture/worktree';
 const bound = { providerID: 'example', id: 'build-model', variant: 'high' };
@@ -15,6 +19,7 @@ const fixture = (overrides = {}) => {
   const records = new Map();
   const delivered = [];
   const sdk = {
+    plugin: { list: vi.fn(async () => ({ data: [{ state: { status: 'active' } }] })) },
     agent: { list: vi.fn(async () => ({ data: agents })) },
     config: { get: vi.fn(async () => [{ info: { default_agent: 'plan' } }]) },
     model: { list: vi.fn(async () => ({ data: [
@@ -60,17 +65,15 @@ const fixture = (overrides = {}) => {
   return { service, sdk, records, delivered, createWorktree, createClient };
 };
 
-// OpenCode 2.3 on a location it has just built: agent.list answers from a registry the plugins
-// have not filled yet, model.list answers once they have activated.
+// OpenCode 2.4 on a location it has just built: agent.list answers from a registry the plugins
+// have not filled yet, and plugin.list stays empty until they have activated.
 const coldLocation = (f) => {
-  let active = false;
-  const models = f.sdk.model.list.getMockImplementation();
-  f.sdk.model.list.mockImplementation(async (...args) => {
-    const response = await models(...args);
-    active = true;
-    return response;
+  let polls = 0;
+  f.sdk.plugin.list.mockImplementation(async () => {
+    polls += 1;
+    return { data: polls > 1 ? [{ state: { status: 'active' } }] : [] };
   });
-  f.sdk.agent.list.mockImplementation(async () => ({ data: active ? agents : [] }));
+  f.sdk.agent.list.mockImplementation(async () => ({ data: polls > 1 ? agents : [] }));
 };
 
 const request = { projectId: 'test', worktree: { name: 'task' }, prompt: 'Only the test double receives this' };
@@ -103,7 +106,8 @@ describe('session creation preconditions', () => {
       const result = await f.service.create(input);
       expect(result).toMatchObject({ agent: 'build', promptDispatched: true });
       expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
-      expect(f.sdk.model.list.mock.invocationCallOrder[0]).toBeLessThan(f.sdk.agent.list.mock.invocationCallOrder[0]);
+      expect(f.sdk.plugin.list).toHaveBeenCalledTimes(2);
+      expect(f.sdk.plugin.list.mock.invocationCallOrder[1]).toBeLessThan(f.sdk.agent.list.mock.invocationCallOrder[0]);
       expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
     },
   );
@@ -268,5 +272,49 @@ describe('session creation preconditions', () => {
     expect(f.delivered).toMatchObject([{ agent: 'build', model: bound }]);
     // The existing explicit-choice validation still runs once in the source directory.
     expect(f.sdk.agent.list).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('session creation in a symlinked checkout', () => {
+  const roots = [];
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  const symlinkedCheckout = async () => {
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'control-create-')));
+    roots.push(root);
+    const real = path.join(root, 'real');
+    const link = path.join(root, 'link');
+    await mkdir(real);
+    await symlink(real, link, process.platform === 'win32' ? 'junction' : undefined);
+    return { real, link };
+  };
+
+  const createIn = async (sharesFilesystem) => {
+    const { real, link } = await symlinkedCheckout();
+    const events = [];
+    const f = fixture({
+      getSessionDirectoryCanonicalizer: createSessionDirectoryCanonicalizer({ sharesFilesystem: () => sharesFilesystem }),
+      createWorktree: vi.fn(async () => ({ path: link, name: 'task', branch: 'task' })),
+      emitSessionCreatedEvent: (event) => events.push(event),
+    });
+    const result = await f.service.create(request);
+    return { f, real, link, result, events };
+  };
+
+  it('creates, prompts and reports the session at the resolved path while OpenCode shares this filesystem', async () => {
+    const { f, real, result, events } = await createIn(true);
+    expect(f.sdk.session.create.mock.calls[0][0].location.directory).toBe(real);
+    expect(f.delivered).toMatchObject([{ location: { directory: real } }]);
+    expect(result.directory).toBe(real);
+    expect(events).toMatchObject([{ directory: real }]);
+  });
+
+  it('keeps the requested spelling everywhere for an OpenCode on another filesystem', async () => {
+    const { f, link, result, events } = await createIn(false);
+    expect(f.sdk.session.create.mock.calls[0][0].location.directory).toBe(link);
+    expect(result.directory).toBe(link);
+    expect(events).toMatchObject([{ directory: link }]);
   });
 });

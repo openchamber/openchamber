@@ -1,4 +1,5 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import { directoryReachability, directoryUnreachableError, type Reachability } from '../directory-reachability/index.js';
 import type { promises as nodeFsPromises } from 'node:fs';
 import type { PlatformPath } from 'node:path';
 import type { Request } from '../shared/http-contracts.js';
@@ -17,6 +18,7 @@ export type ProjectDirectoryDependencies = DirectorySettingsSource & {
   normalizeDirectoryPath: (value: string) => string;
   sanitizeProjects: (value: SettingsDocument[string]) => SessionProject[] | null | undefined;
   refuseDirectory?: (candidate: string) => string | null;
+  checkDirectory?: (directory: string) => Promise<Reachability>;
 };
 
 export type ProjectDirectoryRequest = { get?: (name: string) => string | string[] | null | undefined; query?: Request['query'] };
@@ -46,6 +48,7 @@ export const createProjectDirectoryRuntime = (dependencies: ProjectDirectoryDepe
     getReadSettingsFromDiskMigrated,
     sanitizeProjects,
     refuseDirectory = () => null,
+    checkDirectory = directoryReachability.check,
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
@@ -71,6 +74,9 @@ export const createProjectDirectoryRuntime = (dependencies: ProjectDirectoryDepe
     const refusal = refuseDirectory(resolved);
     if (refusal !== null && refusal.length > 0) {
       return { ok: false, error: refusal };
+    }
+    if (await checkDirectory(resolved) === 'unreachable') {
+      return { ok: false, error: directoryUnreachableError(resolved).message };
     }
     try {
       const stats = await fsPromises.stat(resolved);

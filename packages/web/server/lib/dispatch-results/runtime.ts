@@ -3,6 +3,9 @@ import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { combinedOutcome, DELETED_OUTCOME, joinBodies, NOTHING_LEFT_NOTICE, NEXT_TURN_NOTICE, outcomeBody, stillRunningNotice, WAIT_LIMIT_MS } from './result-text.js';
+import { createOwnWork } from './own-work.js';
+import type { OwnWorkSources } from './own-work.js';
 
 const FILE_NAME = 'dispatch-results.json';
 const FILE_VERSION = 1;
@@ -14,8 +17,9 @@ const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_PAGE_LIMIT = 50;
-const ANSWER_CHAR_LIMIT = 50_000;
 const MAX_FOLLOWED_DELIVERIES = 5;
+const WAIT_CHECK_MS = 60_000;
+const WAIT_GRACE_MS = 30_000;
 
 const DISPATCH_RESULT_SOURCE = 'openchamber-session';
 
@@ -36,6 +40,13 @@ const entrySchema = z.object({
   messageId: messageIdSchema.optional(),
   follow: z.literal(true).optional(),
   targetIdleId: z.string().min(1).optional(),
+  held: z.object({ since: timeSchema, bodies: z.array(z.string()).min(1) }).optional(),
+  watching: z.literal(true).optional(),
+  outgoing: z.object({
+    text: z.string(),
+    description: z.string(),
+    metadata: z.object({ source: z.literal(DISPATCH_RESULT_SOURCE), sessionID: z.string(), state: z.enum(['completed', 'error', 'cancelled']), title: z.string().optional() }),
+  }).optional(),
 });
 
 const storedFileSchema = z.object({ entries: z.array(z.unknown()) });
@@ -94,7 +105,7 @@ export interface DispatchResultMessage {
     source: typeof DISPATCH_RESULT_SOURCE;
     sessionID: string;
     state: DispatchOutcome['state'];
-    title?: string;
+    title?: string | undefined;
   };
 }
 
@@ -119,12 +130,15 @@ export interface DispatchResultsOptions {
   quietMs?: number;
   retryDelayMs?: (failures: number) => number;
   settleRecheckMs?: number;
+  waitCheckMs?: number;
+  waitGraceMs?: number;
+  ownWorkSources?: () => OwnWorkSources;
 }
 
 type WatchedSession =
-  | { kind: 'running'; ownerId: string | null }
+  | { kind: 'running'; title: string; ownerId: string | null; active: ReadonlySet<string> }
   | { kind: 'deleted' }
-  | { kind: 'ended'; title: string; records: unknown[]; ownerId: string | null };
+  | { kind: 'ended'; title: string; records: unknown[]; ownerId: string | null; active: ReadonlySet<string> };
 
 interface ReadyResult {
   entry: DispatchEntry;
@@ -195,34 +209,20 @@ export const readDispatchOutcome = (records: unknown[], dispatchedAt: number, af
   };
 };
 
-const outcomeBody = ({ state, text, errorMessage }: DispatchOutcome, sessionId: string) => {
-  const answer = text.length > ANSWER_CHAR_LIMIT
-    ? `${text.slice(0, ANSWER_CHAR_LIMIT)}\n\n[Cut at ${ANSWER_CHAR_LIMIT} characters; read the rest with session.messages for ${sessionId}.]`
-    : text;
-  if (state === 'completed') return answer || 'The session finished without a text reply.';
-  if (state === 'error') {
-    const failure = errorMessage ? `The session failed: ${errorMessage}` : 'The session failed.';
-    return answer ? `${failure}\n\nIts last reply:\n${answer}` : failure;
-  }
-  const stopped = 'The session was stopped before it finished.';
-  return answer ? `${stopped}\n\nIts last reply:\n${answer}` : stopped;
-};
-
-export const buildDispatchResultMessage = ({ sessionId, title, outcome }: { sessionId: string; title: string; outcome: DispatchOutcome }): DispatchResultMessage => {
+export const buildDispatchResultMessage = ({ sessionId, title, outcome, body = outcomeBody(outcome, sessionId) }: { sessionId: string; title: string; outcome: DispatchOutcome; body?: string }): DispatchResultMessage => {
   const label = title || 'Dispatched session';
   const attributes = `sessionID="${escapeAttribute(sessionId)}" state="${outcome.state}" title="${escapeAttribute(label)}"`;
   const metadata: DispatchResultMessage['metadata'] = { source: DISPATCH_RESULT_SOURCE, sessionID: sessionId, state: outcome.state };
   if (title) metadata.title = title;
   return {
-    text: `<openchamber-session ${attributes}>\n${outcomeBody(outcome, sessionId)}\n</openchamber-session>`,
+    text: `<openchamber-session ${attributes}>\n${body}\n</openchamber-session>`,
     description: label,
     metadata,
   };
 };
 
-const DELETED_OUTCOME: DispatchOutcome = { state: 'cancelled', text: '', errorMessage: '' };
 
-interface FollowedTurn {
+export interface FollowedTurn {
   idleId: string;
   outcome: DispatchOutcome;
 }
@@ -250,12 +250,6 @@ const turnsAfter = (records: unknown[], entry: Pick<DispatchEntry, 'afterIdleId'
   });
 };
 
-const combinedOutcome = (turns: FollowedTurn[], sessionId: string): DispatchOutcome => {
-  const last = turns.at(-1)?.outcome ?? DELETED_OUTCOME;
-  if (turns.length < 2) return last;
-  return { ...last, state: 'completed', text: turns.map((turn) => outcomeBody(turn.outcome, sessionId)).join('\n\n') };
-};
-
 export function createDispatchResultsRuntime({
   globalEventHub,
   buildOpenCodeUrl,
@@ -267,6 +261,9 @@ export function createDispatchResultsRuntime({
   quietMs = QUIET_MS,
   retryDelayMs = retryDelay,
   settleRecheckMs = SETTLE_RECHECK_MS,
+  waitCheckMs = WAIT_CHECK_MS,
+  waitGraceMs = WAIT_GRACE_MS,
+  ownWorkSources,
 }: DispatchResultsOptions) {
   const filePath = path.join(dataDir, FILE_NAME);
 
@@ -363,12 +360,14 @@ export function createDispatchResultsRuntime({
       const session = await openCodeRequest(`/api/session/${encoded}`, sessionRecordSchema);
       if (!session) return null;
       const ownerId = session.time?.archived ? null : ownerLinkSchema.safeParse(session.metadata).data?.openchamber.parentID ?? null;
-      if (statuses[sessionId]) return { kind: 'running', ownerId };
+      const title = session.title?.trim() ?? '';
+      const active = new Set(Object.keys(statuses));
+      if (statuses[sessionId]) return { kind: 'running', title, ownerId, active };
       const page = await openCodeRequest(`/api/session/${encoded}/message`, messagePageSchema, {
         query: { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' },
       });
       if (!page) return null;
-      return { kind: 'ended', title: session.title?.trim() ?? '', records: page.data, ownerId };
+      return { kind: 'ended', title, records: page.data, ownerId, active };
     } catch (error) {
       if (hasStatus(error) && error.status === 404) return { kind: 'deleted' };
       return null;
@@ -390,6 +389,74 @@ export function createDispatchResultsRuntime({
         console.log(`[dispatch-results] dropping the result of ${entry.sessionId}: session ${entry.parentSessionId} no longer exists`);
         return 'parent-gone';
       }
+      throw error;
+    }
+  };
+
+  const nothingRunsSince = new Map<string, number>();
+  const ownWork = createOwnWork({
+    jobs: activityProbe,
+    sources: ownWorkSources,
+    dispatched: (sessionId, active) => Array.from(entries.values())
+      .filter((entry) => entry.follow && entry.parentSessionId === sessionId && (active.has(entry.sessionId) || entry.held || entry.watching))
+      .map((entry) => entry.sessionId),
+  });
+
+  const holdOrNotice = async (entry: DispatchEntry, hasNewTurn: boolean, active: ReadonlySet<string>): Promise<{ hold: number } | { notice: string; watch?: true }> => {
+    const work = await ownWork.read(entry.sessionId, active);
+    const onlyWatching = !hasNewTurn && !entry.held;
+    if (onlyWatching && (work === null || work.running.length > 0)) {
+      nothingRunsSince.delete(entry.id);
+      return { hold: waitCheckMs };
+    }
+    if (work === null || (work.waitsOnAnswer && !onlyWatching)) return { notice: '' };
+    if (work.running.length === 0) {
+      if (hasNewTurn) return { notice: '' };
+      const since = nothingRunsSince.get(entry.id) ?? now();
+      nothingRunsSince.set(entry.id, since);
+      const left = since + waitGraceMs - now();
+      return left > 0 ? { hold: left } : { notice: NOTHING_LEFT_NOTICE };
+    }
+    nothingRunsSince.delete(entry.id);
+    const left = (entry.held?.since ?? now()) + WAIT_LIMIT_MS - now();
+    if (left > 0) return { hold: Math.min(left, waitCheckMs) };
+    return { notice: stillRunningNotice(work.running), watch: true };
+  };
+
+  const holdTurns = async (entry: DispatchEntry, turns: FollowedTurn[], cursor: string) => {
+    const before = { ...entry };
+    entry.held = {
+      since: entry.held?.since ?? now(),
+      bodies: [...(entry.held?.bodies ?? []), ...turns.map((turn) => outcomeBody(turn.outcome, entry.sessionId))],
+    };
+    entry.afterIdleId = cursor;
+    delete entry.watching;
+    try {
+      await persist();
+    } catch (error) {
+      delete entry.held;
+      delete entry.afterIdleId;
+      Object.assign(entry, before);
+      throw error;
+    }
+  };
+
+  const mint = async (entry: DispatchEntry, title: string, turns: FollowedTurn[], notice: string, watch = false) => {
+    const before = entry.watching;
+    const target = turns.at(-1)?.idleId ?? entry.afterIdleId;
+    entry.messageId = createMessageId(now());
+    if (target) entry.targetIdleId = target;
+    delete entry.watching;
+    if (watch) entry.watching = true;
+    entry.outgoing = buildDispatchResultMessage({ sessionId: entry.sessionId, title, ...combinedOutcome(turns, entry, notice) });
+    try {
+      await persist();
+    } catch (error) {
+      delete entry.messageId;
+      delete entry.targetIdleId;
+      delete entry.outgoing;
+      delete entry.watching;
+      if (before) entry.watching = before;
       throw error;
     }
   };
@@ -451,34 +518,61 @@ export function createDispatchResultsRuntime({
     return changed;
   };
 
-  const deliverFollowedTurns = async (entry: DispatchEntry, watched: Extract<WatchedSession, { kind: 'ended' }>) => {
-    if (!entry.messageId) {
-      const turns = turnsAfter(watched.records, entry);
-      const target = turns.at(-1);
-      if (!target) return false;
-      entry.messageId = createMessageId(now());
-      entry.targetIdleId = target.idleId;
-      try {
-        await persist();
-      } catch (error) {
-        delete entry.messageId;
-        delete entry.targetIdleId;
-        throw error;
-      }
-    }
-    const outcome = combinedOutcome(turnsAfter(watched.records, entry, entry.targetIdleId), entry.sessionId);
-    const result = await deliver(entry, buildDispatchResultMessage({ sessionId: entry.sessionId, title: watched.title, outcome }));
-    const cursor = entry.targetIdleId ?? turnsAfter(watched.records, entry).at(-1)?.idleId;
+  const sendFollowed = async (entry: DispatchEntry, title: string, records: unknown[]) => {
+    const message = entry.outgoing
+      ?? buildDispatchResultMessage({ sessionId: entry.sessionId, title, ...combinedOutcome(turnsAfter(records, entry, entry.targetIdleId), entry, '') });
+    const result = await deliver(entry, message);
+    nothingRunsSince.delete(entry.id);
+    const cursor = entry.targetIdleId ?? turnsAfter(records, entry).at(-1)?.idleId;
     if (result === 'parent-gone' || !cursor) {
       entries.delete(entry.id);
     } else {
       entry.afterIdleId = cursor;
       delete entry.messageId;
       delete entry.targetIdleId;
+      delete entry.held;
+      delete entry.outgoing;
     }
     await persist();
-    console.log(`[dispatch-results] delivered the ${outcome.state} result of ${entry.sessionId} to ${entry.parentSessionId}`);
-    return true;
+    console.log(`[dispatch-results] delivered the ${message.metadata.state} result of ${entry.sessionId} to ${entry.parentSessionId}`);
+    return 'sent' as const;
+  };
+
+  const deliverFollowedTurns = async (entry: DispatchEntry, watched: Extract<WatchedSession, { kind: 'ended' }>): Promise<'sent' | 'nothing' | { hold: number; newTurn: boolean }> => {
+    if (!entry.messageId) {
+      const turns = turnsAfter(watched.records, entry);
+      const target = turns.at(-1);
+      if (!target && !entry.held && !entry.watching) return 'nothing';
+      const verdict = turns.every(({ outcome }) => outcome.state === 'completed')
+        ? await holdOrNotice(entry, target !== undefined, watched.active)
+        : { notice: '' };
+      if ('hold' in verdict) {
+        if (target) await holdTurns(entry, turns, target.idleId);
+        return { ...verdict, newTurn: target !== undefined };
+      }
+      await mint(entry, watched.title, turns, verdict.notice, 'watch' in verdict);
+    }
+    return sendFollowed(entry, watched.title, watched.records);
+  };
+
+  const releaseWhileRunning = async (entry: DispatchEntry, { title, active }: Extract<WatchedSession, { kind: 'running' }>) => {
+    if (!entry.held) return undefined;
+    if (!entry.messageId) {
+      const left = entry.held.since + WAIT_LIMIT_MS - now();
+      const asks = (await ownWork.read(entry.sessionId, active))?.waitsOnAnswer === true;
+      if (left > 0 && !asks) return Math.min(left, waitCheckMs);
+      await mint(entry, title, [], left > 0 ? '' : NEXT_TURN_NOTICE);
+    }
+    if (entry.outgoing) await sendFollowed(entry, title, []);
+    return undefined;
+  };
+
+  const releaseBeforeDropping = async (sessionId: string, { ownerId, title }: Extract<WatchedSession, { kind: 'running' | 'ended' }>) => {
+    for (const entry of pendingFor(sessionId)) {
+      if (!entry.held || entry.parentSessionId === ownerId) continue;
+      if (!entry.messageId) await mint(entry, title, [], '');
+      if (entry.outgoing) await sendFollowed(entry, title, []);
+    }
   };
 
   async function tick(sessionId: string): Promise<void> {
@@ -486,17 +580,38 @@ export function createDispatchResultsRuntime({
     if (ticking.has(sessionId)) return arm(sessionId);
     ticking.add(sessionId);
     try {
+      for (const entry of pendingFor(sessionId)) if (entry.outgoing) await sendFollowed(entry, '', []);
       const watched = await readWatchedSession(sessionId);
       if (watched === null) return retryLater(sessionId);
+      if (watched.kind !== 'deleted') await releaseBeforeDropping(sessionId, watched);
       if (watched.kind !== 'deleted' && reconcileFollowers(sessionId, watched.ownerId)) await persist();
-      if (watched.kind === 'running') return;
+      let holdMs: number | undefined;
+      if (watched.kind === 'running') {
+        for (const entry of pendingFor(sessionId)) {
+          const left = await releaseWhileRunning(entry, watched);
+          if (left !== undefined) holdMs = Math.min(holdMs ?? left, left);
+        }
+        if (holdMs !== undefined) arm(sessionId, holdMs);
+        return;
+      }
 
       let waiting = false;
       if (watched.kind === 'ended') {
         for (const entry of pendingFor(sessionId).filter((candidate) => candidate.follow)) {
           let deliveries = 0;
-          while (deliveries < MAX_FOLLOWED_DELIVERIES && entries.has(entry.id) && await deliverFollowedTurns(entry, watched)) deliveries += 1;
-          if (deliveries === 0) waiting = true;
+          while (deliveries < MAX_FOLLOWED_DELIVERIES && entries.has(entry.id)) {
+            const result = await deliverFollowedTurns(entry, watched);
+            if (result === 'sent') {
+              deliveries += 1;
+              continue;
+            }
+            if (result === 'nothing') waiting ||= deliveries === 0;
+            else {
+              holdMs = Math.min(holdMs ?? result.hold, result.hold);
+              waiting ||= !result.newTurn;
+            }
+            break;
+          }
         }
       }
 
@@ -532,10 +647,12 @@ export function createDispatchResultsRuntime({
       for (const item of ready) deliveries.set(item.entry.messageId, [...(deliveries.get(item.entry.messageId) ?? []), item]);
       for (const group of deliveries.values()) {
         const { entry, outcome } = group.find((item) => item.outcome.text) ?? group[0];
+        const held = group.flatMap((item) => item.entry.held?.bodies ?? []);
         const message = buildDispatchResultMessage({
           sessionId,
           title: watched.kind === 'ended' ? watched.title : '',
           outcome,
+          body: held.length > 0 ? joinBodies([...held, outcomeBody(outcome, sessionId)], sessionId) : outcomeBody(outcome, sessionId),
         });
         await deliver(entry, message);
         for (const item of group) entries.delete(item.entry.id);
@@ -544,6 +661,7 @@ export function createDispatchResultsRuntime({
       }
       failures.delete(sessionId);
 
+      if (holdMs !== undefined) arm(sessionId, holdMs);
       if (!waiting) {
         settleChecks.delete(sessionId);
         return;
@@ -551,7 +669,7 @@ export function createDispatchResultsRuntime({
       const spent = settleChecks.get(sessionId) ?? 0;
       if (spent < SETTLE_RECHECKS) {
         settleChecks.set(sessionId, spent + 1);
-        arm(sessionId, settleRecheckMs);
+        arm(sessionId, Math.min(settleRecheckMs, holdMs ?? settleRecheckMs));
       }
     } catch (error) {
       console.warn(`[dispatch-results] delivering the result of ${sessionId} failed:`, (hasMessage(error) ? error.message : undefined) ?? error);
@@ -631,6 +749,10 @@ export function createDispatchResultsRuntime({
       arm(sessionId);
     } else {
       clearTimer(sessionId);
+      const pending = pendingFor(sessionId);
+      for (const entry of pending) nothingRunsSince.delete(entry.id);
+      const deadlines = pending.flatMap((entry) => (entry.held ? [entry.held.since + WAIT_LIMIT_MS - now()] : []));
+      if (deadlines.length > 0) arm(sessionId, Math.min(waitCheckMs, ...deadlines));
     }
   };
 

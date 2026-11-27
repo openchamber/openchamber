@@ -1,3 +1,5 @@
+import { gitHubApiBaseUrl } from './api-host.js';
+
 const GITHUB_COM = 'github.com';
 const RAW_GITHUB_COM = 'raw.githubusercontent.com';
 const MEDIA_SECRET_RE = /^[A-Za-z0-9_-]{16,8192}$/;
@@ -96,7 +98,7 @@ function enterpriseMediaRequest(url: URL, instance: string): MediaRequest | null
   if (attachmentPath(url.pathname)) return { urls: [url.toString()], raw: false, authorized: true };
   const repository = repositoryPath(url.pathname);
   if (!repository || (!repository.raw && url.searchParams.get('raw') !== 'true')) return null;
-  return { urls: contentsUrls(`https://${instance}/api/v3`, repository), raw: true, authorized: true };
+  return { urls: contentsUrls(gitHubApiBaseUrl(instance), repository), raw: true, authorized: true };
 }
 
 const sameName = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();

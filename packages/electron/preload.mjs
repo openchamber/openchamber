@@ -171,12 +171,12 @@ const desktopBridge = {
   invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
   openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
   grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
-  openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
   listen: async (event, handler) => addListener(event, handler),
   pathForFile: (file) => webUtils.getPathForFile(file),
 };
 
 if (isLocalPage) {
+  desktopBridge.openExternal = (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url });
   desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
   if (process.platform === 'linux') {
     desktopBridge.clipboard = {

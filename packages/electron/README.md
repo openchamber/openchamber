@@ -131,10 +131,15 @@ PDF iframes also start with an opaque origin under the packaged UI protocol. The
 
 The preload bridge exposes desktop-only APIs to the web UI through `window.__OPENCHAMBER_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
 
-Confirmed chat application links use the local-page-gated `desktop_open_external_url`
-command and the OS protocol handler. `external-url-policy.mjs` validates schemes
-again in main, with the same exclusions as the shared UI classifier. Native
-opening failures do not fall back to a browser window for application links.
+Confirmed chat application links and mail links clicked in chat use the local-page-gated
+`desktop_open_external_url` command and the OS protocol handler. Preload exposes
+`openExternal` only on local pages, so remote-served pages cannot reach it.
+`external-url-policy.mjs` validates schemes again in main, with the same exclusions
+as the shared UI classifier, and admits `mailto:` only with RFC 6068 compose headers.
+Native opening failures do not fall back to a browser window for application or mail links.
+Automatic popup and navigation fallbacks in main and Mini Chat windows
+(`window-navigation-guards.mjs`) open only normalized `http:` and `https:` URLs
+externally; every other scheme is refused without calling `shell.openExternal`.
 
 Native menu actions reach the renderer as one DOM event per click. Main must not also send them over IPC: preload turns every IPC emit into a call to its bridge listeners and a DOM event, so the action would run again. Update-check notifications go over IPC only, for the same reason.
 
@@ -409,7 +414,7 @@ The AppImage launcher also prepends its own directories to `PATH`, `LD_LIBRARY_P
 
 Linux updates are supported when the packaged app runs from a writable AppImage or from an installed `.deb` or `.rpm`. electron-updater picks its installer from `resources/package-type`, which electron-builder writes into the packages: the AppImage is replaced in place by electron-updater. A package is downloaded by electron-updater but installed by `linux-package-install.mjs`: one `pkexec` call running `apt install` for a `.deb`, or the first of `zypper`/`dnf`/`yum`/`rpm` for an `.rpm`, so the system asks for the administrator password once. It runs asynchronously because electron-updater's installers use `spawnSync`, which freezes every window through the prompt and the install, and because its dpkg path retries a cancelled `dpkg -i` with `apt-get install -f`, a second prompt. Package installs relaunch through `linux-relaunch.mjs` instead of `app.relaunch()`: Chromium starts the relaunched process with `no_new_privs`, which every later `pkexec` refuses ("must be setuid root"), so the next update would fail without a prompt. A failed install after the backend stopped, a cancelled prompt included, relaunches the current version on every platform. Update checks, downloads, and installation report an actionable error when neither an AppImage nor a package type is found, or the AppImage is invalid or read-only; a missing release feed (`latest-linux.yml` 404 before the first Linux publish) is treated as “no update available”. Authenticated Web clients connected to the embedded Desktop Host use this same `electron-updater` check, download, and restart flow rather than a package-manager command, except on a `.deb` or `.rpm` host: its password prompt would appear only on the host's screen while its server is down, so the check reports `installBlocked: 'desktop-host'` and the install route refuses with 409, and clients tell the user to update on that computer. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate; each lists that architecture's AppImage, `.deb` and `.rpm`, each updater takes the file of its own format, and `verify-update-manifest.mjs` checks every listed file against its bytes before upload. Linux updates download full files (no `.blockmap` differential channel yet).
 
-`desktop_restart` does not answer the renderer before the install is decided. On the apply-update path it calls `quitAndInstall()` and keeps the IPC call open until the app quits or `autoUpdater` emits `error`, which the platform installers do asynchronously (a rejected code signature, or a Squirrel session disabled by an earlier failure). A failed install rejects the IPC call and rolls back the quit/install flags. A failure before backend shutdown leaves the app running; one after it relaunches the current version, because the in-process server does not restart in place. A Linux package install runs its own async install in place of `quitAndInstall()` and detaches the `error` listener first, so an unrelated update-check error during the password prompt cannot relaunch the app under a running install. A still-running app after the grace period resolves the call. The installer grace period starts after backend cleanup, so a slow terminal shutdown cannot remove the error listener before installation begins.
+`desktop_restart` does not answer the renderer before the install is decided. On the apply-update path, including a countdown that reaches zero, it calls `quitAndInstall()` and keeps the IPC call open until the app quits or `autoUpdater` emits `error`, which the platform installers do asynchronously (a rejected code signature, or a Squirrel session disabled by an earlier failure). A failed install rejects the IPC call and rolls back the quit/install flags. A failure before backend shutdown leaves the app running; one after it relaunches the current version, because the in-process server does not restart in place. A Linux package install runs its own async install in place of `quitAndInstall()` and detaches the `error` listener first, so an unrelated update-check error during the password prompt cannot relaunch the app under a running install. A still-running app after the grace period resolves the call. The installer grace period starts after backend cleanup, so a slow terminal shutdown cannot remove the error listener before installation begins.
 
 ### Updater End-to-End Fixture
 
@@ -549,6 +554,20 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   in the window that shows its instance and raises that window; the
   receiving window is brought forward first only when it already shows the
   same instance, so the local window does not jump in front of a remote one.
+  A pull request notification (`itemUrl`, an http(s) address, and `directory`;
+  main checks the address and opens nothing itself) waits in main
+  (`notification-tracker-item.mjs`), the newest one only and for a minute at
+  most, and main sends the main window `openchamber:tracker-item-waiting`, which
+  carries nothing, unless the window is loading: a page on its way out must not
+  take the click. The listener (`useDesktopTrackerItemClicks`) takes the click
+  with `desktop_take_pending_tracker_item` on that nudge and whenever it mounts,
+  so a click made while the main window is missing, loading, on a startup or
+  recovery screen or remounting its main view opens once a listener is there.
+  A Mini Chat has no Tracker and takes none. A missing main window is opened. The
+  renderer hands a notification of another instance to
+  `desktop_open_host_tracker_item`, which opens it in that instance's window,
+  reusing an open one, the way `desktop_open_host_session` does for sessions;
+  a new window starts on the web route `?item=&itemDir=`.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - Theme-file selection uses the local `~/.vscode/extensions` directory when present.
   The local-page-gated `desktop_pick_theme_file` command returns only the selected
@@ -601,7 +620,13 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   form posted into a new window is not repeated and keeps Electron's agent.
   Chromium reports `window.open(url)` without window features as a new tab, the
   same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
-  `window.open` that keeps its opener as a popup. A link aimed at a new tab is
+  `window.open` that keeps its opener as a popup. A popup that is not a POST
+  and opens while an agent's click, hover, typing or dialog answer runs on
+  the page, or within 5 seconds after that action (`browser-panel-agent-actions.mjs`), becomes a background panel tab
+  owned by the acting session instead, without `window.opener`, so the agent
+  can drive and close it; it keeps the sign-ins of the page that opened it; the user's own key, mouse or touch press on the page ends
+  that window early. The panel tells main which session acts through
+  `desktop_browser_agent_action`. A link aimed at a new tab is
   noopener by default and becomes a panel tab
   (`openchamber:browser-panel-open-tab` to the renderer). The event carries
   Electron's referrer URL and policy for the new tab's first load; a renderer

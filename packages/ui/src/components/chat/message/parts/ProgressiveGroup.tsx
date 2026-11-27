@@ -19,6 +19,8 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { isSkillFilePath } from '../../work-status/loadedSkills';
+import { openSkillSettings } from '@/components/sections/skills/openSkillSettings';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
 import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
@@ -103,12 +105,12 @@ const getToolFilePath = (activity: TurnActivityPart): string | null => {
     return typeof filePath === 'string' && filePath.trim().length > 0 ? filePath : null;
 };
 
-const getToolSkillDirectory = (activity: TurnActivityPart): string | null => {
+const getToolSkillMetadata = (activity: TurnActivityPart) => {
     const part = activity.part as ToolPartType;
     const state = part.state as { metadata?: Record<string, unknown> } | undefined;
-    const dir = state?.metadata?.dir;
+    const text = (value: unknown) => (typeof value === 'string' && value.trim().length > 0 ? value : null);
 
-    return typeof dir === 'string' && dir.trim().length > 0 ? dir : null;
+    return { directory: text(state?.metadata?.directory) ?? text(state?.metadata?.dir), name: text(state?.metadata?.name) };
 };
 
 const getToolReadOffset = (activity: TurnActivityPart): number | undefined => {
@@ -266,13 +268,14 @@ const StaticToolRowInner: React.FC<{
 
         const entries: Array<{ name: string; path: string }> = [];
         for (const activity of activities) {
-            const name = getToolShortDescription(activity);
+            const metadata = getToolSkillMetadata(activity);
+            const name = metadata.name ?? getToolShortDescription(activity);
             if (!name) continue;
 
             const skill = skillByName.get(name);
-            const rawPath = skill?.path || getToolSkillDirectory(activity);
-            const path = rawPath ? resolveSkillFilePath(rawPath) : '';
-            if (!path || entries.some((entry) => entry.name === name && entry.path === path)) continue;
+            const rawPath = skill?.path || metadata.directory;
+            const path = !rawPath ? '' : isSkillFilePath(rawPath) ? resolveSkillFilePath(rawPath) : '';
+            if ((!path && !skill) || entries.some((entry) => entry.name === name && entry.path === path)) continue;
             entries.push({ name, path });
         }
 
@@ -360,7 +363,7 @@ const StaticToolRowInner: React.FC<{
     return (
         <div
             className={cn(
-                'oc-static-tool-row flex w-full items-center gap-x-1.5 pe-2 ps-px py-1.5 rounded-xl min-w-0'
+                'oc-static-tool-row flex w-full items-center gap-x-1.5 pe-2 ps-px py-1.5 sm:py-1 rounded-xl min-w-0'
             )}
         >
             <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
@@ -454,7 +457,8 @@ const StaticToolRowInner: React.FC<{
                         onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            handleFileClick(entry.path);
+                            if (entry.path) handleFileClick(entry.path);
+                            else openSkillSettings(entry.name);
                         }}
                         className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-start hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
                         style={{ color: 'var(--tools-title)' }}

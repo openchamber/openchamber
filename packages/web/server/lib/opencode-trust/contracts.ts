@@ -1,4 +1,5 @@
 import type fs from 'node:fs';
+import type { Reachability } from '../directory-reachability/index.js';
 import type { createOpenCodeTrust } from './index.js';
 
 export type OpenCodeTrustItemKind = 'plugin' | 'package' | 'mcp' | 'lsp' | 'formatter' | 'shell' | 'config' | 'env' | 'file' | 'permission';
@@ -30,7 +31,7 @@ export interface OpenCodeTrustAssessment {
 
 export interface OpenCodeTrustRefusal {
   error: string;
-  code?: 'opencode_trust_required';
+  code?: 'opencode_trust_required' | 'DIRECTORY_UNREACHABLE';
   directory?: string;
 }
 
@@ -66,6 +67,7 @@ export interface TrustOptions {
   homeDirectory?: string;
   fsPromises?: TrustFileSystem;
   now?: () => number;
+  checkDirectory?: (directory: string) => Promise<Reachability>;
 }
 
 export interface SessionDirectoryOptions {

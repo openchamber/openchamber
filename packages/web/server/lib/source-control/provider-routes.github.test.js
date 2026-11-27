@@ -683,6 +683,21 @@ describe('GET /api/source-control/github/references', () => {
     expect(fetch.mock.calls.slice(calls).some(([url]) => String(url).includes('/labels'))).toBe(false);
   });
 
+  it('reads every page of assignable people for the assignee picker, one for reviewers', async () => {
+    const people = Array.from({ length: 101 }, (_, index) => ({ login: `user${index}` }));
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      const page = Number(endpoint.searchParams.get('page') ?? 1);
+      return response(people.slice((page - 1) * 100, page * 100));
+    }));
+    const read = async (role) => (await request(app).get('/api/source-control/github/references/reviewers')
+      .query({ ...readContext(project), owner: 'example', repo: 'project', ...role }).expect(200)).body.items;
+
+    expect((await read({ role: 'assignee' })).at(-1)).toEqual({ id: 'user100', login: 'user100' });
+    expect(await read({})).toHaveLength(100);
+  });
+
   it('reads the statuses of listed PRs with the sidebar summaries, only from the project repo network', async () => {
     const fetch = serveGitHub((body) => {
       expect(body.variables).toMatchObject({ o0: 'example', n0: 'project', p0: 4, o1: 'example', n1: 'project', p1: 9 });
@@ -935,9 +950,9 @@ describe('GitHub Enterprise references on a trusted enterprise checkout', () => 
       detail: expect.objectContaining({ number: 4, comments: [], pull: expect.objectContaining({ reviewDecision: 'approved', additions: 1 }) }),
     });
     // Only the named host was used: the request never touched github.com. The
-    // detail is read beside its stack, so the host answers two GraphQL calls.
+    // detail, its thread read, its review roster and its stack are four GraphQL calls to that host.
     expect(fetch.mock.calls.every(([url]) => String(url).startsWith('https://github.example.com/'))).toBe(true);
-    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/graphql'))).toHaveLength(2);
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/graphql'))).toHaveLength(4);
   });
 });
 

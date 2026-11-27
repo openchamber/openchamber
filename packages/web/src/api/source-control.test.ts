@@ -273,6 +273,22 @@ describe('createWebSourceControlAPI', () => {
       .rejects.toThrow('invalid repository remote');
   });
 
+  it('keeps a remote\'s resolved SSH alias host only when it is a host name', async () => {
+    const endpoint = { displayUrl: 'git@gh-work:team/repo.git', fingerprint: 'alias' };
+    const context = (sshHostName: unknown) => Response.json({
+      supported: true, repositoryId: 'repo_one', configRevision: 'config_one', bare: false,
+      remotes: [{ name: 'origin', fetch: endpoint, push: endpoint, sshHostName }],
+    });
+    runtimeFetchMock.mockResolvedValueOnce(context('github.com'));
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).repositoryContext('/repo'))
+      .resolves.toMatchObject({ remotes: [{ name: 'origin', sshHostName: 'github.com' }] });
+    for (const value of ['-oProxyCommand=x', 'github.com/evil', 42]) {
+      runtimeFetchMock.mockResolvedValueOnce(context(value));
+      const read = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).repositoryContext('/repo');
+      expect(read.remotes[0]).not.toHaveProperty('sshHostName');
+    }
+  });
+
   it('serializes exact remote removal and confirmed full reset intents without retry', async () => {
     const repository = { repositoryId: 'repo_one', configRevision: 'config_one', bare: false, remotes: [{
       name: 'origin', fetch: { displayUrl: 'https://github.com/team/repo.git', fingerprint: 'fetch' },
@@ -992,6 +1008,27 @@ describe('createWebSourceControlAPI', () => {
     });
   });
 
+  it("carries the context's reviews only when the host sends them, dropping a malformed list", async () => {
+    const context = { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream' };
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const payload = (reviews?: unknown[]) => {
+      const body = { identity: githubIdentity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [] };
+      return reviews === undefined ? body : { ...body, reviews };
+    };
+    const review = { id: 'PRR_one', state: 'approved', author: { login: 'hubot' }, submittedAt: null };
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(payload([review])));
+    await expect(api.changeRequestContext(context, 4)).resolves.toMatchObject({ reviews: [review] });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(payload()));
+    const absent = await api.changeRequestContext(context, 4);
+    expect('reviews' in absent).toBe(false);
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(payload([{ ...review, state: 'approved-ish' }])));
+    const malformed = await api.changeRequestContext(context, 4);
+    expect('reviews' in malformed).toBe(false);
+  });
+
   it('parses per-person reviewer state, skips an entry it cannot read, and leaves it out when the host did not say', async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     const ctx = { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'origin' };
@@ -1186,6 +1223,24 @@ describe('createWebSourceControlAPI', () => {
       body: expect.stringContaining('"state":"closed"'),
     }));
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(6, '/api/source-control/github/pr/state', expect.anything());
+  });
+
+  it('dismisses a review with a reason, and withdraws the viewer\'s own approval without one', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()));
+
+    await expect(api.changeRequestDismissReview({ ...mutationContext, reviewId: 'PRR_one', message: 'Superseded by the rewrite' }))
+      .resolves.toMatchObject({ result: {} });
+    await expect(api.changeRequestDismissReview({ ...mutationContext })).resolves.toMatchObject({ result: {} });
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/pr/review/dismiss', expect.objectContaining({
+      body: expect.stringContaining('"reviewId":"PRR_one","message":"Superseded by the rewrite"'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/pr/review/dismiss', expect.objectContaining({
+      body: expect.not.stringContaining('"reviewId"'),
+    }));
   });
 
   it('posts thread replies, resolutions and new threads to their routes', async () => {

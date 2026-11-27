@@ -10,8 +10,8 @@ import { useRawAssetUrl } from './useRawAssetUrl';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64');
 
-test('protected Files media and prepared chat images load through header-aware HTTP and retire object URLs', async () => {
-  const dom = new Window({ url: 'http://localhost' });
+const installNativeAppDom = (url: string) => {
+  const dom = new Window({ url });
   Object.assign(dom, { Capacitor: { isNativePlatform: () => true } });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   class Reader {
@@ -28,6 +28,16 @@ test('protected Files media and prepared chat images load through header-aware H
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
+  return async () => {
+    await dom.happyDOM.close();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
+    }
+  };
+};
+
+test('protected Files media and prepared chat images load through header-aware HTTP and retire object URLs', async () => {
+  const restoreDom = installNativeAppDom('http://localhost');
   const requests: { path: string; header: string }[] = [];
   let pendingStarted = () => {};
   const pendingRequest = new Promise<void>((resolve) => { pendingStarted = resolve; });
@@ -119,10 +129,56 @@ test('protected Files media and prepared chat images load through header-aware H
     revoke.mockRestore();
     switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
     server.close();
-    await dom.happyDOM.close();
-    for (const [name, descriptor] of originals) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
+    await restoreDom();
+  }
+});
+
+test('the Android shell reads Files media and chat images from a plain-http server through fetch', async () => {
+  const restoreDom = installNativeAppDom('https://localhost/');
+  const server = await serveTestHttp((request, response) => {
+    const url = new URL(request.url || '/', 'http://fixture');
+    if (url.pathname.endsWith('/markdown-image-grants')) {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ results: [{ source: 'picture.png', status: 'ready', path: '/repo/picture.png' }] }));
+      return;
     }
+    const path = url.searchParams.get('path') || '';
+    response.setHeader('Content-Type', path.endsWith('.png') ? 'image/png' : 'application/pdf');
+    response.end(path.endsWith('.png') ? png : Buffer.from(`fixture:${path}`));
+  });
+  let latest: ReturnType<typeof useRawAssetUrl> | undefined;
+  const root = createRoot(document.createElement('div'));
+  const syntheticUrlToken = async () => 'oc_url_synthetic';
+  let markLoaded = () => {};
+  const reportError = (error: string | null) => { if (error === null) markLoaded(); };
+  const Probe = ({ runtime = 'lan' }: { runtime?: string }) => {
+    latest = useRawAssetUrl({ path: '/repo/book.pdf', runtime, directory: '/repo', revision: '0', outsideWorkspace: false }, reportError, 'read failed', syntheticUrlToken);
+    return null;
+  };
+  const renderLoaded = async (runtime?: string) => {
+    const loaded = new Promise<void>((resolve) => { markLoaded = resolve; });
+    await act(async () => root.render(<Probe runtime={runtime} />));
+    await act(async () => loaded);
+  };
+  try {
+    switchRuntimeEndpoint({ apiBaseUrl: server.url.toString().replace(/\/$/, ''), clientToken: 'oc_client_synthetic' });
+    await renderLoaded();
+    expect(latest?.src.startsWith('blob:')).toBe(true);
+    expect(Buffer.from(await (await fetch(latest!.src)).arrayBuffer())).toEqual(Buffer.from('fixture:/repo/book.pdf'));
+    const chat = new MarkdownMediaOwner({ mode: 'assistant', directory: '/repo', sessionId: 'ses_media', messageId: 'msg_media' });
+    chat.register('picture.png');
+    try {
+      expect(await chat.resolve('picture.png')).toBe(`data:image/png;base64,${png.toString('base64')}`);
+    } finally { chat.dispose(); }
+    // An https server is not mixed content: the player keeps the streamed address.
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://tunnel.example', clientToken: 'oc_client_synthetic' });
+    await renderLoaded('tunnel');
+    expect(latest?.src.startsWith('https://tunnel.example/api/fs/raw?')).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+    server.close();
+    await restoreDom();
   }
 });
 

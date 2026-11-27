@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { ModelEffortMenu } from '@/components/multirun/ModelEffortMenu';
 import { SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
+import { useActiveSpaceTarget, useSpaceModelOffer } from '@/lib/spaces/space-model-offer';
 import type { ParallelComposer } from './useParallelComposer';
 
 function SettingsColumnBlock({ title, children }: { title: string; children: React.ReactNode }): React.ReactNode {
@@ -39,6 +40,7 @@ function LaunchSettingsDialog({
   onOpenChange: (open: boolean) => void;
 }): React.ReactNode {
   const { t } = useI18n();
+  const spaceTarget = useActiveSpaceTarget();
   const state = parallel.state;
   const [setupDraft, setSetupDraft] = React.useState('');
   const setupCommands = state?.setupCommands;
@@ -131,6 +133,7 @@ function LaunchSettingsDialog({
                   onRemove={() => parallel.setFuse(null)}
                   maxModels={1}
                   showChips={false}
+                  spaceTarget={spaceTarget}
                   dropdownSide="bottom"
                   addButtonLabel={judge ? judge.displayName || judge.modelID : t('multirun.fusion.model.placeholder')}
                   triggerIcon={judge ? <ProviderLogo providerId={judge.providerID} className="me-1 size-3.5" /> : undefined}
@@ -182,7 +185,10 @@ export function ParallelComposerStrip({
 }): React.ReactNode {
   const { t } = useI18n();
   const state = parallel.state;
-  const { isGitRepository } = useBranchOptions(project?.path ?? null);
+  const spaceTarget = useActiveSpaceTarget();
+  const inSpace = useSpaceModelOffer(spaceTarget) !== null;
+  const { isGitRepository: projectIsGit } = useBranchOptions(project?.path ?? null);
+  const isGitRepository = inSpace ? false : projectIsGit;
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const { setIsolate, setSetupCommands } = parallel;
 
@@ -317,6 +323,7 @@ export function ParallelComposerStrip({
           onRemove={() => undefined}
           maxModels={1}
           showChips={false}
+          spaceTarget={spaceTarget}
           dropdownSide="top"
           portal
           addButtonClassName="h-6 min-h-6 w-6 justify-center px-0"

@@ -13,7 +13,7 @@ Choisissez comment les réponses sont lues :
 
 - **browser** utilise les voix disponibles dans votre navigateur. Sur Linux de bureau, installez `speech-dispatcher`, sa bibliothèque cliente `libspeechd` et un moteur vocal comme `espeak-ng`. Activez le service speech-dispatcher si votre distribution ne le démarre pas automatiquement, puis redémarrez OpenChamber.
 - **OpenAI** — les voix d’OpenAI ; collez votre clé API et choisissez une voix
-- **OpenAI-compatible** — tout service qui parle le format OpenAI ; saisissez son URL et, s’il en demande une, une clé API
+- **OpenAI-compatible** — tout service qui parle le format OpenAI ; saisissez son URL et, s’il en demande une, une clé API. Si le service fournit la liste de ses voix, **Voix** est une liste déroulante qui se termine par **Personnalisée…** pour tout autre nom de voix ; sinon, saisissez le nom
 - **macOS say** — la commande intégrée `say`, sur les Mac qui l’ont
 
 Une fois activé, un bouton de lecture apparaît sur les messages pour les écouter à voix haute.
@@ -38,6 +38,8 @@ Les modèles Whisper et Qwen3-ASR détectent la langue eux-mêmes et, sur une ph
 Activez **Corriger les mots mal compris** pour que votre Small Model (Paramètres → Sessions → Small Model) relise le texte quand vous arrêtez de dicter. Il remplace les mots que le modèle vocal a mal compris et retire les hésitations comme "euh". Le texte part alors chez le fournisseur du Small Model et apparaît une ou deux secondes plus tard. Sans Small Model, le texte est inséré tel qu’il a été entendu.
 
 Les clés API saisies pour ces services sont conservées par le serveur OpenChamber, pas par votre navigateur. Tapez une clé et appuyez sur Entrée pour l’enregistrer ; le champ indique ensuite qu’une clé est enregistrée, et la croix la supprime.
+
+**Clé d’un fournisseur OpenCode** se trouve sous le champ de la clé API. Elle permet au service d’utiliser la clé d’un fournisseur que vous avez déjà configuré dans OpenCode, sans la saisir de nouveau. OpenChamber ne choisit un fournisseur pour vous que si un seul fournisseur disposant d’une clé a la même adresse (schéma, hôte et port) que le service ; si deux l’ont, ou aucun, rien n’est choisi. Ce choix n’envoie encore aucune clé. Choisissez un fournisseur, ou **Aucune**, pour décider vous-même. Une clé saisie dans le champ de la clé API passe en premier. Le serveur OpenChamber lit la clé du fournisseur au moment du besoin et ne l’envoie jamais au navigateur. Il n’envoie la clé à un serveur qu’après que vous avez appuyé sur **Envoyer la clé** pour ce fournisseur et cette adresse, y compris quand c’est l’adresse que OpenCode utilise pour ce fournisseur. Une approbation couvre la clé que le fournisseur a à ce moment-là : si vous changez de compte ou si la clé change, même sous le même nom, vous appuyez de nouveau sur **Envoyer la clé**.
 
 ## Note pour les téléphones
 
