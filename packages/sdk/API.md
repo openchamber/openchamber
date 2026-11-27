@@ -218,12 +218,15 @@ These methods extend the existing `sessions` capability. They expose registered 
 | Method | Result |
 | --- | --- |
 | `listProjects()` | `Promise<GuestProjectsSnapshot>` |
+| `getProjectIcon(projectId)` | `Promise<GuestProjectIcon>`, the icon the sidebar shows |
 | `listWorktrees(projectId)` | `Promise<GuestWorktreesSnapshot>` |
 | `listSessions(projectId)` | `Promise<GuestSessionsSnapshot>` including known archived sessions |
 | `onProjects(listener)` | `Promise<() => void>` |
 | `onWorktrees(projectId, listener)` | `Promise<() => void>` |
 | `onSessions(projectId, listener)` | `Promise<() => void>` |
 | `openSession(sessionId)` | `Promise<void>`, explicitly opens the chat and closes the page |
+
+`getProjectIcon(projectId)` returns the icon the sidebar draws: `{ kind: 'image', mime, dataUrl, background }` for a custom project icon (already a data URL, with the background colour the sidebar puts behind it), or `{ kind: 'symbol', symbol, color }` for a preset. `symbol` is the project's preset key (`code`, `rocket`, ...), or `folder` when none is set; `color` is the resolved CSS colour. A missing or unreadable image, or one over 256 KiB, falls back to the preset. The image follows the host's current theme; call it again after a theme change.
 
 Await subscription registration to handle refusal, then retain its returned unsubscribe function. Each subscription sends an initial snapshot, then changes. At most 32 subscriptions per iframe. `dispose()` releases them all. Unmount, disable, uninstall and runtime switch also release host subscriptions.
 

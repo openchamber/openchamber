@@ -48,6 +48,7 @@ import {
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { guestMay, isGuestActive } from '@/lib/guests/capabilities';
 import { guestFileOperation } from '@/lib/guests/files';
+import { readGuestProjectIcon } from '@/lib/guests/project-icon';
 import { useHostDevice } from '@/lib/guests/useHostDevice';
 import { useHostTypography } from '@/lib/guests/useHostTypography';
 import { guestGenerate } from '@/lib/guests/generate';
@@ -325,6 +326,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const sentSessionRef = React.useRef<HostReadyContext['session'] | undefined>(undefined);
   const directoryRef = React.useRef(directory);
   directoryRef.current = directory;
+  const themeRef = React.useRef(currentTheme);
+  themeRef.current = currentTheme;
   const effectiveDirectoryRef = React.useRef(effectiveDirectory);
   effectiveDirectoryRef.current = effectiveDirectory;
   const sessionIdRef = React.useRef(currentSessionId);
@@ -634,6 +637,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
       void answerGuestMessage(message, {
         workspaceRead: (query) => { requireSessions(); return readGuestWorkspace(query, guestIdRef.current); },
+        getProjectIcon: (projectId) => {
+          requireSessions();
+          return readGuestProjectIcon(projectId, {
+            themeVariant: themeRef.current.metadata.variant,
+            iconColor: themeRef.current.colors.surface.foreground,
+          });
+        },
         workspaceSubscribe: ({ subscriptionId, query }) => {
           requireSessions();
           subscriptions.get(subscriptionId)?.();

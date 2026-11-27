@@ -2,6 +2,19 @@ import type { JsonValue } from './contract.ts';
 
 export type GuestLoadState = 'loading' | 'ready' | 'error';
 export type GuestProject = { id: string; name: string; directory: string };
+
+/** Largest custom project icon the host sends to a guest, before base64 expansion. */
+export const GUEST_PROJECT_ICON_MAX_BYTES = 256 * 1024;
+/** Room for the base64 form of GUEST_PROJECT_ICON_MAX_BYTES plus its data URL prefix. */
+export const GUEST_PROJECT_ICON_DATA_URL_MAX = 400_000;
+
+/**
+ * What the sidebar draws for a project: a custom image already packaged for an
+ * `<img>` element, or the preset symbol and resolved colour when it has none.
+ */
+export type GuestProjectIcon =
+  | { kind: 'image'; mime: string; dataUrl: string; background: string | null }
+  | { kind: 'symbol'; symbol: string; color: string | null };
 export type GuestWorktree = {
   directory: string;
   name: string;

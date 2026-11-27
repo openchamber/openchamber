@@ -140,6 +140,30 @@ describe('connectHost', () => {
     expect(events).toEqual(['preview-1:escape']);
   });
 
+  test('asks the host for a project icon and returns its resolved descriptor', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    const pending = host.getProjectIcon('proj-1');
+    const request = frame.posted.at(-1);
+    if (!request || request.type !== 'project-icon') throw new Error('Expected a project icon request');
+    expect(request.payload).toEqual({ projectId: 'proj-1' });
+    frame.dispatch(new MessageEvent('message', { data: {
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: request.id, ok: true,
+      payload: { kind: 'symbol', symbol: 'code', color: '#123456' },
+    } }));
+    await expect(pending).resolves.toEqual({ kind: 'symbol', symbol: 'code', color: '#123456' });
+
+    const refused = host.getProjectIcon('proj-2');
+    const refusedRequest = frame.posted.at(-1);
+    if (!refusedRequest || refusedRequest.type !== 'project-icon') throw new Error('Expected a project icon request');
+    frame.dispatch(new MessageEvent('message', { data: {
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: refusedRequest.id, ok: false,
+      error: 'No such project.', code: 'NOT_FOUND',
+    } }));
+    await expect(refused).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'No such project.' });
+    host.dispose();
+  });
+
   test('toast options are sent as data and resolve on display acknowledgement', async () => {
     const frame = createFrame();
     const host = connectHost({ target: frame, acceptSource: () => true });

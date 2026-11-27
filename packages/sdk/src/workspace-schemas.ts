@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_KEYS_MAX } from './workspace.ts';
+import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_KEYS_MAX, GUEST_PROJECT_ICON_DATA_URL_MAX } from './workspace.ts';
 
 export const guestSessionContextSchema = z.object({
   tokens: z.number().nonnegative(), limit: z.number().positive().nullable(),
@@ -49,6 +49,19 @@ export const guestSessionWorktreeSchema = z.union([
   z.boolean(),
   z.object({ kind: z.literal('existing'), directory: identity }).strict(),
   z.object({ kind: z.literal('new'), name: z.string().trim().min(1).max(200).optional(), baseBranch: z.string().trim().min(1).max(200).optional() }).strict(),
+]);
+export const guestProjectIconSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('image'),
+    mime: z.string().trim().min(1).max(100),
+    dataUrl: z.string().min(1).max(GUEST_PROJECT_ICON_DATA_URL_MAX),
+    background: z.string().trim().min(1).max(64).nullable(),
+  }).strict(),
+  z.object({
+    kind: z.literal('symbol'),
+    symbol: z.string().trim().min(1).max(64),
+    color: z.string().trim().min(1).max(64).nullable(),
+  }).strict(),
 ]);
 const storageKey = z.string().min(1).max(GUEST_STORAGE_KEY_MAX);
 export const guestStorageRequestSchema = z.discriminatedUnion('op', [

@@ -6,6 +6,7 @@ import {
   type GuestWorkspaceQuery,
   type GuestWorkspaceSnapshot,
   type GuestWorkspaceSubscription,
+  type GuestProjectIcon,
   type GuestShellsSubscription,
   type GuestShellOutputRequest,
   type GuestShellOutputResult,
@@ -49,6 +50,7 @@ import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes'
 
 type HostBridgeEffects = {
   workspaceRead: (query: GuestWorkspaceQuery) => GuestWorkspaceSnapshot;
+  getProjectIcon: (projectId: string) => Promise<GuestProjectIcon>;
   workspaceSubscribe: (subscription: GuestWorkspaceSubscription) => void;
   workspaceUnsubscribe: (subscriptionId: string) => void;
   shellsSubscribe: (subscription: GuestShellsSubscription) => void;
@@ -264,6 +266,7 @@ export const answerGuestMessage = async (
   try {
   switch (message.type) {
     case 'workspace-read': return okResult(message.id, effects.workspaceRead(message.payload));
+    case 'project-icon': return okResult(message.id, await effects.getProjectIcon(message.payload.projectId));
     case 'workspace-subscribe': effects.workspaceSubscribe(message.payload); return okResult(message.id);
     case 'workspace-unsubscribe': effects.workspaceUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
     case 'shells-subscribe': effects.shellsSubscribe(message.payload); return okResult(message.id);
