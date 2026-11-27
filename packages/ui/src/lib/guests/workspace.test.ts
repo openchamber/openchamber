@@ -11,7 +11,7 @@ import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { applySessionEventToGlobalSessions } from '@/sync/session-event-router';
 import { applySessionLiveWorkEvents, resetSessionLiveWork } from '@/sync/session-live-work';
-import { applyWaitingPageEvent, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
+import { applyWaitingPageEvent, readHostBlockingRequestsSnapshot, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import type { OpenCodeEvent } from '@opencode/client';
 import { translateWireEvent } from '@/lib/opencode/events';
 import { readGuestWorkspace, observeGuestWorkspace } from './workspace';
@@ -233,6 +233,45 @@ describe('extension workspace projection', () => {
     child.setState({ permission: {}, form: { 'b-session': [{ id: 'form', sessionID: 'b-session', title: 'Pick one', fields: [{ key: 'answer', type: 'boolean' }] }] } });
     expect(readB().sessions[0].activity).toBe('waiting-question');
     expect('messages' in readB().sessions[0]).toBe(false);
+  });
+  test('a session already waiting on a host form reports it before any live event', async () => {
+    const child = manager.ensureChild('/b-tree', { bootstrap: false });
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+    expect(readB().sessions[0].activity).toBe('running');
+
+    await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: { 'b-session': { status: 'busy', lastUpdateAt: 1 } },
+      pending: { 'b-session': { permissions: [], forms: [{ id: 'form_1', sessionID: 'b-session', title: 'Pick one' }], pages: [] } },
+      serverTime: 2,
+    }), () => '/b-tree');
+
+    // The child store is filled by live events only, so a page load leaves it empty.
+    expect(child.getState().form['b-session']).toBeUndefined();
+    expect(child.getState().permission['b-session']).toBeUndefined();
+    expect(readB().sessions[0].activity).toBe('waiting-question');
+  });
+  test('a host permission the child store never saw reports waiting-permission', async () => {
+    const child = manager.ensureChild('/b-tree', { bootstrap: false });
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+    await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: { 'b-session': { status: 'busy', lastUpdateAt: 1 } },
+      pending: { 'b-session': { permissions: [{ id: 'permission_1', sessionID: 'b-session', action: 'bash', resources: ['rm *'] }], forms: [], pages: [] } },
+      serverTime: 2,
+    }), () => '/b-tree');
+    expect(child.getState().permission['b-session']).toBeUndefined();
+    expect(readB().sessions[0].activity).toBe('waiting-permission');
+  });
+  test('a session with nothing pending stays running rather than waiting', async () => {
+    const child = manager.ensureChild('/b-tree', { bootstrap: false });
+    applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });
+    await readHostBlockingRequestsSnapshot(async () => ({
+      sessions: { 'b-session': { status: 'busy', lastUpdateAt: 1 } },
+      pending: { 'b-session': { permissions: [], forms: [], pages: [] } },
+      serverTime: 2,
+    }), () => '/b-tree');
+    expect(child.getState().form['b-session']).toBeUndefined();
+    expect(child.getState().permission['b-session']).toBeUndefined();
+    expect(readB().sessions[0].activity).toBe('running');
   });
   test('a turn waiting on an answer page reads as waiting-question until the page settles, and publishes both', async () => {
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'busy' } } });

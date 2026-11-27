@@ -88,14 +88,14 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
   const contextLimit = reading?.state === 'measured'
     ? limitsForAnsweringModel(findSessionModelKey(session), useConfigStore.getState().providers).context
     : 0;
-  const pages = useGlobalBlockingRequestsStore.getState().bySession.get(session.id)?.pages;
+  const blocking = useGlobalBlockingRequestsStore.getState().bySession.get(session.id);
   let activity: GuestSessionRecord['activity'] = 'unknown';
   if (connected) {
     if (status?.type === 'busy') activity = 'running';
     else if (status?.type === 'retry') activity = 'retrying';
     else if (status?.type === 'idle' || (!statusInvalidated && (child?.sessionStatusReady || observed))) activity = 'idle';
-    if (child?.permission[session.id]?.length) activity = 'waiting-permission';
-    else if (child?.form[session.id]?.length || pages?.length) activity = 'waiting-question';
+    if (child?.permission[session.id]?.length || blocking?.permissions.length) activity = 'waiting-permission';
+    else if (child?.form[session.id]?.length || blocking?.forms.length || blocking?.pages.length) activity = 'waiting-question';
   }
   return {
     id: session.id, title: session.title || session.id, projectId, directory,
