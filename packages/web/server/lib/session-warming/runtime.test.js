@@ -21,9 +21,9 @@ const status = (type, sessionID = SESSION) => ({ type: 'session.status', propert
 
 /**
  * A fake OpenCode: `active` is what `/api/session/active` lists (the running
- * sessions), `answer` what a ping gets back.
+ * sessions), `answer` what a ping gets back, `config` the user's OpenCode config.
  */
-const makeRuntime = ({ dataDir = makeDataDir(), answer = () => new Response('{"data":{"text":"OK"}}'), active = {}, model, modelGate } = {}) => {
+const makeRuntime = ({ dataDir = makeDataDir(), answer = () => new Response('{"data":{"text":"OK"}}'), active = {}, model, modelGate, config = {} } = {}) => {
   const events = [];
   const opencode = { active, answer };
   const fetchImpl = vi.fn(async (url) => {
@@ -44,6 +44,7 @@ const makeRuntime = ({ dataDir = makeDataDir(), answer = () => new Response('{"d
     getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic x' }),
     broadcast: (event) => events.push(event),
     fetchImpl,
+    readConfigFiles: () => [config],
   });
   runtimes.push(runtime);
   return { runtime, fetchImpl, events, dataDir, opencode };
@@ -322,8 +323,8 @@ describe('session warming runtime', () => {
   });
 
   describe('ping interval from the cache lifetime', () => {
-    const warmAfterTurn = async (model) => {
-      const made = makeRuntime({ model });
+    const warmAfterTurn = async (model, config) => {
+      const made = makeRuntime({ model, config });
       made.runtime.setEnabled(true);
       made.runtime.processPayload(status('busy'));
       made.runtime.setSessionWarm(SESSION, DIRECTORY, true);
@@ -410,6 +411,18 @@ describe('session warming runtime', () => {
     it('keeps 4 minutes for Claude Agent billed by key, which caches for 5', async () => {
       const { fetchImpl } = await warmAfterTurn({ id: 'opus', providerID: 'claude-agent', cost: [{ input: 15 }] });
       await vi.advanceTimersByTimeAsync(WARMING_INTERVAL_MS);
+      expect(pings(fetchImpl)).toHaveLength(1);
+    });
+
+    it.each(['providers', 'provider'])('keeps the hour for Claude Agent on a subscription when the config adds a price under %s to show spending', async (key) => {
+      const cost = { input: 15, output: 75 };
+      const { fetchImpl } = await warmAfterTurn(
+        { id: 'opus', providerID: 'claude-agent', cost: [cost] },
+        { [key]: { 'claude-agent': { models: { opus: { cost } } } } },
+      );
+      await vi.advanceTimersByTimeAsync(54 * MINUTE - 1);
+      expect(pings(fetchImpl)).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
       expect(pings(fetchImpl)).toHaveLength(1);
     });
   });

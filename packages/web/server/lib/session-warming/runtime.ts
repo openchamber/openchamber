@@ -3,6 +3,9 @@ import path from 'path';
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { waitForPluginList } from '../opencode/location-plugins.js';
+import { getConfigSourcePaths, readConfigFile } from '../opencode/config-files.js';
+import { isRecord, toProviderEntity } from '../opencode/config-v2.js';
+import type { OpenCodeConfigLayer } from '../opencode/config-files.js';
 import type { TranslatedEvent } from '../event-stream/translate-v2.js';
 import type { SessionWarmingSnapshot } from './contracts.js';
 
@@ -15,6 +18,7 @@ export interface SessionWarmingRuntimeOptions {
   now?: () => number;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
+  readConfigFiles?: (directory: string) => OpenCodeConfigLayer[];
 }
 
 interface WarmingEntry {
@@ -84,14 +88,32 @@ const parseCacheTtl = (ttl: string | undefined) => {
   return match && isCacheTtlUnit(unit) ? Number(match[1]) * CACHE_TTL_UNITS[unit] : null;
 };
 
-const cacheLifetimeOf = (model: z.infer<typeof modelListSchema>[number] | null | undefined) => {
+const readOpenCodeConfigFiles = (directory: string) => getConfigSourcePaths(directory).flatMap((filePath) => {
+  try {
+    return [readConfigFile(filePath)];
+  } catch {
+    return [];
+  }
+});
+
+const hasModelCost = (config: OpenCodeConfigLayer, providerID: string, id: string) => ['providers', 'provider'].some((key) => {
+  const section = config[key];
+  return isRecord(section) && toProviderEntity(section[providerID]).models?.[id]?.cost !== undefined;
+});
+
+const cacheLifetimeOf = (model: z.infer<typeof modelListSchema>[number] | null | undefined, configFiles: () => OpenCodeConfigLayer[]) => {
   const configured = parseCacheTtl(model?.settings?.cache?.ttl);
   if (configured) return configured;
-  if (model?.providerID === 'claude-agent' && model.cost.length === 0) return CLAUDE_SUBSCRIPTION_CACHE_MS;
+  if (model?.providerID !== 'claude-agent') return null;
+  const priceConfigured = () => configFiles().some((config) => hasModelCost(config, model.providerID, model.id));
+  if (model.cost.length === 0 || priceConfigured()) return CLAUDE_SUBSCRIPTION_CACHE_MS;
   return null;
 };
 
-type OpenCodeReader = Pick<SessionWarmingRuntimeOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> & { fetchImpl: typeof fetch };
+type OpenCodeReader = Pick<SessionWarmingRuntimeOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> & {
+  fetchImpl: typeof fetch;
+  readConfigFiles?: ((directory: string) => OpenCodeConfigLayer[]) | undefined;
+};
 
 const readOpenCodeJson = async ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders }: OpenCodeReader, route: string, directory: string) => {
   const response = await fetchImpl(buildOpenCodeUrl(route, ''), {
@@ -109,7 +131,7 @@ const readOpenCodeJson = async ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHe
   return unwrapOpenCodeResponse(await response.json());
 };
 
-export const readSessionModel = async (reader: OpenCodeReader, sessionId: string, directory: string) => {
+export const readSessionModel = async ({ readConfigFiles = readOpenCodeConfigFiles, ...reader }: OpenCodeReader, sessionId: string, directory: string) => {
   const session = sessionModelSchema.safeParse(await readOpenCodeJson(reader, `/api/session/${encodeURIComponent(sessionId)}`, directory));
   if (!session.success) return null;
   await waitForPluginList(async () => {
@@ -120,7 +142,7 @@ export const readSessionModel = async (reader: OpenCodeReader, sessionId: string
   const { id, providerID } = session.data.model;
   const model = models.success ? models.data.find((item) => item.id === id && item.providerID === providerID) : null;
   const { context = 0, input = 0 } = model?.limit ?? {};
-  return { id, providerID, family: model?.family ?? null, modelID: model?.modelID ?? null, cacheLifetimeMs: cacheLifetimeOf(model), window: context && input ? Math.min(context, input) : context || input || null };
+  return { id, providerID, family: model?.family ?? null, modelID: model?.modelID ?? null, cacheLifetimeMs: cacheLifetimeOf(model, () => readConfigFiles(directory)), window: context && input ? Math.min(context, input) : context || input || null };
 };
 
 const statusPayloadSchema = z.object({
@@ -144,6 +166,7 @@ export const createSessionWarmingRuntime = ({
   now = Date.now,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
+  readConfigFiles,
 }: SessionWarmingRuntimeOptions) => {
   const filePath = path.join(dataDir, FILE_NAME);
 
@@ -246,7 +269,7 @@ export const createSessionWarmingRuntime = ({
   };
 
   const readPingInterval = async (sessionId: string, directory: string) => {
-    const model = await readSessionModel({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory).catch(() => null);
+    const model = await readSessionModel({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders, readConfigFiles }, sessionId, directory).catch(() => null);
     const lifetime = model?.cacheLifetimeMs;
     return lifetime ? lifetime * CACHE_LIFETIME_SHARE : WARMING_INTERVAL_MS;
   };
