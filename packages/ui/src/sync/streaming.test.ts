@@ -241,4 +241,29 @@ describe("updateStreamingState", () => {
 
     expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_2")
   })
+
+  test("keeps the trailing assistant message streaming while the session retries", () => {
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ], { type: "retry", attempt: 1, message: "provider is down", next: 1 }))
+
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_1")
+  })
+
+  test("incrementally keeps the streaming marker while the session retries", () => {
+    const previous = stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ])
+    updateStreamingState(previous, 10)
+
+    const next = stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ], { type: "retry", attempt: 2, message: "provider is still down", next: 2 })
+    updateChangedStreamingSessions(next, previous, 20)
+
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_1")
+  })
 })

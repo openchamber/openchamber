@@ -391,7 +391,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 <div
                     ref={chatRootRef}
                     data-composer-bound
-                    data-live-tail={sessionStatusForCurrent.type === 'busy' && isFollowingProgrammatically ? 'true' : undefined}
+                    data-live-tail={(sessionStatusForCurrent.type === 'busy' || sessionStatusForCurrent.type === 'retry') && isFollowingProgrammatically ? 'true' : undefined}
                     className="relative flex min-w-0 flex-1 flex-col h-full bg-background"
                 >
                     <ReturnToParentButton

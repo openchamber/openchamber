@@ -61,7 +61,8 @@ export function updateStreamingState(state: State, now = Date.now()) {
   const busySessionIds = new Set<string>()
   for (const [sessionID, status] of Object.entries(state.session_status ?? {})) {
     countSyncPerformance("streamingStatusEntriesVisited")
-    if ((status as SessionStatus).type === "busy") {
+    const type = (status as SessionStatus).type
+    if (type === "busy" || type === "retry") {
       busySessionIds.add(sessionID)
     }
   }
@@ -202,7 +203,8 @@ export function updateChangedStreamingSessions(state: State, previous: State, no
   for (const sessionID of changedSessionIds) {
     countSyncPerformance("streamingSessionCandidatesVisited")
     const previousMessageID = currentStore.streamingMessageIds.get(sessionID)
-    if (state.session_status?.[sessionID]?.type !== "busy") {
+    const statusType = state.session_status?.[sessionID]?.type
+    if (statusType !== "busy" && statusType !== "retry") {
       if (previousMessageID) complete(sessionID, previousMessageID)
       continue
     }
