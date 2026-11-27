@@ -52,6 +52,7 @@ import { themedLogoSvg } from '../appearance/provider-logo-routes.js';
 import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
 import { withGuestUpdate } from './updates.js';
 import { registerGuestUpdateRoutes } from './update-routes.js';
+import type { GuestUpdateErrorResponse } from './update-routes.js';
 import type { GuestGitAccounts } from './clone.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
 import { guestGrantScope, sameCredentialTarget } from './grant-scope.js';
@@ -191,7 +192,6 @@ export const renderOauthCallbackPage = <Message>({ title, message }: { title: st
 </body>
 </html>`;
 
-type GuestUpdateErrorResponse = { error: string; required?: string };
 type GuestInstallErrorResponse = GuestUpdateErrorResponse & { capabilities?: string[] | undefined; id?: string; reason?: string };
 
 const sendInstallResult = (res: Response, result: Awaited<ReturnType<typeof installGuest>>) => {

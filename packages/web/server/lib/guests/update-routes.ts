@@ -12,7 +12,7 @@ const updateCheckBodySchema = z.object({
   force: z.boolean().optional(),
 });
 
-type GuestUpdateErrorResponse = { error: string; required?: string };
+export type GuestUpdateErrorResponse = { error: string; required?: string };
 
 export const registerGuestUpdateRoutes = (app: Application, {
   persistPath,
