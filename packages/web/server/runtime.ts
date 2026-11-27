@@ -1351,7 +1351,7 @@ const prWatchRuntime = createPrWatchRuntime({
   getOpenCodeAuthHeaders,
   broadcastUiEvent: broadcastOpenChamberUiEvent,
   dataDir: OPENCHAMBER_DATA_DIR,
-  readCleanupOnMerge: async () => (await readSettingsFromDiskMigrated())?.mergedWorktreeCleanupEnabled === true,
+  readSettings: () => readSettingsFromDiskMigrated(),
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });

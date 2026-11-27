@@ -27,6 +27,8 @@ const prNode = (number, overrides = {}) => ({
   mergeable: 'MERGEABLE',
   mergeStateStatus: 'CLEAN',
   headRefOid: `sha-${number}`,
+  headRefName: `branch-${number}`,
+  headRepository: { nameWithOwner: 'me/app' },
   baseRefName: 'main',
   commits: {
     nodes: [{
@@ -369,9 +371,12 @@ describe('fetchPrSummaries', () => {
   });
 
   test('maps a merged PR without checks or mergeability', async () => {
-    const octokit = fakeOctokit(new Map([[7, prNode(7, { state: 'MERGED', mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' })]]));
+    const merged = { state: 'MERGED', mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' };
+    const octokit = fakeOctokit(new Map([[7, prNode(7, merged)], [8, prNode(8, { ...merged, headRepository: null })]]));
 
-    const { summaries: [summary] } = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 7 }] });
+    const { summaries: [summary, fromDeletedFork] } = await fetchPrSummaries({
+      octokit, refs: [{ owner: 'acme', repo: 'app', number: 7 }, { owner: 'acme', repo: 'app', number: 8 }],
+    });
 
     expect(summary).toEqual({
       owner: 'acme',
@@ -381,6 +386,8 @@ describe('fetchPrSummaries', () => {
       draft: false,
       title: 'PR 7',
       headSha: 'sha-7',
+      head: 'branch-7',
+      headRepository: 'me/app',
       base: 'main',
       mergeable: null,
       mergeableState: 'unknown',
@@ -389,6 +396,8 @@ describe('fetchPrSummaries', () => {
       autoMergeRequest: null,
       checks: null,
     });
+    expect(fromDeletedFork).toMatchObject({ number: 8, head: 'branch-8' });
+    expect(fromDeletedFork).not.toHaveProperty('headRepository');
   });
 
   test('keeps partial data when some PRs cannot be resolved', async () => {

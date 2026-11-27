@@ -14,9 +14,9 @@ a turn open to wait.
 Wiring: created in `server/index.js` after `../dispatch-results`, handed to the
 control service as `prWatch` (`../openchamber-control/service.js`, actions
 `pr.watch` and `pr.unwatch`, always for the calling session), attached to the
-tracked-items service and its readers when `server-frame/feature-routes-runtime.js`
-creates them, routes registered there, stopped by
-`server-frame/shutdown-runtime.js`.
+tracked-items service, its readers and the source-control binding reader when
+`server-frame/feature-routes-runtime.js` creates them, routes registered there,
+stopped by `server-frame/shutdown-runtime.js`.
 
 ## Invariants
 
@@ -90,9 +90,17 @@ fresh reads here, including unchanged summaries. The watch names the events:
   on GitLab the merge request's user notes.
 
 The first known check, conflict, and activity states establish baselines.
-A merge while "Archive a worktree after its PR is merged"
-(`mergedWorktreeCleanupEnabled`) is on ends the watch without a wake.
-The UI is about to archive that worktree with its sessions.
+A merge ends the watch without a wake when the UI is about to archive the
+session with its worktree: "Archive a worktree after its PR is merged"
+(`mergedWorktreeCleanupEnabled`) is on, and the session's directory is in a
+linked worktree whose main checkout is a project, that is no project itself
+and holds none, with the pull request's head branch checked out, and with the
+repository that branch lives in behind the remote the branch's pull requests
+are read through: the ready primary remote of the project's source-control
+binding, or `origin` when the provider has no binding (the summary's `head`
+and `headRepository`; `worktree.ts`). Every other merge, also one whose
+summary lacks either field or whose binding needs attention or cannot be
+read, wakes the session.
 
 ## Wake
 
@@ -202,6 +210,45 @@ After a wake the agent works: it reads the failure, pushes a fix, answers a
 review. Changes arriving meanwhile would steer into that turn or pile up
 behind it. Ending the watch keeps one message per wait, and the agent says
 when it waits again, with a fresh baseline after its own push or comment.
+
+### Why the session's worktree decides a quiet merge, and not the setting alone
+
+The UI's cleanup (`useMergedWorktreeCleanup`) archives a linked worktree listed
+under a project (`partitionWorktreesByRegisteredProject`) only when the pull
+request of that worktree's own branch merges. Ending the wait on the setting
+alone would also silence a session in a project's own checkout, in a worktree
+on another branch, in a worktree that is a project of its own, or in another
+repository's worktree, and nothing would ever archive it. So the server
+checks the facts the cleanup picks its worktrees by: a linked worktree whose
+main checkout is a project and that is no project itself, the pull request's
+head branch checked out there, and the repository that branch lives in
+behind the remote the cleanup's branch lookup reads pull requests through:
+the binding's ready primary remote for that provider, or `origin` when the
+provider has no binding. A binding that needs attention leaves the lookup no
+remote at all, so its merges wake. The remote
+is matched by path whatever host or SSH alias it names. The branch name alone
+is not enough: a task that opens a pull request in several repositories often
+uses one branch name in all of them, and a contributor's fork, whose remote
+stays after checking out their pull request, can push a branch named like one
+of yours. The remote matters too: the cleanup finds no pull request for a
+branch pushed to any other remote than the primary one.
+
+Where the rule and the cleanup part, the rule wakes, since an extra message
+costs a short turn and a missed one strands the agent. That happens for a
+GitLab merge request from a fork, whose summary has no source project path.
+It happens for a project in a folder of the main checkout, in another
+worktree, or around a bare repository, which the path match misses. It
+happens for a pull request whose head lives in the primary remote's fork
+parent, or that the cleanup ties to a contributor checkout through its
+provenance remote. And it happens for an unbound repository whose pull
+request host is not behind `origin`.
+
+A few sessions still end quietly with no archive. The cleanup holds a worktree
+back while a window shows it or a session there runs, and runs only while a
+desktop or web window is open, which the server cannot see. On GitHub it never
+ties a repository's default branch to a pull request from that same
+repository. And while a second pull request from the same branch is open, it
+follows that one.
 
 ### Why queue removals use a timeline cursor
 
