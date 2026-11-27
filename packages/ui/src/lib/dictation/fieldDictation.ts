@@ -16,6 +16,15 @@ export type FieldRecordingActions = Pick<UseDictationResult,
     'startDictation' | 'confirmDictation' | 'cancelDictation' | 'retryFailedDictation'
     | 'acceptPartialTranscript' | 'discardFailedDictation' | 'subscribeLevel'>;
 
+export interface DictationStatusActions {
+    finish: () => void;
+    cancel: () => void;
+    retry: () => void;
+    discard: () => void;
+    acceptPartial: () => void;
+    subscribeLevel: FieldRecordingActions['subscribeLevel'];
+}
+
 export interface FieldRecording extends FieldRecordingTarget {
     id: number;
     view: FieldRecordingView;

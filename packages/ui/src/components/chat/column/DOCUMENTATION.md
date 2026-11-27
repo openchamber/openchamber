@@ -12,7 +12,8 @@ The column binds one shown session to its transcript, composer, navigation, load
 - A pinned session demands bootstrap for its own directory because app bootstrap covers only the current directory and globally selected session. History retention follows the actually rendered session through the deferred switch until commit.
 - Automatic draft opening reads the live selection and rechecks the store inside the effect because routing or effect replay can select a session after render. The automatic flag preserves the persisted last-session pointer used by cold-launch restore.
 - Archived space sessions are read-only, with execution also refused by the server. A new draft can still inherit the archive directory before sending, so archive read-only state requires a session ID.
-- Read-only chats keep permission and form docks answerable even though they do not mount `ChatInput`. Parent and child views share those requests, so answering in either clears both; a running subagent also remains stoppable.
+- Read-only chats keep permission and form docks answerable even though they do not show `ChatInput`. Parent and child views share those requests, so answering in either clears both; a running subagent also remains stoppable.
+- A dictation started in the column's composer survives opening a session that cannot be prompted. While the recording runs, transcribes or waits after a failure, `ComposerSlot` keeps `ChatInput` mounted and hidden, and the read-only row shows the recording with the same controls a panel field shows (`DictationStatusControls`). Finishing there acts like the overlay's check: the transcript goes to the draft the recording started in. While hidden, Enter and the dictation shortcut confirm as insert even with auto-send on, because the session on screen may be the recording's own session that just became read-only (an archived space, a removed folder). The composer is unmounted once the recording ends.
 - Prompt ownership falls back to the global session record when the selected directory's live store has no record. Cross-worktree workers can read their transcript through the parent's directory; they stay read-only until Take over removes their operator-child metadata, regardless of the subagent prompting setting.
 - Blocking requests cover the current session and descendant subagents. Unrelated sessions in the directory cannot block this column.
 - Once the directory status snapshot arrives, an absent session status means idle because stopping OpenCode can leave an incomplete persisted turn. Before authoritative status arrives, the incomplete-turn fallback uses the last conversation message because synthetic, skill, shell, and switch records can follow it.
@@ -132,3 +133,7 @@ Hydration can wait minutes for OpenCode startup. Loading rows use the shared 1 s
 ### Why keep a minimum scroller width and not allow it to collapse to zero
 
 The scroller keeps a 1 px minimum width because zero-width rows lose scrollable height and their saved scroll position.
+
+### Why a read-only chat keeps a recording composer mounted and not move the recording to the app root
+
+The recording, its keys, its failure salvage and the transcript's routing to its origin draft all live in the composer's `ComposerDictation`. Moving them to an app-root host like plain fields have would rebuild that machinery for one case. Keeping the composer mounted, hidden, only while a recording is active leaves every path the same as a switch between two editable sessions.
