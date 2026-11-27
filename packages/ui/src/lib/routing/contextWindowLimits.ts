@@ -1,3 +1,5 @@
+import { findLatestContextFill } from '@/stores/utils/tokenUtils';
+
 export type ContextWindowLimits = {
   context: number;
   output: number;
@@ -5,9 +7,30 @@ export type ContextWindowLimits = {
 
 const NO_CONTEXT_WINDOW_LIMITS: ContextWindowLimits = { context: 0, output: 0 };
 
-type AnsweringMessage = { role?: string; providerID?: string; modelID?: string };
+type AnsweringMessage = {
+  role?: string;
+  providerID?: string;
+  modelID?: string;
+  tokens?: {
+    total?: number;
+    input?: number;
+    output?: number;
+    reasoning?: number;
+    cache?: { read?: number; write?: number };
+  };
+  status?: string;
+  error?: unknown;
+};
 
 export const findAnsweringModelKey = (messages: readonly AnsweringMessage[]): string | null => {
+  const fill = findLatestContextFill(messages);
+  if (fill?.state === 'measured') {
+    const fillMessage = messages[fill.index];
+    if (fillMessage?.providerID && fillMessage?.modelID) {
+      return `${fillMessage.providerID}/${fillMessage.modelID}`;
+    }
+  }
+
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message?.role !== 'assistant') continue;
@@ -38,4 +61,22 @@ export const limitsForAnsweringModel = (
   const modelId = answeringModelKey.slice(separator + 1);
   const model = providers.find((provider) => provider.id === providerId)?.models.find((entry) => entry.id === modelId);
   return { context: model?.limit?.context ?? 0, output: model?.limit?.output ?? 0 };
+};
+
+export const resolveContextLimits = ({
+  answeringModelKey,
+  sessionModelKey,
+  fallbackLimit,
+  providers,
+}: {
+  answeringModelKey: string | null;
+  sessionModelKey: string | null;
+  fallbackLimit?: { context?: number; output?: number };
+  providers: readonly ProviderLike[];
+}): ContextWindowLimits => {
+  const answering = limitsForAnsweringModel(answeringModelKey, providers);
+  if (answering.context > 0) return answering;
+  const onRecord = limitsForAnsweringModel(sessionModelKey, providers);
+  if (onRecord.context > 0) return onRecord;
+  return { context: fallbackLimit?.context ?? 0, output: fallbackLimit?.output ?? 0 };
 };

@@ -3,7 +3,7 @@ import React from 'react';
 import {
   findAnsweringModelKey,
   findSessionModelKey,
-  limitsForAnsweringModel,
+  resolveContextLimits,
   type ContextWindowLimits,
 } from '@/lib/routing/contextWindowLimits';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -29,12 +29,12 @@ export const useContextWindowLimits = (sessionId: string | null, directory?: str
   );
 
   return React.useMemo(() => {
-    const onRecord = limitsForAnsweringModel(sessionModelKey, providers);
-    if (onRecord.context > 0) return onRecord;
-    const answering = limitsForAnsweringModel(answeringModelKey, providers);
-    if (answering.context > 0) return answering;
-    const limit = getCurrentModel()?.limit;
-    return { context: limit?.context ?? 0, output: limit?.output ?? 0 };
+    return resolveContextLimits({
+      answeringModelKey,
+      sessionModelKey,
+      fallbackLimit: getCurrentModel()?.limit,
+      providers,
+    });
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the getter's output tracks the selected model ids
-  }, [sessionModelKey, answeringModelKey, currentProviderId, currentModelId, getCurrentModel, providers]);
+  }, [answeringModelKey, sessionModelKey, currentProviderId, currentModelId, getCurrentModel, providers]);
 };
