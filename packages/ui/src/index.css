@@ -1204,10 +1204,12 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* A UI block's bar grows from its start once, when it first appears. */
+/* A UI block's bar grows from its start once, when it first appears. The fill
+   is `backwards`: `both` keeps the finished animation attached, and Chromium
+   then keeps a composited layer per bar (see .oc-md-block-enter). */
 .oc-bar-grow {
   transform-origin: left center;
-  animation: oc-bar-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: oc-bar-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
 }
 
 [dir="rtl"] .oc-bar-grow {
@@ -2520,9 +2522,11 @@ diffs-container {
 }
 
 /* A block committed mid-stream fades in where it stands. Text never moves on
-   arrival: a rise made the reply look like it slid up into place. Opacity is
-   compositor-only, so short replies pay nothing for it. Blocks committed in
-   the same tick cascade via --oc-md-enter-delay set inline by the renderer. */
+   arrival: a rise made the reply look like it slid up into place. Blocks
+   committed in the same tick cascade via --oc-md-enter-delay set inline by the
+   renderer. The fill is `backwards`, which holds opacity 0 through the delay:
+   `both` keeps the finished animation attached, and Chromium then keeps a
+   composited layer for every block of the reply for as long as it is mounted. */
 @keyframes oc-md-block-enter {
   from {
     opacity: 0;
@@ -2533,7 +2537,7 @@ diffs-container {
 }
 
 .oc-md-block-enter {
-  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: oc-md-block-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
   animation-delay: var(--oc-md-enter-delay, 0ms);
 }
 
