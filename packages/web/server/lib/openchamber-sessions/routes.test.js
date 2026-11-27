@@ -5,6 +5,8 @@ import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSessionKnowledgeRuntime, KNOWLEDGE_ENTRY_KEYS } from '../session-knowledge/runtime.js';
+import { findInstalledGuest } from '../guests/catalog.js';
+import { extensionsPersistPath, writeExtensionPaths } from '../guests/persist.js';
 
 const createWorktreeMock = vi.fn(async () => ({
   head: 'abc123',
@@ -139,6 +141,7 @@ vi.mock('../git/index.js', () => ({
   listStashes: vi.fn(),
   validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
   resolveWorktreeTopLevel: vi.fn(async (directory) => ({ root: directory, prefix: '' })),
+  listWorktreeArchives: vi.fn(async () => []),
 }));
 
 const createMemorySessionMetadataStore = () => {
@@ -641,6 +644,142 @@ describe('openchamber session routes', () => {
         .expect(200, { metadata: {} });
 
       expect(broadcastGlobalUiEvent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('extension session links', () => {
+    const makeExtensionLinksFixture = async (run) => {
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-extension-links-'));
+      try {
+        const guests = ['board-one', 'board-two'];
+        const roots = guests.map((id) => {
+          const root = path.join(dataDir, id);
+          fs.mkdirSync(root);
+          fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
+            name: id, version: '1.0.0',
+            openchamber: { apiVersion: 1, id, name: id, icon: 'window', contributes: { panel: { entry: 'index.html' } } },
+          }));
+          fs.writeFileSync(path.join(root, 'index.html'), '<!doctype html><title>Board</title>');
+          return root;
+        });
+        const persist = extensionsPersistPath(dataDir);
+        await writeExtensionPaths(roots, persist);
+        const extensions = await Promise.all(guests.map(async (id) => {
+          const guest = await findInstalledGuest(id, persist);
+          return { id, storageId: guest?.storageId };
+        }));
+        const records = new Map();
+        const openCode = {
+          read: async (id) => records.get(id) ?? null,
+          write: async (id, metadata) => { records.set(id, JSON.parse(JSON.stringify(metadata))); },
+        };
+        const makeApp = (overrides = {}) => createApp({
+          ...overrides,
+          dataDir,
+          sessionMetadataStore: createSessionMetadataStore({ dataDir, openCode }),
+          readSettingsFromDiskMigrated: async () => ({ projects: [
+            { id: 'outer', path: '/repo/app' },
+            { id: 'nested', path: '/repo/app/nested' },
+          ] }),
+        }).app;
+        await run({ extensions, records, makeApp });
+      } finally {
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    };
+
+    const entry = {
+      id: 'guest:board-two:TASK-1', providerId: 'board-two', identifier: 'TASK-1',
+      kind: 'guest', title: 'Task', url: 'https://board.example/tasks/1', linkedAt: 1,
+    };
+    const endpoint = (id) => `/api/openchamber/sessions/${id}/links`;
+
+    it('limits explicit targets to the exact project, including its archived sessions and worktrees', async () => {
+      await makeExtensionLinksFixture(async ({ extensions: [owner], records, makeApp }) => {
+        records.set('ses_archived', {});
+        records.set('ses_nested', {});
+        records.set('ses_worktree', {});
+        const locations = {
+          ses_nested: '/repo/app/nested',
+          ses_worktree: '/repo/worktrees/side-task',
+        };
+        sessionGetMock.mockImplementation(async ({ sessionID }) => ({
+          id: sessionID, time: { archived: 10 },
+          location: { directory: locations[sessionID] ?? '/repo/app' },
+        }));
+        const app = makeApp();
+        const scope = { ...owner, frameDirectory: '/repo/app' };
+        await request(app).post(endpoint('ses_archived')).send({ operation: 'link', extension: scope, entry }).expect(200);
+        await request(app).post(endpoint('ses_nested')).send({ operation: 'link', extension: scope, entry }).expect(404);
+        await request(app).post(endpoint('ses_worktree')).send({ operation: 'link', extension: scope, entry }).expect(200);
+        await request(app).post(endpoint('ses_worktree')).send({ operation: 'unlink', extension: scope, url: entry.url }).expect(200);
+        await request(app).post(endpoint('ses_archived')).send({
+          operation: 'unlink', extension: { ...scope, frameDirectory: '/repo/app/nested' }, url: entry.url,
+        }).expect(404);
+        expect(records.get('ses_nested')).toEqual({});
+        expect(records.get('ses_archived').openchamber.linked_issues).toMatchObject([{ providerId: 'board-one' }]);
+      });
+    });
+
+    it('finds the project of an archived session whose worktree checkout is gone', async () => {
+      await makeExtensionLinksFixture(async ({ extensions: [owner], records, makeApp }) => {
+        records.set('ses_gone', {});
+        records.set('ses_gone_nested', {});
+        const locations = { ses_gone: '/repo/worktrees/gone', ses_gone_nested: '/repo/worktrees/gone/nested' };
+        sessionGetMock.mockImplementation(async ({ sessionID }) => ({
+          id: sessionID, time: { archived: 10 }, location: { directory: locations[sessionID] },
+        }));
+        const app = makeApp({
+          validateDirectoryPath: async (directory) => (directory.startsWith('/repo/worktrees/gone')
+            ? { ok: false, error: 'Directory not found' }
+            : { ok: true, directory }),
+          listWorktreeArchives: async () => [{ path: '/repo/worktrees/gone', sessionIds: ['ses_gone', 'ses_gone_nested'] }],
+        });
+        const scope = { ...owner, frameDirectory: '/repo/app' };
+        await request(app).post(endpoint('ses_gone')).send({ operation: 'link', extension: scope, entry }).expect(200);
+        await request(app).post(endpoint('ses_gone_nested')).send({ operation: 'link', extension: scope, entry }).expect(404);
+        await request(app).post(endpoint('ses_gone')).send({ operation: 'unlink', extension: scope, url: entry.url }).expect(200);
+        expect(records.get('ses_gone').openchamber.linked_issues).toEqual([]);
+        expect(records.get('ses_gone_nested')).toEqual({});
+      });
+    });
+
+    it('keeps the recorded owner across store recreation without letting another extension claim a duplicate', async () => {
+      await makeExtensionLinksFixture(async ({ extensions: [owner, other], records, makeApp }) => {
+        records.set('ses_a', {});
+        const add = (app, extension, added) => request(app).post(endpoint('ses_a')).send({ operation: 'link', extension, entry: added });
+        const remove = (app, extension) => request(app).post(endpoint('ses_a')).send({ operation: 'unlink', extension, url: entry.url });
+        await add(makeApp(), owner, entry).expect(200);
+        const app = makeApp();
+        await add(app, other, { ...entry, title: 'Changed' }).expect(200);
+        await remove(app, other).expect(404);
+        expect(records.get('ses_a').openchamber.linked_issues).toMatchObject([{ title: 'Task', providerId: 'board-one' }]);
+        await remove(app, owner).expect(200);
+        expect(records.get('ses_a').openchamber.linked_issues).toEqual([]);
+      });
+    });
+
+    it('will not remove a user replacement even after the extension re-links it', async () => {
+      await makeExtensionLinksFixture(async ({ extensions: [owner], records, makeApp }) => {
+        records.set('ses_a', {});
+        const app = makeApp();
+        const add = { operation: 'link', extension: owner, entry };
+        const remove = { operation: 'unlink', extension: owner, url: entry.url };
+        await request(app).post(endpoint('ses_a')).send(add).expect(200);
+        const [owned] = records.get('ses_a').openchamber.linked_issues;
+        // Both the ordinary links operation and generic metadata edits may receive
+        // a modified copy of the persisted entry, which must not keep its owner.
+        await request(app).post('/api/openchamber/sessions/ses_a/metadata').send({
+          patch: { openchamber: { linked_issues: [{ ...owned, title: 'User edit' }] } },
+        }).expect(200);
+        await request(app).post(endpoint('ses_a')).send(remove).expect(404);
+        await request(app).post(endpoint('ses_a')).send({ entries: [owned], linked: false }).expect(200);
+        await request(app).post(endpoint('ses_a')).send(add).expect(200);
+        await request(app).post(endpoint('ses_a')).send({ entries: [{ ...owned, title: 'User replacement' }], linked: true }).expect(200);
+        await request(app).post(endpoint('ses_a')).send(add).expect(200);
+        await request(app).post(endpoint('ses_a')).send(remove).expect(404);
+        expect(records.get('ses_a').openchamber.linked_issues).toMatchObject([{ title: 'User replacement' }]);
+      });
     });
   });
 

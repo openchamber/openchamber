@@ -41,7 +41,8 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   attach: overrides.attach ?? (() => {}),
   startSession: overrides.startSession ?? (async () => ({ sessionId: 'ses-1', sent: 'skipped' })),
   prompt: overrides.prompt ?? (async () => ({ ok: true, result: { sent: 'skipped' } })),
-  sessionLink: overrides.sessionLink ?? (async () => ({ ok: true })),
+  sessionLink: overrides.sessionLink ?? (async () => {}),
+  sessionUnlink: overrides.sessionUnlink ?? (async () => {}),
   close: overrides.close ?? (() => {}),
   oauthStart: overrides.oauthStart ?? (async () => true),
   oauthDisconnect: overrides.oauthDisconnect ?? (async () => true),
@@ -370,7 +371,6 @@ describe('answerGuestMessage', () => {
     }, effects({
       sessionLink: async (issue) => {
         seen.push(issue.id);
-        return { ok: true };
       },
     }));
     expect(seen).toEqual(['!12']);
@@ -388,7 +388,7 @@ describe('answerGuestMessage', () => {
         url: 'https://gitlab.com/acme/app/-/merge_requests/12',
       },
     }, effects({
-      sessionLink: async () => ({ ok: false, code: 'NO_SESSION', message: 'No open session.' }),
+      sessionLink: async () => { throw new HostRequestError('NO_SESSION', 'No open session.'); },
     }));
     expect(missing).toEqual({
       channel: OPENCHAMBER_SDK_CHANNEL,

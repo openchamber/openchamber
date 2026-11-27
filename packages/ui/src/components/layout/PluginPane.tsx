@@ -78,7 +78,7 @@ import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { trackerGuestConnection } from '@/lib/guests/tracker-connection';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useTrackerAuthEntry, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
-import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
+import { guestSessionLinkEffects, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
 import { useGuestsStore } from '@/lib/guests/store';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
 import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
@@ -244,6 +244,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       && (surface === 'panel' || surface === 'page' || surface === 'status')) features.popovers = true;
     if (!headless) features.lateGenerateResults = true;
     if (!headless && canCaptureGuestMicrophone()) features.microphone = true;
+    if (!isVSCodeRuntime()) features.sessionLinks = true;
     return {
     theme: {
       mode: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
@@ -749,6 +750,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
             return { ok: false, code: 'NOT_GRANTED', message: NOT_GRANTED_MESSAGE };
           }
           const started = await startGuestSession({
+            extension: activeGuest,
             request,
             directory: directoryRef.current || null,
             t: translateRef.current,
@@ -778,12 +780,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           t: translateRef.current,
           });
         },
-        sessionLink: (issue) => linkGuestSession({
-          request: issue,
-          sessionId: sessionIdRef.current,
-          directory: directoryRef.current || null,
-          t: translateRef.current,
-        }),
+        ...guestSessionLinkEffects({ extension: activeGuest, sessionId: sessionIdRef.current, directory: directoryRef.current || null, t: translateRef.current }),
         close: () => {
           if (childPopover || popover) {
             const context = childPopover?.context ?? popover;

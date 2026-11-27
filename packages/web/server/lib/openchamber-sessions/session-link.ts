@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
-import { buildLinkedIssuesPatch } from './session-linked-issues.js';
+import { buildLinkedIssuesPatch, withoutExtensionLinkOwner } from './session-linked-issues.js';
 import type { TrackerRegistry, TrackerImplementation } from '../trackers/tracker-contract.js';
 import type { LinkedIssuesPatch } from './session-linked-issues.js';
 import type { JsonValue } from '@opencode/client';
@@ -140,7 +140,7 @@ export const buildLinkPatch = (metadata: SessionMetadata | JsonValue | undefined
   const refreshed = { ...existing, ...entry, linkedAt: existing.linkedAt ?? entry.linkedAt };
   if (SNAPSHOT_KEYS.every((key) => existing[key] === refreshed[key])) return null;
   const next = [...current];
-  next[index] = refreshed;
+  next[index] = withoutExtensionLinkOwner(refreshed);
   return { openchamber: { linked_issues: next } };
 };
 

@@ -2,7 +2,7 @@
 import type { JsonValue, Metadata } from "@/lib/opencode/model"
 import { z } from 'zod';
 
-import { toStoredLinkedIssue, type LinkedIssue } from '@/lib/linkedIssues';
+import { toStoredLinkedIssue, type LinkedGuestIssue, type LinkedIssue } from '@/lib/linkedIssues';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const archiveResponseSchema = z.object({
@@ -160,12 +160,34 @@ export async function requestSessionMetadataUpdate(
 
 export type SessionLinksUpdateResult =
   | { outcome: 'updated'; metadata: Metadata }
-  | { outcome: 'unavailable'; reason: string };
+  | { outcome: 'unavailable'; reason: string; status?: number };
 
-export async function requestSessionLinksUpdate(
+type ManualLinksOperation = { entries: ReturnType<typeof toStoredLinkedIssue>[]; linked: boolean };
+export type ExtensionLinksOperation = {
+  extension: { id: string; storageId: string; frameDirectory?: string };
+  directory?: string;
+} & ({ operation: 'link'; entry: LinkedGuestIssue } | { operation: 'unlink'; url: string });
+
+export function requestSessionLinksUpdate(
   sessionID: string,
   entries: readonly LinkedIssue[],
   linked: boolean,
+  directory?: string | null,
+): Promise<SessionLinksUpdateResult> {
+  return sendSessionLinksUpdate(sessionID, { entries: entries.map(toStoredLinkedIssue), linked }, directory);
+}
+
+export function requestExtensionSessionLinksUpdate(
+  sessionID: string,
+  body: ExtensionLinksOperation,
+  directory: string,
+): Promise<SessionLinksUpdateResult> {
+  return sendSessionLinksUpdate(sessionID, body, directory);
+}
+
+async function sendSessionLinksUpdate(
+  sessionID: string,
+  body: ManualLinksOperation | ExtensionLinksOperation,
   directory?: string | null,
 ): Promise<SessionLinksUpdateResult> {
   let response: Response;
@@ -173,7 +195,7 @@ export async function requestSessionLinksUpdate(
     response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionID)}/links`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ entries: entries.map(toStoredLinkedIssue), linked }),
+      body: JSON.stringify(body),
       directory,
     });
   } catch (error) {
@@ -181,17 +203,17 @@ export async function requestSessionLinksUpdate(
   }
 
   if (!response.ok) {
-    return { outcome: 'unavailable', reason: `links request failed with ${response.status}` };
+    return { outcome: 'unavailable', reason: `links request failed with ${response.status}`, status: response.status };
   }
 
-  let body: unknown;
+  let received: unknown;
   try {
-    body = await response.json();
+    received = await response.json();
   } catch (error) {
     return { outcome: 'unavailable', reason: error instanceof Error ? error.message : 'links response was not JSON' };
   }
 
-  const parsed = metadataResponseSchema.safeParse(body);
+  const parsed = metadataResponseSchema.safeParse(received);
   if (!parsed.success) {
     return { outcome: 'unavailable', reason: `malformed links response: ${parsed.error.issues[0]?.message ?? 'unknown shape'}` };
   }

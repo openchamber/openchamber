@@ -211,6 +211,7 @@ const hostResultPayloadSchema = z.union([
   microphoneOpenResultPayloadSchema,
 ]);
 
+const linkTargetSchema = z.string().min(1).max(1024).optional();
 const attachPayloadSchema = z.object({
   providerId: z.string().trim().regex(ATTACH_PROVIDER_ID),
   id: z.string().trim().min(1).max(GUEST_ATTACH_ID_MAX),
@@ -318,6 +319,7 @@ const readyPayloadSchema = z.object({
     popovers: z.literal(true).optional(),
     lateGenerateResults: z.literal(true).optional(),
     microphone: z.literal(true).optional(),
+    sessionLinks: z.literal(true).optional(),
   }).optional(),
   device: deviceContextSchema.optional(),
 });
@@ -625,8 +627,9 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     ...envelope,
     type: z.literal('session-link'),
     id: z.string().min(1),
-    payload: attachPayloadSchema,
+    payload: attachPayloadSchema.extend({ sessionId: linkTargetSchema }),
   }),
+  z.object({ ...envelope, type: z.literal('session-unlink'), id: z.string().min(1), payload: z.object({ url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX), sessionId: linkTargetSchema }) }),
   z.object({
     ...envelope,
     type: z.literal('close'),

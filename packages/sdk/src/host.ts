@@ -5,6 +5,7 @@ import { isGuestStatusControls } from './status-controls.ts';
 import type { GuestBlockCall, JsonValue } from './contract.ts';
 import { isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest } from './popover.ts';
 import { guestNavigationCalls, type GuestNavigationClient } from './navigation.ts';
+import { guestSessionLinkCalls, type GuestSessionLinkClient } from './session-links.ts';
 import {
   GUEST_FILE_EDITOR_CONTENT_MAX,
   GUEST_FILE_EDITOR_VERSION_MAX,
@@ -144,7 +145,6 @@ export type HostClient = {
   attach: (request: AttachIssueRequest) => Promise<void>;
   startSession: (request: StartSessionRequest) => Promise<StartSessionResult>;
   prompt: (request: PromptRequest) => Promise<PromptResult>;
-  sessionLink: (request: AttachIssueRequest) => Promise<void>;
   close: () => Promise<void>;
   oauthStart: () => Promise<void>;
   oauthDisconnect: () => Promise<void>;
@@ -167,7 +167,7 @@ export type HostClient = {
   requestFileSave: () => void;
   reportFileUnsupported: () => void;
   dispose: () => void;
-} & GuestNavigationClient;
+} & GuestNavigationClient & GuestSessionLinkClient;
 
 // external: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/instanceof#instanceof_and_multiple_realms Event constructors belong to their realm; non-browser runtimes may have none.
 const isKeyEvent = (event: Event): event is KeyboardEvent => 'key' in event && 'metaKey' in event && 'ctrlKey' in event;
@@ -995,13 +995,8 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       }
       return result;
     }),
-    sessionLink: (payload) => request({
-      channel: OPENCHAMBER_SDK_CHANNEL,
-      v: OPENCHAMBER_SDK_API_VERSION,
-      type: 'session-link',
-      id: nextId(ids),
-      payload: clampAttachRequest(payload),
-    }),
+    ...guestSessionLinkCalls(request, () => nextId(ids), (code, message) => Promise.reject(new HostRequestError(code, message)),
+      () => lastReady?.features?.sessionLinks === true),
     close: () => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,

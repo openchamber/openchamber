@@ -441,16 +441,18 @@ test('composer and guest sends retain the same unsent model after selecting a pi
 });
 const setup = () => {
   const create = spyOn(opencodeClient, 'createSession').mockImplementation(async (_input, directory) => ({ ...created, directory: directory ?? created.directory }));
-  spyOn(sessionActions, 'setLinkedIssue').mockResolvedValue(created);
+  spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{"metadata":{}}', { status: 200 }));
   useProjectsStore.setState({ hasServerSnapshot: true, projects: [{ id: 'a', path: '/project-a', addedAt: 1 }, { id: 'b', path: '/project-b', addedAt: 1 }], activeProjectId: 'a' });
   useSessionUIStore.setState({ currentSessionId: 'existing-chat', currentSessionDirectory: '/project-a' });
   useUIStore.getState().setOpenGuestPage('board');
   return create;
 };
 
+const extension = { id: 'board', storageId: 'board-installation' };
+
 test('a guest session in another project registers without changing the open page or chat', async () => {
   const create = setup();
-  const result = await startGuestSession({ directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
+  const result = await startGuestSession({ extension, directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
     request: { providerId: 'board', id: 'TASK-1', title: 'Task', url: 'https://example.com/task', projectId: 'b' } });
   expect(create.mock.calls[0]?.[1]).toBe('/project-b');
   expect(result).toMatchObject({ sessionId: created.id, directory: '/project-b', sent: 'skipped', linked: true });
@@ -469,7 +471,7 @@ test('named worktrees forward the base ref through existing creation and keep bo
   spyOn(sharedTrust, 'resolveWorktreeSetupCommands').mockResolvedValue([]);
   spyOn(projectConfig, 'getWorktreeSetupWaitEnabled').mockResolvedValue(true);
   spyOn(worktreeBootstrap, 'waitForWorktreeBootstrap').mockRejectedValue(new Error('Setup failed'));
-  const result = await startGuestSession({ directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
+  const result = await startGuestSession({ extension, directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
     request: { providerId: 'board', id: 'TASK-2', title: 'Task', url: 'https://example.com/task', projectId: 'b', worktree: { kind: 'new', name: 'fix-login', baseBranch: 'release' } } });
   expect(createTree.mock.calls[0]?.[0]).toMatchObject({ id: 'b', path: '/project-b' });
   expect(createTree.mock.calls[0]?.[1]).toMatchObject({ branchName: 'fix-login', worktreeName: 'fix-login', startRef: 'release' });
@@ -485,7 +487,7 @@ test('existing worktrees create sessions in their directory without creating or 
   }]]]) });
   const tree = spyOn(worktreeCreate, 'createWorktreeWithDefaults');
   spyOn(projectConfig, 'getWorktreeSetupWaitEnabled').mockResolvedValue(false);
-  const result = await startGuestSession({ directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
+  const result = await startGuestSession({ extension, directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
     request: { providerId: 'board', id: 'TASK-3', title: 'Task', url: 'https://example.com/task', projectId: 'b', worktree: { kind: 'existing', directory: '/existing' } } });
   expect(create.mock.calls[0]?.[1]).toBe('/existing');
   expect(tree.mock.calls.length).toBe(0);

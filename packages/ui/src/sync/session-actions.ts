@@ -234,7 +234,7 @@ function updateLiveSession(session: Session, directory?: string): boolean {
   return false
 }
 
-function mirrorSessionIntoLiveStores(session: Session, directory?: string): void {
+export function mirrorSessionIntoLiveStores(session: Session, directory?: string): void {
   if (directory && updateLiveSession(session, directory)) {
     return
   }
@@ -724,7 +724,7 @@ function getGlobalSessionSnapshot(sessionId: string): Session | null {
   return [...global.activeSessions, ...global.archivedSessions].find((session) => session.id === sessionId) ?? null
 }
 
-function findLiveSession(sessionId: string): Session | null {
+export function findLiveSession(sessionId: string): Session | null {
   if (!_childStores) return null
   for (const store of _childStores.children.values()) {
     const session = store.getState().session.find((item) => item.id === sessionId)

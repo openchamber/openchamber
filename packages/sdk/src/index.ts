@@ -402,6 +402,7 @@ export {
 export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide } from './popover.ts';
 export { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX, isGuestCommitSha } from './navigation.ts';
 export type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
+export type { GuestSessionLinkMessage, GuestSessionUnlinkMessage, SessionLinkRequest, SessionUnlinkRequest } from './session-links.ts';
 export {
   clampAttachRequest,
   clampBadgeCount,
@@ -522,7 +523,6 @@ export type {
   GuestRequestMessage,
   GuestRequestMethod,
   GuestPromptMessage,
-  GuestSessionLinkMessage,
   GuestStartSessionMessage,
   GuestRequestResult,
   GuestSettings,

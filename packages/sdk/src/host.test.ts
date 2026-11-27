@@ -725,24 +725,33 @@ describe('connectHost', () => {
     host.dispose();
   });
 
-  test('posts prompt and session-link', async () => {
+  test('posts prompt and session link operations', async () => {
     const parent = createFrame();
     const guest = createFrame();
     guest.parent = parent.parent;
     const host = connectHost({ target: guest, acceptSource: () => true });
+    const target = { url: 'https://gitlab.com/acme/app/-/merge_requests/12', sessionId: 'ses-target' };
+    await expect(host.sessionUnlink(target)).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    await expect(host.sessionLink({ providerId: 'gitlab', id: '!12', title: 'Fix login', ...target })).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    guest.dispatch(new MessageEvent('message', { data: { ...ready, payload: { ...ready.payload, features: { sessionLinks: true } } } }));
     const prompt = host.prompt({ text: 'Fix the login', send: true });
     const link = host.sessionLink({
       providerId: 'gitlab',
       id: '!12',
       title: 'Fix login',
       url: 'https://gitlab.com/acme/app/-/merge_requests/12',
+      sessionId: 'ses-target',
     });
+    const unlink = host.sessionUnlink({ url: 'https://gitlab.com/acme/app/-/merge_requests/12', sessionId: 'ses-target' });
     const promptRequest = parent.posted[1];
     const linkRequest = parent.posted[2];
-    if (promptRequest?.type !== 'prompt' || linkRequest?.type !== 'session-link') {
-      throw new Error('expected prompt and session-link');
+    const unlinkRequest = parent.posted[3];
+    if (promptRequest?.type !== 'prompt' || linkRequest?.type !== 'session-link' || unlinkRequest?.type !== 'session-unlink') {
+      throw new Error('expected prompt, session-link, and session-unlink');
     }
     expect(promptRequest.payload).toEqual({ text: 'Fix the login', send: true });
+    expect(linkRequest.payload.sessionId).toBe('ses-target');
+    expect(unlinkRequest.payload).toEqual({ url: linkRequest.payload.url, sessionId: 'ses-target' });
     guest.dispatch(new MessageEvent('message', {
       data: {
         channel: OPENCHAMBER_SDK_CHANNEL,
@@ -756,8 +765,12 @@ describe('connectHost', () => {
     guest.dispatch(new MessageEvent('message', {
       data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: linkRequest.id, ok: true },
     }));
+    guest.dispatch(new MessageEvent('message', {
+      data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: unlinkRequest.id, ok: false, code: 'NOT_FOUND', error: 'No owned link' },
+    }));
     expect(await prompt).toEqual({ sent: 'sent' });
     await link;
+    await expect(unlink).rejects.toMatchObject({ code: 'NOT_FOUND' });
     host.dispose();
   });
 

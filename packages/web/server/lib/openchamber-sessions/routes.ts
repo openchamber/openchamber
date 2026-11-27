@@ -10,6 +10,7 @@ import {
   getPathsWithoutChanges as getPathsWithoutChangesDefault,
   getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
   listStashes as listStashesDefault,
+  listWorktreeArchives as listWorktreeArchivesDefault,
   removeWorktree as removeWorktreeDefault,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel as resolveWorktreeTopLevelDefault,
@@ -31,7 +32,7 @@ import { createArchiveStore } from './archive-store.js';
 import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
 import { applyForkInheritance, listForkMessages } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
-import { createSessionMetadataStore, createOpenCodeSessionMetadata, type SessionMetadata, type MetadataDecider } from './session-metadata-store.js';
+import { createSessionMetadataStore, createOpenCodeSessionMetadata, isSessionNotFound, type SessionMetadata, type MetadataDecider } from './session-metadata-store.js';
 import { compareAndSetSessionMetadata, registerConditionalMetadataRoute, setSessionMetadata } from './session-metadata-route.js';
 import { createSession } from './create-session.js';
 import { mayBeReloading, readCatalogListing } from './catalog-reload.js';
@@ -40,6 +41,8 @@ import type { ModelSelection } from './catalog-models.js';
 import { fetchSelectionInputs } from './selection-inputs.js';
 import { EMPTY_SESSION_AUTO_ERROR, assertEmptySessionModel, resolveRequestedModel, splitModel } from './requested-model.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
+import { createExtensionSessionLinks } from './extension-session-links.js';
+import { createRegisteredProjectLookup } from './project-paths.js';
 import { createSessionWorktreeMover, type SessionMoveWorktree } from './worktree-move.js';
 import { sessionParentId } from '../session-lineage.js';
 import { listArchivedSubsessions } from './archived-subsessions.js';
@@ -58,6 +61,7 @@ import type { createWorktreeBootstrapStore } from '../git/worktree-bootstrap-sto
 export interface SessionPayload {
   entries?: unknown;
   linked?: unknown;
+  extension?: unknown;
   model?: unknown;
   providerID?: unknown;
   modelID?: unknown;
@@ -134,6 +138,7 @@ export interface SessionServiceDependencies {
   stashApply?: typeof stashApplyDefault;
   stashDrop?: typeof stashDropDefault;
   listStashes?: typeof listStashesDefault;
+  listWorktreeArchives?: typeof listWorktreeArchivesDefault;
   resolveWorktreeTopLevel?: typeof resolveWorktreeTopLevelDefault;
   validateWorktreeDirectory?: typeof validateWorktreeDirectoryDefault;
   resolveAutoSelection?: ReturnType<typeof createRoutingRuntime>['resolveAutoSelection'] | null;
@@ -614,6 +619,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     stashApply = stashApplyDefault,
     stashDrop = stashDropDefault,
     listStashes = listStashesDefault,
+    listWorktreeArchives = listWorktreeArchivesDefault,
     resolveWorktreeTopLevel = resolveWorktreeTopLevelDefault,
     validateWorktreeDirectory = validateWorktreeDirectoryDefault,
     resolveAutoSelection = null,
@@ -656,47 +662,14 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
 
   const resolveStartDirectory = createStartDirectoryResolver({ resolveWorktreeTopLevel, validateWorktreeDirectory, getSessionDirectoryCanonicalizer });
 
-  const toPathKey = (value: string | undefined) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
-  const holdsPath = (outer: string, inner: string) => inner === outer || inner.startsWith(`${outer}/`);
-  const checkoutRootOf = (directoryKey: string, folder: string | null) => {
-    if (folder === null) return null;
-    if (folder === '') return directoryKey;
-    return directoryKey.endsWith(`/${folder}`) ? directoryKey.slice(0, -folder.length - 1) : null;
-  };
-
-  const projectPathInPrimaryCheckout = async (directory: string, folder: string, projects: SessionProject[]) => {
-    const primaryRoot = toPathKey((await resolvePrimaryWorktreeRoot(directory)).root);
-    let best: { path: string; folder: string } | null = null;
-    for (const project of projects) {
-      const projectKey = toPathKey(project.path);
-      if (!holdsPath(primaryRoot, projectKey)) continue;
-      const projectFolder = projectKey.slice(primaryRoot.length).replace(/^\/+/, '');
-      if (projectFolder && !holdsPath(projectFolder, folder)) continue;
-      if (!best || projectFolder.length > best.folder.length) best = { path: project.path, folder: projectFolder };
-    }
-    return best?.path ?? null;
-  };
+  const registeredProjectPathFor = createRegisteredProjectLookup({ resolveWorktreeTopLevel, resolvePrimaryWorktreeRoot });
 
   const projectPathFor = async (directory: string) => {
     const projects = await readSettingsFromDiskMigrated()
       .then((settings) => sanitizeProjects(settings?.projects || []))
       .catch(() => []);
-    const directoryKey = toPathKey(directory);
-    const prefix = (await resolveWorktreeTopLevel(directory).catch(() => null))?.prefix;
-    const folder = prefix === undefined ? null : toPathKey(prefix);
-    const checkoutRoot = checkoutRootOf(directoryKey, folder);
-    let containing: string | null = null;
-    for (const project of projects) {
-      const projectKey = toPathKey(project.path);
-      if (!holdsPath(projectKey, directoryKey)) continue;
-      if (checkoutRoot && !holdsPath(checkoutRoot, projectKey)) continue;
-      if (!containing || projectKey.length > toPathKey(containing).length) containing = project.path;
-    }
-    if (containing) return containing;
-    if (folder !== null) {
-      const inPrimaryCheckout = await projectPathInPrimaryCheckout(directory, folder, projects).catch(() => null);
-      if (inPrimaryCheckout) return inPrimaryCheckout;
-    }
+    const registered = await registeredProjectPathFor(directory, projects);
+    if (registered) return registered;
     const resolved = await resolveRequestedDirectory({
       chatsScope,
       payload: { directory },
@@ -1069,9 +1042,16 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     return result;
   };
 
+  const setExtensionSessionLinks = createExtensionSessionLinks({
+    dataDir, chatsRoot: chatsScope?.root ?? null, readSession: (id) => clientFor().session.get({ sessionID: id }),
+    readProjects: async () => sanitizeProjects((await readSettingsFromDiskMigrated())?.projects || []),
+    validateDirectoryPath, registeredProjectPathFor, listWorktreeArchives, resolvePrimaryWorktreeRoot, updateMetadata,
+  });
+
   const setSessionLinks = async (sessionID: string | undefined, payload: SessionPayload | null = {}) => {
     const id = asNonEmptyString(sessionID);
     if (!id) throw new OpenChamberControlError('a session id is required', 400);
+    if (payload && payload.extension !== undefined) return setExtensionSessionLinks(id, payload);
     const parsed = parseLinkOperation(payload);
     if (!parsed.ok) throw new OpenChamberControlError(parsed.error, 400);
     const directory = asNonEmptyString(payload?.directory) || '';
@@ -1631,8 +1611,11 @@ export const registerOpenChamberSessionRoutes = (app: Application, dependencies:
     try {
       return res.json(await service.setSessionLinks(req.params.sessionId, payloadFields(req)));
     } catch (error) {
-      console.error('[OpenChamberSessions] failed to update session links:', error);
-      return sendServiceError(res, error, 'Failed to update session links');
+      if (isSessionNotFound(error)) return res.status(404).json({ error: 'Session is unavailable.' });
+      const fallback = 'Failed to update session links';
+      const cause = asControlError(error, fallback);
+      if (Number(cause.statusCode) >= 500) console.error('[OpenChamberSessions] failed to update session links:', error);
+      return sendServiceError(res, cause, fallback);
     }
   });
 
