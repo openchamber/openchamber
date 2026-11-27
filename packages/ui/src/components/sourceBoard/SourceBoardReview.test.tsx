@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { EditorView } from '@codemirror/view';
 
 import type {
   ChangeRequestSubmitRequirement,
@@ -58,7 +59,7 @@ const voteLabels: ChangeRequestVoteLabel[] = [
   { name: 'Verified', defaultValue: 0, blocking: true, status: 'neutral', permitted: [], values: [], votes: [] },
 ];
 
-/** The registry holds a forge and a review host; the runtime records the reviews sent. */
+/** The registry holds a forge and a review host; the runtime records the reviews and comments sent. */
 const setUp = async () => {
   const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
   const { githubLikeDescriptor, changeHostDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
@@ -66,11 +67,20 @@ const setUp = async () => {
   const ordered = [githubLikeDescriptor(), changeHostDescriptor()];
   useSourceControlProviderRegistry.setState({ ordered, byId: new Map(ordered.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
   const reviews: ReviewChangeRequestInput[] = [];
+  const comments: string[] = [];
   const base = createWebAPIs();
   const apis = (): RuntimeAPIs => ({
     ...base,
     sourceControl: {
       ...base.sourceControl,
+      changeRequestComment: async (input) => {
+        comments.push(input.body);
+        return {
+          status: 'succeeded', replayed: false, result: {},
+          actor: { provider: input.provider, instance: input.instance, providerAccountId: `${input.instance}#7` },
+          target: { repositoryId: input.repositoryId, bindingRevision: input.bindingRevision, primaryRemote: input.primaryRemote, project: { id: '1', owner: 'acme', name: 'app' } },
+        };
+      },
       changeRequestReview: async (input) => {
         reviews.push(input);
         return {
@@ -81,7 +91,7 @@ const setUp = async () => {
       },
     },
   });
-  return { apis, reviews };
+  return { apis, reviews, comments };
 };
 
 const render = async (apis: RuntimeAPIs, node: React.ReactNode) => {
@@ -92,6 +102,46 @@ const render = async (apis: RuntimeAPIs, node: React.ReactNode) => {
   });
 };
 
+/** The editor's height cap is measured from the line height its CSS resolves; happy-dom loads no CSS. */
+const withLineHeight = async (lineHeight: string, run: () => Promise<void>) => {
+  const original = globalThis.getComputedStyle;
+  Object.defineProperty(globalThis, 'getComputedStyle', {
+    configurable: true,
+    writable: true,
+    // SAFETY: the stub answers only `lineHeight`, the single property ComposerEditor's height cap reads; the real style object is returned for every other element.
+    value: (element: Element) => element instanceof HTMLElement && element.classList.contains('cm-content')
+      ? ({ lineHeight } as CSSStyleDeclaration)
+      : original(element),
+  });
+  try {
+    await run();
+  } finally {
+    Object.defineProperty(globalThis, 'getComputedStyle', { configurable: true, writable: true, value: original });
+  }
+};
+
+const typeIntoEditor = async (text: string) => {
+  const editorDOM = host.querySelector('.cm-editor');
+  if (!(editorDOM instanceof HTMLElement)) throw new Error('Expected the comment editor');
+  const view = EditorView.findFromDOM(editorDOM);
+  if (!view) throw new Error('Expected the comment editor view');
+  await act(async () => { view.dispatch({ changes: { from: 0, insert: text } }); });
+};
+
+const submitWithModEnter = async () => {
+  const field = host.querySelector('.cm-content');
+  if (!(field instanceof HTMLElement)) throw new Error('Expected the comment editor');
+  await act(async () => {
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+  });
+};
+
+const editorHost = () => {
+  const editor = host.querySelector<HTMLElement>('.composer-editor');
+  if (!editor) throw new Error('Expected the shared comment editor');
+  return editor;
+};
+
 const buttons = () => [...host.querySelectorAll('button')];
 const buttonNamed = (name: string) => buttons().find((button) => button.textContent?.trim() === name);
 const click = async (element: HTMLElement | undefined) => {
@@ -100,6 +150,21 @@ const click = async (element: HTMLElement | undefined) => {
 };
 
 describe('reviewing a change request', () => {
+  test('the comment box is the shared Markdown editor and posts the text it holds', async () => {
+    const { apis, comments } = await setUp();
+    const { SourceBoardReply } = await import('./SourceBoardReply');
+    await withLineHeight('21px', () => render(apis(), <SourceBoardReply reference={pullOn('github')} context={context} onRefresh={() => undefined} />));
+    const editor = editorHost();
+    expect(editor.className).toContain('typography-markdown');
+    expect(editor.className).toContain('min-h-[calc(12*1lh)]');
+    expect(editor.getAttribute('data-chat-input')).toBe('reference-body');
+    expect(host.querySelector<HTMLElement>('.cm-scroller')?.style.maxHeight).toBe('252px');
+    await typeIntoEditor('Nice work');
+    expect(buttonNamed('Comment')?.hasAttribute('disabled')).toBe(false);
+    await submitWithModEnter();
+    expect(comments).toEqual(['Nice work']);
+  });
+
   test('a verdict host keeps its two verdict buttons and sends a verdict', async () => {
     const { apis, reviews } = await setUp();
     const { SourceBoardReply } = await import('./SourceBoardReply');

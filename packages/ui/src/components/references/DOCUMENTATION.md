@@ -39,7 +39,7 @@ Host text is Markdown source, where mentions name host users and file paths rema
 
 ### Why host text editors take the body's type and one shared line count
 
-The editor writes what the description and comments render as: `typography-markdown`, the same 14 px the rendered body uses, instead of the 16 px browser default the composer host would otherwise inherit. Both host-text editors are the same component and take one line count (`REFERENCE_EDITOR_MAX_LINES`, 12 lines), because per-call-site counts (a body at 8, a comment at 4) had left both too short to read the text being written. The count is not a prop: a call site that sets its own can silently shrink the window again.
+The editor writes what the description and comments render as: `typography-markdown`, the same 14 px the rendered body uses, instead of the 16 px browser default the composer host would otherwise inherit. The description, a comment edit and a thread reply are one component, and it is one 12-line window (`REFERENCE_EDITOR_MAX_LINES`, both the minimum and the cap), because per-call-site counts (a body at 8, a comment at 4) had left them too short to read the text being written. The count is not a prop: a call site that sets its own can silently shrink the window again. Escape closes the editor wherever it is a temporary one; the board's comment box has nothing to close, so it keeps the text, and a thread reply keeps its own text until the reply is sent.
 
 ### Why PR statuses subscribe through the store and not an effect
 

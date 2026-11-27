@@ -85,6 +85,7 @@ describe('a host item text edited in the composer editor', () => {
         // 21px is the used line height of --text-markdown at the default zoom.
         await withLineHeight('21px', () => show());
         expect(host.querySelector('.composer-editor')?.className).toContain('typography-markdown');
+        expect(host.querySelector('.composer-editor')?.className).toContain('min-h-[calc(12*1lh)]');
         expect(host.querySelector<HTMLElement>('.cm-scroller')?.style.maxHeight).toBe('252px');
     });
 
@@ -106,6 +107,17 @@ describe('a host item text edited in the composer editor', () => {
         await show();
         await press('Enter');
         expect(saves).toBe(0);
+    });
+
+    test('an IME confirming Enter neither saves nor cancels', async () => {
+        await show();
+        const field = browser.document.querySelector('[contenteditable]');
+        if (!field) throw new Error('Expected the editor');
+        await act(async () => {
+            field.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }));
+        });
+        expect(saves).toBe(0);
+        expect(cancels).toBe(0);
     });
 
     test('word backspace deletes a mixed-script word as one group', async () => {

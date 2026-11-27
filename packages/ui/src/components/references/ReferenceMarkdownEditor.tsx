@@ -70,7 +70,7 @@ export const ReferenceMarkdownEditor: React.FC<ReferenceMarkdownEditorProps> = (
             editable={!disabled}
             placeholder={placeholder}
             spellCheck
-            className="typography-markdown"
+            className="typography-markdown min-h-[calc(12*1lh)]"
             maxLines={REFERENCE_EDITOR_MAX_LINES}
             aria-label={ariaLabel ?? placeholder}
         />
