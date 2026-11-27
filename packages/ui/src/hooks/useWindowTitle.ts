@@ -1,9 +1,10 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
-import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { isDesktopShell } from '@/lib/desktop';
+import { desktopHostsGet, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { LOCAL_HOST_ID, resolveCurrentDesktopHost, runtimeKeyForDesktopHost, withLocalDesktopHost } from '@/lib/desktopCurrentHost';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useI18n } from '@/lib/i18n';
 import { isContextWindow } from '@/lib/contextWindow/role';
 
@@ -24,6 +25,7 @@ const buildWindowTitle = (projectLabel: string | null, windowLabel: string | nul
 
 export const useWindowTitle = () => {
   const { t } = useI18n();
+  const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
   const windowLabel = isContextWindow() ? t('contextPanel.window.title') : null;
   const activeProject = useProjectsStore((state) => {
     if (!state.activeProjectId) {
@@ -50,11 +52,10 @@ export const useWindowTitle = () => {
     return null;
   }, [activeProject]);
 
-  const [instanceLabel, setInstanceLabel] = React.useState<string | null>(null);
+  const [instance, setInstance] = React.useState<{ runtimeKey: string; label: string } | null>(null);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isDesktopShell()) {
-      setInstanceLabel(null);
       return;
     }
 
@@ -62,33 +63,18 @@ export const useWindowTitle = () => {
 
     const refreshInstanceLabel = async () => {
       try {
-        if (isDesktopLocalOriginActive()) {
-          if (!cancelled) {
-            setInstanceLabel(null);
-          }
-          return;
-        }
-
-        const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
-        const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
-
-        if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
-          if (!cancelled) {
-            setInstanceLabel(null);
-          }
-          return;
-        }
-
         const cfg = await desktopHostsGet();
-        const match = cfg.hosts.find((host) => runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false);
-        const nextLabel = match?.label?.trim() ? redactSensitiveUrl(match.label.trim()) : 'Instance';
-        if (!cancelled) {
-          setInstanceLabel(nextLabel);
-        }
+        if (cancelled || getRuntimeKey() !== runtimeKey) return;
+        const host = cfg.hosts.find((entry) => runtimeKeyForDesktopHost(entry) === runtimeKey)
+          ?? resolveCurrentDesktopHost(withLocalDesktopHost(cfg.hosts, cfg.localOrigin));
+        const label = host.id === LOCAL_HOST_ID
+          ? t('desktopHostSwitcher.instance.local')
+          : host.id === 'custom' && !host.url
+            ? t('desktopHostSwitcher.instance.fallback')
+            : redactSensitiveUrl(host.label.trim()) || t('desktopHostSwitcher.instance.fallback');
+        setInstance({ runtimeKey, label });
       } catch {
-        if (!cancelled) {
-          setInstanceLabel('Instance');
-        }
+        return;
       }
     };
 
@@ -103,9 +89,14 @@ export const useWindowTitle = () => {
       cancelled = true;
       window.removeEventListener('focus', handleFocus);
     };
-  }, []);
+  }, [runtimeKey, t]);
 
-  const title = React.useMemo(() => buildWindowTitle(projectLabel, windowLabel, instanceLabel), [projectLabel, windowLabel, instanceLabel]);
+  const instanceLabel = instance?.runtimeKey === runtimeKey
+    ? instance.label
+    : t(runtimeKey === LOCAL_HOST_ID ? 'desktopHostSwitcher.instance.local' : 'desktopHostSwitcher.instance.fallback');
+  const title = isDesktopShell()
+    ? [APP_TITLE, instanceLabel, windowLabel].filter(Boolean).join(' - ')
+    : buildWindowTitle(projectLabel, windowLabel, null);
 
   React.useEffect(() => {
     if (typeof document !== 'undefined') {

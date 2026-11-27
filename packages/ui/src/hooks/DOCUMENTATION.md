@@ -121,6 +121,7 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 
 ### Desktop and mobile platform
 
+- Desktop window titles identify the current instance as `OpenChamber - <label>`, with translated `Local` for the built-in host. Saved host IDs take precedence over transport URLs, so relay connections keep their labels. Runtime changes refresh the title, and a failed host read keeps the last label for that runtime. Browser tabs retain project titles.
 - The tray and dock badge admit only sessions with a sidebar row. Sessions from unconfigured directories cannot be opened or cleared from there, and pending approvals follow the same rule.
 - Tray status comes from the status map, not the session list: a session can have a live status before it appears in a list, and several stores can list it. A session is active when either the synced child stores or the cross-project map says so.
 - Push visibility on the native app follows `App.appStateChange`. Web visibility signals are unreliable in a WKWebView, where `hasFocus()` can report false while the app is active, which leaked push notifications.
