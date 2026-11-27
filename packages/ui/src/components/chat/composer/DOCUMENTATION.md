@@ -2175,6 +2175,12 @@ The salvage reader follows the end only while already there; rewrapping text
 keeps a reader who scrolled up in place. Expanding the composer releases this
 height floor and uses the existing fullscreen layout.
 
+On Android web, the focused composer can be fixed above a keyboard that only
+shrinks the visual viewport. Its editor uses that visible height minus the rest
+of the form, including attachment previews and footer controls. When the cap
+changes, CodeMirror reveals the current selection after layout, except during
+IME composition. Fullscreen and Capacitor keep their existing height paths.
+
 Their timing and focus invariants live in this document. Platform behavior needs
 verification on real hardware.
 
