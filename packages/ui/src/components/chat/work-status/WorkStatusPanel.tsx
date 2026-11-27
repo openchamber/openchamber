@@ -37,8 +37,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const sectionLayout = useWorkStatusSectionLayout();
   const { allSectionsHidden } = sectionLayout;
-  useLoadSessionTodos(sessionId, directory, visible && isWorkStatusSectionVisible(sectionLayout.hiddenSections, 'tasks'));
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
+  useLoadSessionTodos(
+    sessionId,
+    directory,
+    sectionsDialogOpen || (visible && isWorkStatusSectionVisible(sectionLayout.hiddenSections, 'tasks')),
+  );
   const [renderedSections, setRenderedSections] = React.useState(1);
   const frameRef = React.useRef<number | null>(null);
 

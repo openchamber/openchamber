@@ -514,7 +514,8 @@ location is already running). The sessions of a directory announced with
 stream had a gap) and every entry when the control stream reconnects are read
 again only while their Tasks are on screen (`showSessionTodos`): a Work Status
 panel or the mobile Status pane is visible with Tasks enabled in its section
-layout. `useLoadSessionTodos` holds that demand and releases it, cancelling a
+layout, or the Panel sections dialog is open (so a hidden Tasks section can still
+be discovered and re-enabled). `useLoadSessionTodos` holds that demand and releases it, cancelling a
 pending retry, when the panel closes or Tasks is hidden. Such a re-read that
 arrives during a read queues its follow-up only while the Tasks are still
 shown when that read ends; a revert queues it regardless. The others are marked

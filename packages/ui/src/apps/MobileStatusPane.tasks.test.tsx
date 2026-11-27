@@ -15,7 +15,8 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { SessionMessageLoader } from '@/sync/session-message-loader';
 import { SyncRuntimeContext, type SyncRuntime } from '@/sync/sync-runtime-context';
 import { OpenCode } from '@opencode/client';
-import { MobileStatusPane } from './MobileStatusPane';
+
+let MobileStatusPane: typeof import('./MobileStatusPane').MobileStatusPane;
 
 const DIR = '/workspace';
 const ID = 'ses_tasks';
@@ -40,24 +41,30 @@ let previousSessionUI: ReturnType<typeof useSessionUIStore.getState>;
 let previousDirectory: ReturnType<typeof useDirectoryStore.getState>;
 
 const settle = () => act(async () => { for (let i = 0; i < 5; i += 1) await Promise.resolve(); });
-const render = async (visible: boolean) => {
+const render = async (visible: boolean, sectionsDialogOpen = false) => {
   await act(async () => root.render(
     <RuntimeAPIContext.Provider value={runtimeApis}><I18nProvider><SyncRuntimeContext.Provider value={runtime}>
-      <MobileStatusPane visible={visible} onLeave={() => {}} sectionsDialogOpen={false} onSectionsDialogOpenChange={() => {}} />
+      <MobileStatusPane visible={visible} onLeave={() => {}} sectionsDialogOpen={sectionsDialogOpen} onSectionsDialogOpenChange={() => {}} />
     </SyncRuntimeContext.Provider></I18nProvider></RuntimeAPIContext.Provider>,
   ));
   await settle();
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   previousUI = useUIStore.getState();
   previousSessionUI = useSessionUIStore.getState();
   previousDirectory = useDirectoryStore.getState();
   dom = new Window({ url: 'http://mobile-status.test' });
   globals = new Map();
   for (const [name, value] of Object.entries({
-    window: dom, document: dom.document, HTMLElement: dom.HTMLElement, Element: dom.Element,
-    Event: dom.Event, CustomEvent: dom.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true,
+    window: dom, document: dom.document, navigator: dom.navigator,
+    Node: dom.Node, HTMLElement: dom.HTMLElement, Element: dom.Element,
+    HTMLButtonElement: dom.HTMLButtonElement, HTMLInputElement: dom.HTMLInputElement,
+    SVGElement: dom.SVGElement, Document: dom.Document, DocumentFragment: dom.DocumentFragment,
+    DOMRect: dom.DOMRect, Event: dom.Event, CustomEvent: dom.CustomEvent,
+    MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+    Touch: dom.Touch, TouchEvent: dom.TouchEvent,
+    getComputedStyle: dom.getComputedStyle.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     ResizeObserver: dom.ResizeObserver, MutationObserver: dom.MutationObserver,
   })) {
@@ -65,6 +72,7 @@ beforeEach(() => {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   registerRuntimeAPIs(runtimeApis);
+  ({ MobileStatusPane } = await import('./MobileStatusPane'));
   const childStores = new ChildStoreManager();
   const runtimeKey = 'mobile-status-tasks-test';
   runtime = {
@@ -79,7 +87,9 @@ beforeEach(() => {
   useUIStore.setState({ isMobile: true, mobileWorkStatusHiddenSections: WORK_STATUS_SECTION_IDS.filter((id) => id !== 'tasks') });
   useSessionUIStore.setState({ currentSessionId: ID, currentSessionDirectory: DIR });
   useDirectoryStore.setState({ currentDirectory: DIR });
-  root = createRoot(document.body);
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
 });
 
 afterEach(async () => {
@@ -123,6 +133,30 @@ test('with Tasks the only enabled section, Status finds them again after the tod
     expect(reads.length).toBe(1);
     await render(true);
     expect(reads.length).toBe(2);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});
+
+test('a hidden Tasks section stays unread until Panel sections opens, then lists so it can be re-enabled', async () => {
+  useUIStore.setState({ isMobile: true, mobileWorkStatusHiddenSections: [...WORK_STATUS_SECTION_IDS] });
+  const reads: string[] = [];
+  const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    reads.push(input instanceof Request ? input.url : String(input));
+    return Response.json({ revision: 1, state: 'ready', todos: [{ content: 'ship it', status: 'in_progress' }] });
+  });
+  try {
+    await render(true, false);
+    expect(reads).toEqual([]);
+
+    await render(true, true);
+    expect(reads.length).toBe(1);
+    const tasksRow = document.querySelector<HTMLElement>('[data-settings-item="chat.work-status.section.tasks"]');
+    expect(tasksRow).not.toBeNull();
+    expect(tasksRow?.getAttribute('aria-pressed')).toBe('false');
+
+    await act(async () => tasksRow?.click());
+    expect(useUIStore.getState().mobileWorkStatusHiddenSections).not.toContain('tasks');
   } finally {
     fetchSpy.mockRestore();
   }

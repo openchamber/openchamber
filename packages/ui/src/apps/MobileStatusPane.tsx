@@ -25,7 +25,11 @@ export const MobileStatusPane: React.FC<{
   const sessionId = useSessionUIStore((state) => state.currentSessionId);
   const directory = useEffectiveDirectory() ?? null;
   const layout = useWorkStatusSectionLayout();
-  useLoadSessionTodos(sessionId, directory, visible && isWorkStatusSectionVisible(layout.hiddenSections, 'tasks'));
+  useLoadSessionTodos(
+    sessionId,
+    directory,
+    sectionsDialogOpen || (visible && isWorkStatusSectionVisible(layout.hiddenSections, 'tasks')),
+  );
   const [renderedSections, setRenderedSections] = React.useState(1);
   React.useEffect(() => {
     if (visible) setRenderedSections((count) => Math.max(count, 1));
