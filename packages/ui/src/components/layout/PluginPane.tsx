@@ -87,7 +87,7 @@ import { guestStorageOperation } from '@/lib/guests/storage';
 import { getGuestPopoverController, guestPopoverOwnerBlocked, positionGuestPopover, type GuestPopoverActivation, type GuestPopoverPosition } from '@/lib/guests/popovers';
 import { createGuestStatusControls, type GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { showGuestToast } from '@/lib/guests/toast';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { closeGuestTabsEverywhere } from '@/lib/guests/tabs';
@@ -386,14 +386,6 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     if (message) postToGuest(message);
   }, [backgroundAction, postToGuest]);
 
-  React.useEffect(() => {
-    if (!guestEnabled) return undefined;
-    return subscribeOpenchamberEvents((event) => {
-      if (event.type !== 'guest-service-event' || event.guestId !== guestId) return;
-      postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'service-event', payload: { topic: event.topic, data: event.data } });
-    });
-  }, [guestEnabled, guestId, postToGuest]);
-
   const connectFileChannel = React.useCallback(() => {
     fileChannelRef.current?.connect(postToGuest);
   }, [postToGuest]);
@@ -567,7 +559,14 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     });
     let stopLateGenerate: (() => void) | null = null;
     const stopLateGenerateListening = () => { stopLateGenerate?.(); stopLateGenerate = null; };
-    const runtimeUnsubscribe = subscribeRuntimeEndpointChanged(() => { disposed = true; closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopMicrophone(); stopOauthPoll(); });
+    const runtimeUnsubscribe = subscribeRuntimeEndpointWillChange(({ runtimeKey: next, previousRuntimeKey }) => {
+      if (next === previousRuntimeKey) return;
+      disposed = true; closeActivePopover('owner'); statusControls.dispose(); clearSubscriptions(); stopMicrophone(); stopOauthPoll();
+    });
+    const unsubscribeEvents = ownerFrame && subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'guest-service-event' || event.guestId !== requestingGuestId || !ownsFrame()) return;
+      postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'service-event', payload: { topic: event.topic, data: event.data } });
+    });
     const requireSessions = () => {
       if (!guestMay(currentGuest(), 'sessions')) throw new HostRequestError('NOT_GRANTED', NOT_GRANTED_MESSAGE);
     };
@@ -1005,6 +1004,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       stopMicrophone();
       stopLateGenerateListening();
       runtimeUnsubscribe();
+      unsubscribeEvents?.();
       window.removeEventListener('message', onMessage);
     };
   }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
