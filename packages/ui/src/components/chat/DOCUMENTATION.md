@@ -185,7 +185,12 @@ OpenCode access.
   native activation, so managing a starter cannot run its enclosing row.
 - Draft headings remain shared for one visit to the new-session screen, including
   changes of draft ID. Their index is reactive state, and project-name
-  substitution treats replacement metacharacters literally.
+  substitution treats replacement metacharacters literally. The project name in
+  a draft heading clips only horizontally, at rest and while its width eases,
+  where the browser supports `overflow: clip`: fonts whose letters are taller
+  than the heading's line (Noto Sans SC, Segoe UI) would otherwise lose the
+  tails of p, y and g. Older WebKit (iOS 15) keeps the two-way clip through the
+  `@supports` guard, so a long name never spills over the text after it.
 - File reference ranges parse before single-line suffixes so `:10-20` cannot
   truncate to `:10`. Fenced-output matching requires an extension-bearing path
   and does not recognize backslash-separated Windows paths; inline-code

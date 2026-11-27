@@ -18,6 +18,7 @@ async function createDraftFixture() {
     import React from 'react';
     import { createRoot } from 'react-dom/client';
     import { DraftWelcome } from '@/components/chat/column/DraftWelcome';
+    import { renderDraftTitle } from '@/components/chat/composer/input/ComposerDraftTitle';
     import { I18nProvider } from '@/lib/i18n';
     import { useProjectsStore } from '@/stores/useProjectsStore';
     import { useUIStore } from '@/stores/useUIStore';
@@ -31,7 +32,9 @@ async function createDraftFixture() {
     useProjectsStore.setState({ projects, activeProjectId: projects[0].id });
     useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projects[0].id, lead: params.get('lead') === '1' });
     window.chooseProject = (i) => useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: projects[i].id, directoryOverride: projects[i].path });
-    createRoot(document.getElementById('root')).render(<I18nProvider><DraftWelcome /></I18nProvider>);
+    // The desktop heading above the composer renders the same name through renderDraftTitle.
+    const desktopHeading = <h1 className="text-3xl">{renderDraftTitle('Where do we start in ' + labels[0] + '?', labels[0])}</h1>;
+    createRoot(document.getElementById('root')).render(<I18nProvider>{params.get('view') === 'desktop' ? desktopHeading : <DraftWelcome />}</I18nProvider>);
   `);
   // The plain draft heading picks a random line; pin it to one that ends in words.
   writeFileSync(path.join(fixture, 'easter-egg-copy.ts'), `
@@ -178,6 +181,61 @@ async function assertHeadingFits(client, url, project, { lead = true, template =
   assertLayout(await evaluate(measureHeading));
 }
 
+// A font whose letters are taller than the heading's line (Noto Sans SC, Segoe UI at 1.2) must keep the
+// tails of p, y and g. A line height of 1 makes every font that tall.
+async function assertNameTailsVisible(client, url, { view, switchProjects = false }) {
+  const evaluate = async (expression) => {
+    const result = await client.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+    assert.equal(result.exceptionDetails, undefined, result.exceptionDetails?.exception?.description);
+    return result.result.value;
+  };
+  const loaded = client.once('Page.loadEventFired');
+  await client.send('Page.navigate', { url: `${url}?project=mpv-lazy&lead=0&view=${view}&template=${encodeURIComponent(PLAIN_TEMPLATE)}` });
+  await loaded;
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline && !(await evaluate('Boolean(document.querySelector("h1 span"))'))) await wait(50);
+  const result = await evaluate(`document.fonts.ready.then(async () => {
+    const heading = document.querySelector('h1');
+    heading.style.lineHeight = '1';
+    const frame = () => new Promise(requestAnimationFrame);
+    // Pixels of the name's glyphs cut off by a box that clips vertically; 0 when every tail shows.
+    const cutOff = () => {
+      // Read the baseline from the text's own box; inserting a marker would restart the width animation.
+      const name = heading.querySelector('span');
+      const style = getComputedStyle(name);
+      const context = document.createElement('canvas').getContext('2d');
+      context.font = style.fontWeight + ' ' + style.fontSize + ' ' + style.fontFamily;
+      const metrics = context.measureText(name.textContent);
+      const range = document.createRange();
+      range.selectNodeContents(name);
+      const baseline = [...range.getClientRects()].at(-1).bottom - metrics.fontBoundingBoxDescent;
+      const inkBottom = baseline + metrics.actualBoundingBoxDescent;
+      let cut = 0;
+      for (let box = name; box !== heading.parentElement; box = box.parentElement) {
+        if (getComputedStyle(box).overflowY === 'visible') continue;
+        cut = Math.max(cut, inkBottom - box.getBoundingClientRect().bottom);
+      }
+      return { cut, morphing: name.hasAttribute('data-width-morphing') };
+    };
+    const samples = [cutOff()];
+    if (${switchProjects}) {
+      await frame();
+      await frame();
+      for (const project of [1, 0]) {
+        window.chooseProject(project);
+        for (let i = 0; i < 120; i++) {
+          await frame();
+          samples.push(cutOff());
+          if (i > 2 && !heading.getAnimations({ subtree: true }).some((animation) => animation.playState === 'running')) break;
+        }
+      }
+    }
+    return { maxCut: Math.max(...samples.map((sample) => sample.cut)), morphFrames: samples.filter((sample) => sample.morphing).length };
+  })`);
+  assert.ok(result.maxCut < 0.5, `the project name loses ${result.maxCut}px of its letters in the ${view} heading`);
+  if (switchProjects) assert.ok(result.morphFrames > 0, 'the name width animates on a project switch');
+}
+
 let chrome;
 try {
   chrome = resolveChrome(process.env.OPENCHAMBER_TEST_CHROME);
@@ -185,7 +243,7 @@ try {
   if (process.env.OPENCHAMBER_TEST_CHROME) throw error;
 }
 
-test('a compact new-session heading shows a long project name and the text after it inside the phone column', {
+test('a new-session heading shows a long project name and the text after it inside the phone column, with every letter tail', {
   skip: !chrome && 'Set OPENCHAMBER_TEST_CHROME to run the browser regression', timeout: 120_000,
 }, async () => {
   const fixture = await createDraftFixture();
@@ -208,6 +266,9 @@ test('a compact new-session heading shows a long project name and the text after
     // A short draft area, such as a phone in landscape: a tall heading must stay reachable.
     await client.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 300, deviceScaleFactor: 1, mobile: true });
     await assertHeadingFits(client, fixture.url, 'project-'.repeat(32), { lead: false });
+    await assertNameTailsVisible(client, fixture.url, { view: 'compact', switchProjects: true });
+    await client.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await assertNameTailsVisible(client, fixture.url, { view: 'desktop' });
   } finally {
     client?.close();
     if (browser && browser.exitCode === null) {
