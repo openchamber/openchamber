@@ -284,6 +284,39 @@ const INTENT_INSTRUCTIONS: Record<CogMapLadderingIntent, string> = {
 };
 
 /**
+ * Asks the agent to build the first map right away when Cognitive Map Mode is switched on
+ * in a session that already has a conversation, instead of waiting for the next user message.
+ * The mode guidance (already written server-side before this runs) carries the modeling rules,
+ * so this stays a tiny one-shot nudge.
+ */
+export async function dispatchCogMapStart(params: {
+  sessionId: string;
+  directory: string;
+  pacing: CogMapPacing;
+}): Promise<void> {
+  const { sessionId, directory, pacing } = params;
+  const text = [
+    `<cogmap-start pacing="${pacing}">`,
+    'Cognitive Map Mode was just switched on. Build the cognitive map for this conversation now with openchamber_cogmap (cogmap.mutate), then cogmap.analyze.',
+    pacing === 'auto'
+      ? 'Map the whole scenario discussed so far in one go.'
+      : 'Start with the 3–5 most important concepts so the user can steer.',
+    'Use the language of this conversation for the map and your reply.',
+    '</cogmap-start>',
+  ].join('\n');
+  await opencodeClient.resumeWithSyntheticInput({
+    runtimeKey: getRuntimeKey(),
+    id: ascendingId('msg'),
+    sessionId,
+    directory,
+    text,
+    metadata: {
+      openchamberCogMapIntent: { intent: 'start', pacing },
+    },
+  });
+}
+
+/**
  * Dispatches a minimal-token bidirectional laddering intent (plus any unsynced
  * user canvas edits as a tiny delta) to the active session.
  */
@@ -300,6 +333,7 @@ export async function dispatchCogMapLaddering(params: {
     `<cogmap-intent mapId="${mapId}" intent="${intent}" nodeId="${node.id}">`,
     `Target node ${node.id}: "${node.label}"${node.pole ? ` ... "${node.pole}"` : ''} [${node.role}]`,
     INTENT_INSTRUCTIONS[intent],
+    'Use the language of this conversation for new nodes and your reply.',
     '</cogmap-intent>',
   ];
   if (userDelta) lines.unshift(userDelta);

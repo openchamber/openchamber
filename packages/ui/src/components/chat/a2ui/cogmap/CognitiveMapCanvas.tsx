@@ -60,7 +60,17 @@ function edgeStrokeColor(sign: CogMapEdgeSign): string {
 }
 
 function clampZoom(z: number): number {
-  return Math.max(0.35, Math.min(2.2, Math.round(z * 100) / 100));
+  return Math.max(0.2, Math.min(2.5, Math.round(z * 1000) / 1000));
+}
+
+const SIGN_MEANING: Record<CogMapEdgeSign, string> = {
+  '+': 'promotes / leads to',
+  '-': 'inhibits / reduces',
+  '?': 'uncertain influence',
+};
+
+function signGlyph(sign: CogMapEdgeSign): string {
+  return sign === '-' ? '−' : sign;
 }
 
 export function CognitiveMapCanvas({
@@ -82,7 +92,18 @@ export function CognitiveMapCanvas({
 }: CognitiveMapCanvasProps) {
   const [direction, setDirection] = React.useState<CogMapDirection>('up');
   const [filter, setFilter] = React.useState<StructuralFilter>('all');
-  const [selectedId, setSelectedId] = React.useState<string | null>(focusNodeId);
+  const [selectedId, setSelectedIdState] = React.useState<string | null>(focusNodeId);
+  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = React.useState<string | null>(null);
+  // Node and edge selection are mutually exclusive: picking one clears the other.
+  const setSelectedId = React.useCallback((next: React.SetStateAction<string | null>) => {
+    setSelectedEdgeId(null);
+    setSelectedIdState(next);
+  }, []);
+  const selectEdge = React.useCallback((edgeId: string | null) => {
+    setSelectedIdState(null);
+    setSelectedEdgeId((prev) => (edgeId !== null && prev === edgeId ? null : edgeId));
+  }, []);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [zoom, setZoom] = React.useState(1);
   const [pan, setPan] = React.useState({ x: 0, y: 0 });
@@ -110,7 +131,16 @@ export function CognitiveMapCanvas({
   const [connectSign, setConnectSign] = React.useState<CogMapEdgeSign>('+');
 
   const viewportRef = React.useRef<HTMLDivElement>(null);
-  const dragOriginRef = React.useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const dragOriginRef = React.useRef<{ x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
+  const zoomRef = React.useRef(zoom);
+  const panRef = React.useRef(pan);
+  zoomRef.current = zoom;
+  panRef.current = pan;
+  // Inline (compact) maps live inside the scrolling chat: only take over the wheel after the user
+  // clicks into the map, so scrolling past it keeps scrolling the conversation.
+  const [wheelArmed, setWheelArmed] = React.useState(!compact);
+  const wheelArmedRef = React.useRef(wheelArmed);
+  wheelArmedRef.current = wheelArmed;
   const markerPrefix = React.useId().replace(/:/g, '');
 
   // Keep selected node synced when parent pushes a new focusNodeId.
@@ -132,6 +162,10 @@ export function CognitiveMapCanvas({
   const loopEdgeSet = React.useMemo(() => new Set(analysis.loops.flatMap((loop) => loop.edges)), [analysis.loops]);
 
   const activeSelectedId = selectedId && nodes.some((node) => node.id === selectedId) ? selectedId : null;
+  const selectedEdge = React.useMemo(
+    () => (selectedEdgeId ? edges.find((edge) => edge.id === selectedEdgeId) ?? null : null),
+    [edges, selectedEdgeId],
+  );
   const selectedNode = React.useMemo(
     () => (activeSelectedId ? nodes.find((node) => node.id === activeSelectedId) ?? null : null),
     [activeSelectedId, nodes],
@@ -154,6 +188,7 @@ export function CognitiveMapCanvas({
       if (filter === 'tails') return tailSet.has(node.id);
       if (filter === 'hubs') return hubSet.has(node.id);
       if (filter === 'loops') return loopNodeSet.has(node.id);
+      if (selectedEdge) return node.id === selectedEdge.from || node.id === selectedEdge.to;
       if (!activeSelectedId) return true;
       return (
         node.id === activeSelectedId
@@ -161,7 +196,7 @@ export function CognitiveMapCanvas({
         || causalCone.downstreamNodes.has(node.id)
       );
     },
-    [activeSelectedId, causalCone, filter, headSet, hubSet, loopNodeSet, searchNeedle, tailSet],
+    [activeSelectedId, causalCone, filter, headSet, hubSet, loopNodeSet, searchNeedle, selectedEdge, tailSet],
   );
 
   const fitView = React.useCallback(() => {
@@ -194,8 +229,9 @@ export function CognitiveMapCanvas({
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest('[data-cogmap-node], button, input, textarea, select')) return;
-    dragOriginRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+    if (compact) setWheelArmed(true);
+    if (target?.closest('[data-cogmap-node], [data-cogmap-edge], button, input, textarea, select')) return;
+    dragOriginRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false };
     setDragging(true);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -207,6 +243,7 @@ export function CognitiveMapCanvas({
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const origin = dragOriginRef.current;
     if (!origin) return;
+    if (!origin.moved && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 3) origin.moved = true;
     setPan({
       x: origin.panX + (event.clientX - origin.x),
       y: origin.panY + (event.clientY - origin.y),
@@ -214,16 +251,43 @@ export function CognitiveMapCanvas({
   };
 
   const handlePointerUp = () => {
+    const origin = dragOriginRef.current;
     dragOriginRef.current = null;
     setDragging(false);
+    // A plain click on empty canvas clears any node/edge selection.
+    if (origin && !origin.moved) {
+      setSelectedIdState(null);
+      setSelectedEdgeId(null);
+    }
   };
 
-  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return;
-    event.preventDefault();
-    const factor = event.deltaY < 0 ? 1.1 : 0.9;
-    setZoom((prev) => clampZoom(prev * factor));
-  };
+  // Wheel zooms around the cursor while the pointer is over the canvas. Registered natively
+  // because React's onWheel listener is passive and cannot stop the page from scrolling.
+  React.useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!wheelArmedRef.current) return;
+      event.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cx = event.clientX - rect.left;
+      const cy = event.clientY - rect.top;
+      const prevZoom = zoomRef.current;
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      const nextZoom = clampZoom(prevZoom * Math.exp(-delta * 0.0015));
+      if (nextZoom === prevZoom) return;
+      const prevPan = panRef.current;
+      const worldX = (cx - prevPan.x) / prevZoom;
+      const worldY = (cy - prevPan.y) / prevZoom;
+      const nextPan = { x: cx - worldX * nextZoom, y: cy - worldY * nextZoom };
+      zoomRef.current = nextZoom;
+      panRef.current = nextPan;
+      setZoom(nextZoom);
+      setPan(nextPan);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   const handleCopyDsl = async () => {
     const dsl = serializeCogMapDsl({
@@ -333,6 +397,66 @@ export function CognitiveMapCanvas({
     [edges, selectedNode],
   );
   const nodeLookup = React.useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+
+  const isEdgeDimmed = (edge: CogMapEdge): boolean => {
+    if (selectedEdgeId) return edge.id !== selectedEdgeId;
+    if (filter === 'loops' && !loopEdgeSet.has(edge.id)) return true;
+    if (!activeSelectedId) return false;
+    return !causalCone.upstreamEdges.has(edge.id) && !causalCone.downstreamEdges.has(edge.id);
+  };
+
+  const edgeDetails = selectedEdge ? (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="oc-badge" style={{ color: edgeStrokeColor(selectedEdge.sign) }}>
+          {signGlyph(selectedEdge.sign)} {SIGN_MEANING[selectedEdge.sign]}
+        </span>
+        <button
+          type="button"
+          aria-label="Clear selection"
+          onClick={() => setSelectedEdgeId(null)}
+          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+        >
+          <Icon name="close" className="size-3.5" />
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={() => setSelectedId(selectedEdge.from)}
+        className="rounded-md bg-muted/30 px-2 py-1 text-start typography-micro hover:bg-muted/60"
+      >
+        <span className="font-mono text-[10px] text-muted-foreground">{selectedEdge.from}</span>{' '}
+        {nodeLookup.get(selectedEdge.from)?.label ?? selectedEdge.from}
+      </button>
+      <div className="ps-2 typography-micro font-semibold" style={{ color: edgeStrokeColor(selectedEdge.sign) }}>
+        {signGlyph(selectedEdge.sign)}{'→'} <span className="font-normal text-foreground">{selectedEdge.label ?? ''}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => setSelectedId(selectedEdge.to)}
+        className="rounded-md bg-muted/30 px-2 py-1 text-start typography-micro hover:bg-muted/60"
+      >
+        <span className="font-mono text-[10px] text-muted-foreground">{selectedEdge.to}</span>{' '}
+        {nodeLookup.get(selectedEdge.to)?.label ?? selectedEdge.to}
+      </button>
+      {editable && onMutate && (
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          className="self-start text-[var(--status-error)]"
+          onClick={() => {
+            const id = selectedEdge.id;
+            setSelectedEdgeId(null);
+            void onMutate({ mapId, removeEdgeIds: [id] });
+          }}
+        >
+          <Icon name="delete-bin" className="size-3" />
+          Delete link
+        </Button>
+      )}
+    </div>
+  ) : null;
 
   const filterButtons: readonly { id: StructuralFilter; label: string; count?: number }[] = [
     { id: 'all', label: 'All', count: analysis.stats.nodeCount },
@@ -581,7 +705,9 @@ export function CognitiveMapCanvas({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          onWheel={handleWheel}
+          onPointerLeave={() => {
+            if (compact) setWheelArmed(false);
+          }}
           style={compact ? { height } : undefined}
           className={cn(
             'relative min-h-[240px] flex-1 overflow-hidden select-none bg-[radial-gradient(color-mix(in_srgb,var(--border)_65%,transparent)_1px,transparent_1px)] [background-size:18px_18px]',
@@ -629,47 +755,33 @@ export function CognitiveMapCanvas({
                   ))}
                 </defs>
 
-                {layout.edges.map(({ edge, path, midX, midY, isFeedback }) => {
-                  const inCone =
-                    !activeSelectedId
-                    || causalCone.upstreamEdges.has(edge.id)
-                    || causalCone.downstreamEdges.has(edge.id);
-                  const inLoopFilter = filter === 'loops' ? loopEdgeSet.has(edge.id) : true;
-                  const dimmed = !inCone || !inLoopFilter;
+                {layout.edges.map(({ edge, path, isFeedback }) => {
+                  const isActive = edge.id === selectedEdgeId || edge.id === hoveredEdgeId;
+                  const dimmed = !isActive && isEdgeDimmed(edge);
                   const stroke = edgeStrokeColor(edge.sign);
                   const markerKey = edge.sign === '+' ? 'pos' : edge.sign === '-' ? 'neg' : 'unc';
                   return (
-                    <g key={edge.id} opacity={dimmed ? 0.16 : 0.92}>
+                    <g key={edge.id} opacity={dimmed ? 0.16 : isActive ? 1 : 0.85}>
                       <path
                         d={path}
                         fill="none"
                         stroke={stroke}
-                        strokeWidth={isFeedback ? 2.1 : 1.75}
+                        strokeWidth={isActive ? 3 : isFeedback ? 2.1 : 1.75}
                         strokeDasharray={edge.sign === '?' ? '5 4' : isFeedback ? '6 3' : undefined}
                         markerEnd={`url(#${markerPrefix}-arrow-${markerKey})`}
                       />
-                      <circle cx={midX} cy={midY} r={9} fill="var(--background)" stroke={stroke} strokeWidth={1.3} />
-                      <text
-                        x={midX}
-                        y={midY + 3.5}
-                        textAnchor="middle"
-                        fontSize="11"
-                        fontWeight="700"
-                        fill={stroke}
-                      >
-                        {edge.sign === '-' ? '−' : edge.sign}
-                      </text>
-                      {edge.label && (
-                        <text
-                          x={midX}
-                          y={midY - 12}
-                          textAnchor="middle"
-                          fontSize="9.5"
-                          fill="var(--muted-foreground)"
-                        >
-                          {edge.label}
-                        </text>
-                      )}
+                      {/* Wide invisible hit area so thin causal links are easy to click. */}
+                      <path
+                        d={path}
+                        data-cogmap-edge={edge.id}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={14}
+                        style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                        onClick={() => selectEdge(edge.id)}
+                        onPointerEnter={() => setHoveredEdgeId(edge.id)}
+                        onPointerLeave={() => setHoveredEdgeId((prev) => (prev === edge.id ? null : prev))}
+                      />
                     </g>
                   );
                 })}
@@ -753,12 +865,61 @@ export function CognitiveMapCanvas({
                   </div>
                 );
               })}
+
+              {/* Edge badges & labels render ABOVE the cards so link text is never hidden. */}
+              {layout.edges.map(({ edge, midX, midY }) => {
+                const isActive = edge.id === selectedEdgeId || edge.id === hoveredEdgeId;
+                const dimmed = !isActive && isEdgeDimmed(edge);
+                const stroke = edgeStrokeColor(edge.sign);
+                return (
+                  <button
+                    key={`label-${edge.id}`}
+                    type="button"
+                    data-cogmap-edge={edge.id}
+                    onClick={() => selectEdge(edge.id)}
+                    onPointerEnter={() => setHoveredEdgeId(edge.id)}
+                    onPointerLeave={() => setHoveredEdgeId((prev) => (prev === edge.id ? null : prev))}
+                    title={edge.label ?? SIGN_MEANING[edge.sign]}
+                    style={{
+                      left: midX,
+                      top: midY,
+                      borderColor: stroke,
+                      zIndex: isActive ? 30 : 20,
+                      opacity: dimmed ? 0.22 : 1,
+                    }}
+                    className={cn(
+                      'absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-start shadow-xs transition-[opacity,box-shadow]',
+                      isActive && 'shadow-md ring-2 ring-[var(--primary)]/35',
+                    )}
+                  >
+                    <span className="text-[11px] font-bold leading-none" style={{ color: stroke }}>
+                      {signGlyph(edge.sign)}
+                    </span>
+                    {edge.label && (
+                      <span
+                        className={cn(
+                          'typography-micro leading-tight text-foreground/85',
+                          isActive ? 'w-max max-w-[260px] whitespace-normal' : 'max-w-[150px] truncate',
+                        )}
+                      >
+                        {edge.label}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {compact && edgeDetails && (
+            <div className="absolute inset-x-2 bottom-2 z-40 rounded-lg border border-border bg-background/95 p-2.5 shadow-md backdrop-blur-xs">
+              {edgeDetails}
             </div>
           )}
 
           {/* Compact Inline Quick Inspector Bar (when a node is clicked inside inline A2UI) */}
           {compact && selectedNode && (
-            <div className="absolute inset-x-2 bottom-2 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-2.5 shadow-md backdrop-blur-xs">
+            <div className="absolute inset-x-2 bottom-2 z-40 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-2.5 shadow-md backdrop-blur-xs">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -835,7 +996,7 @@ export function CognitiveMapCanvas({
         {/* Full-Mode Right Inspector & Structural Analysis Sidebar */}
         {!compact && sidebarOpen && (
           <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-s border-border bg-background p-3">
-            {selectedNode ? (
+            {edgeDetails ?? (selectedNode ? (
               <div className="flex flex-col gap-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
@@ -1058,7 +1219,7 @@ export function CognitiveMapCanvas({
               /* Structural Overview (0 LLM tokens) */
               <div className="flex flex-col gap-3">
                 <div className="typography-micro text-muted-foreground">
-                  Click any node to trace its upstream causes & downstream goals, read notes, or trigger AI laddering.
+                  Click a node to trace its causes & consequences, or click a link to read why it holds. Scroll to zoom, drag to pan.
                 </div>
 
                 <div>
@@ -1150,7 +1311,7 @@ export function CognitiveMapCanvas({
                   </div>
                 )}
               </div>
-            )}
+            ))}
           </aside>
         )}
       </div>

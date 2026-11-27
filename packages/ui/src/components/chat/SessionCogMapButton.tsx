@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useCogMapStore } from '@/stores/useCogMapStore';
+import { dispatchCogMapStart, useCogMapStore } from '@/stores/useCogMapStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 interface SessionCogMapButtonProps {
@@ -50,11 +50,19 @@ export const SessionCogMapButton: React.FC<SessionCogMapButtonProps> = React.mem
   const handleToggle = () => {
     const nextActive = !active;
     if (sessionId) {
-      void setSessionMode(sessionId, {
-        active: nextActive,
-        pacing,
-        directory: directory || null,
-      });
+      const hadMaps = Object.keys(sessionState?.maps ?? {}).length > 0;
+      void (async () => {
+        const next = await setSessionMode(sessionId, {
+          active: nextActive,
+          pacing,
+          directory: directory || null,
+        });
+        // The server has written the mode guidance by the time setSessionMode resolves, so the
+        // agent sees the rules when it starts. Existing maps mean the user is just resuming.
+        if (nextActive && next?.modeActive && !hadMaps && directory) {
+          await dispatchCogMapStart({ sessionId, directory, pacing }).catch(() => {});
+        }
+      })();
     } else {
       setDraftMode(nextActive, pacing);
     }

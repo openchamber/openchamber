@@ -3,6 +3,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { dispatchCogMapLaddering, useCogMapStore } from '@/stores/useCogMapStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { SyncRuntimeContext } from '@/sync/sync-runtime-context';
 import { CognitiveMapCanvas } from './cogmap/CognitiveMapCanvas';
 import { parseCogMapDsl } from './cogmap/graph';
 import type {
@@ -77,7 +78,23 @@ function parseEdgesProp(raw: A2uiJson | undefined): CogMapEdge[] {
   });
 }
 
-export function A2uiCognitiveMap({
+/**
+ * `useEffectiveDirectory` reads live session state and throws outside `<SyncProvider>`
+ * (A2UI demo page, shared documents, previews). Only resolve the directory when a sync
+ * runtime is mounted; otherwise render the map as a standalone snapshot.
+ */
+export function A2uiCognitiveMap(props: A2uiCognitiveMapProps) {
+  const syncRuntime = React.useContext(SyncRuntimeContext);
+  if (!syncRuntime) return <A2uiCognitiveMapView {...props} effectiveDirectory="" />;
+  return <A2uiCognitiveMapWithDirectory {...props} />;
+}
+
+function A2uiCognitiveMapWithDirectory(props: A2uiCognitiveMapProps) {
+  const effectiveDirectory = useEffectiveDirectory() ?? '';
+  return <A2uiCognitiveMapView {...props} effectiveDirectory={effectiveDirectory} />;
+}
+
+function A2uiCognitiveMapView({
   title,
   mapId,
   focusNodeId = null,
@@ -89,9 +106,9 @@ export function A2uiCognitiveMap({
   disabled = false,
   isDemo = false,
   onDispatchAction,
-}: A2uiCognitiveMapProps) {
+  effectiveDirectory,
+}: A2uiCognitiveMapProps & { effectiveDirectory: string }) {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const effectiveDirectory = useEffectiveDirectory() ?? '';
   const openContextSurface = useUIStore((state) => state.openContextSurface);
 
   const liveSession = useCogMapStore((state) => (currentSessionId ? state.sessions[currentSessionId] : undefined));

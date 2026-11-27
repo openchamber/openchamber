@@ -28,7 +28,7 @@ const NODE_WIDTH = 224;
 const BASE_NODE_HEIGHT = 64;
 const POLE_EXTRA_HEIGHT = 20;
 const H_GAP = 44;
-const V_GAP = 64;
+const V_GAP = 88;
 const PADDING = 40;
 
 function estimateNodeHeight(node: CogMapNode): number {
