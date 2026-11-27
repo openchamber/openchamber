@@ -1,5 +1,5 @@
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
-import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageOptions, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
+import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestProjectIcon, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageOptions, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import { isGuestStatusControls } from './status-controls.ts';
 import type { GuestBlockCall, JsonValue } from './contract.ts';
@@ -76,6 +76,7 @@ import {
   isGuestRequestResult,
   isPromptResult,
   isStartSessionResult,
+  isGuestProjectIcon,
 } from './contract.ts';
 import {
   GUEST_MICROPHONE_OPEN_TIMEOUT_MS,
@@ -103,6 +104,7 @@ export type HostClientOptions = {
 
 export type HostClient = {
   listProjects: () => Promise<GuestProjectsSnapshot>;
+  getProjectIcon: (projectId: string) => Promise<GuestProjectIcon>;
   listWorktrees: (projectId: string) => Promise<GuestWorktreesSnapshot>;
   listSessions: (projectId: string) => Promise<GuestSessionsSnapshot>;
   onProjects: (listener: (snapshot: GuestProjectsSnapshot) => void) => Promise<() => void>;
@@ -732,6 +734,12 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     listProjects: async () => {
       const result = await readWorkspace({ kind: 'projects' });
       if (result.kind !== 'projects') throw new HostRequestError('HOST_REJECTED', 'Expected projects.');
+      return result;
+    },
+    getProjectIcon: async (projectId) => {
+      requireIdentity(projectId);
+      const result = await send({ ...envelope, type: 'project-icon', id: nextId(ids), payload: { projectId } });
+      if (!isGuestProjectIcon(result)) throw new HostRequestError('HOST_REJECTED', 'Host did not return a project icon.');
       return result;
     },
     listWorktrees: async (projectId) => {

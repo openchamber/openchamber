@@ -39,6 +39,20 @@ test('background action messages round-trip and reject invalid payloads', () => 
   expect(guestMessageSchema.safeParse({ ...reply, payload: { ok: false, error: 'x'.repeat(501) } }).success).toBe(false);
 });
 
+test('round-trips a project icon request and both result kinds', () => {
+  const request = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'project-icon', id: 'icon-1', payload: { projectId: 'proj-1' } };
+  expect(guestMessageSchema.parse(request)).toEqual(request);
+  expect(guestMessageSchema.safeParse({ ...request, payload: { projectId: '' } }).success).toBe(false);
+
+  const symbol = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: 'icon-1', ok: true, payload: { kind: 'symbol', symbol: 'code', color: null } };
+  expect(hostMessageSchema.parse(symbol)).toEqual(symbol);
+  expect(hostMessageSchema.safeParse({ ...symbol, payload: { kind: 'symbol', symbol: '', color: null } }).success).toBe(false);
+
+  const image = { ...symbol, payload: { kind: 'image', mime: 'image/png', dataUrl: 'data:image/png;base64,AA==', background: '#112233' } };
+  expect(hostMessageSchema.parse(image)).toEqual(image);
+  expect(hostMessageSchema.safeParse({ ...symbol, payload: { kind: 'image', mime: 'image/png', dataUrl: '', background: null } }).success).toBe(false);
+});
+
 const readyPayload = {
   theme: {
     mode: 'dark',

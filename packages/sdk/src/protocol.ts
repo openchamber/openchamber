@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { guestSessionContextSchema, guestSessionTokenTotalsSchema, guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
+import { guestSessionContextSchema, guestSessionTokenTotalsSchema, guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema, guestProjectIconSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
 import { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX } from './navigation.ts';
@@ -197,6 +197,7 @@ const microphoneOpenResultPayloadSchema = z.object({
 const hostResultPayloadSchema = z.union([
   guestStorageResultSchema,
   guestWorkspaceSnapshotSchema,
+  guestProjectIconSchema,
   shellOutputResultPayloadSchema,
   shellStopResultPayloadSchema,
   startSessionResultPayloadSchema,
@@ -541,6 +542,7 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   z.object({ ...envelope, type: z.literal('popover-close'), id: z.string().min(1), payload: z.object({ id: z.string().min(1).max(80), reason: z.enum(['closed', 'escape']).optional() }).strict() }),
   z.object({ ...envelope, type: z.literal('popover-anchor'), id: z.string().min(1), payload: z.object({ id: z.string().min(1).max(80), active: z.boolean() }).strict() }),
   z.object({ ...envelope, type: z.literal('open-session'), id: z.string().min(1), payload: z.object({ sessionId: z.string().min(1).max(1024) }) }),
+  z.object({ ...envelope, type: z.literal('project-icon'), id: z.string().min(1), payload: z.object({ projectId: z.string().min(1).max(1024) }) }),
   z.object({
     ...envelope,
     type: z.literal('hello'),

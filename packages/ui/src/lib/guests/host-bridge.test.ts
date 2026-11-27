@@ -22,6 +22,7 @@ const toast: GuestMessage = {
 type BridgeEffects = Parameters<typeof answerGuestMessage>[1];
 const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   workspaceRead: overrides.workspaceRead ?? (() => ({ kind: 'projects', state: 'ready', projects: [] })),
+  getProjectIcon: overrides.getProjectIcon ?? (async () => ({ kind: 'symbol', symbol: 'folder', color: null })),
   workspaceSubscribe: overrides.workspaceSubscribe ?? (() => {}),
   workspaceUnsubscribe: overrides.workspaceUnsubscribe ?? (() => {}),
   shellsSubscribe: overrides.shellsSubscribe ?? (() => {}),
@@ -62,6 +63,23 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
 });
 
 describe('answerGuestMessage', () => {
+  test('returns the project icon the host resolved and reports a refusal', async () => {
+    const message: GuestMessage = {
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'project-icon', id: 'icon-1', payload: { projectId: 'proj-1' },
+    };
+    const icon = await answerGuestMessage(message, effects({
+      getProjectIcon: async (projectId) => ({ kind: 'symbol', symbol: projectId === 'proj-1' ? 'code' : 'folder', color: '#123456' }),
+    }));
+    expect(icon).toMatchObject({
+      type: 'result', id: 'icon-1', ok: true,
+      payload: { kind: 'symbol', symbol: 'code', color: '#123456' },
+    });
+
+    const refused = await answerGuestMessage(message, effects({
+      getProjectIcon: async () => { throw new HostRequestError('NOT_FOUND', 'No such project.'); },
+    }));
+    expect(refused).toMatchObject({ type: 'result', id: 'icon-1', ok: false, code: 'NOT_FOUND', error: 'No such project.' });
+  });
   test('publishes status controls through the frame owner and reports unsupported owners', async () => {
     const controls: GuestStatusControl[] = [{ kind: 'button', id: 'refresh', label: 'Refresh' }];
     const seen: GuestStatusControl[][] = [];

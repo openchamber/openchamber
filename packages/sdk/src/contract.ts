@@ -4,7 +4,7 @@ import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSna
 import type { GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
 import type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
 import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOutputResult, GuestShellStopResult, GuestShellsSubscription } from './shells.ts';
-import type { SessionSnapshot, GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
+import type { SessionSnapshot, GuestProjectIcon, GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 export type { SessionSnapshot } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest } from './popover.ts';
@@ -159,6 +159,7 @@ export type LateGenerateResult = { request: GenerateRequest } & (
 export type HostResultPayload =
   | GuestStorageResult
   | GuestWorkspaceSnapshot
+  | GuestProjectIcon
   | GuestShellOutputResult
   | GuestShellStopResult
   | GuestRequestResult
@@ -179,6 +180,23 @@ export const isStartSessionResult = (
 export const isPromptResult = (
   value: HostResultPayload | undefined,
 ): value is PromptResult => Boolean(value && 'sent' in value && !('sessionId' in value));
+
+export const isGuestProjectIcon = (
+  value: HostResultPayload | undefined,
+): value is GuestProjectIcon => {
+  if (!value || typeof value !== 'object') return false;
+  const icon = value as { kind?: unknown; mime?: unknown; dataUrl?: unknown; background?: unknown; symbol?: unknown; color?: unknown };
+  if (icon.kind === 'image') {
+    return typeof icon.mime === 'string' && icon.mime.length > 0
+      && typeof icon.dataUrl === 'string' && icon.dataUrl.startsWith('data:')
+      && (icon.background === null || typeof icon.background === 'string');
+  }
+  if (icon.kind === 'symbol') {
+    return typeof icon.symbol === 'string' && icon.symbol.length > 0
+      && (icon.color === null || typeof icon.color === 'string');
+  }
+  return false;
+};
 
 export const EMPTY_GUEST_CONNECTION: GuestConnection = {
   connected: false,
@@ -620,6 +638,7 @@ export type GuestOauthDisconnectMessage = GuestCall<'oauth-disconnect'>;
 export type GuestRequestMessage = GuestCall<'request', GuestRequest>;
 export type GuestServiceRequestMessage = GuestCall<'service-request', GuestRequest>;
 export type GuestServiceStatusMessage = GuestCall<'service-status'>;
+export type GuestProjectIconMessage = GuestCall<'project-icon', { projectId: string }>;
 export type GuestFileReadMessage = GuestCall<'file-read', FileReadRequest>;
 export type GuestFileWriteMessage = GuestCall<'file-write', FileWriteRequest>;
 export type GuestFileListMessage = GuestCall<'file-list', FileListRequest>;
@@ -677,6 +696,7 @@ export type GuestMessage =
   | GuestRequestMessage
   | GuestServiceRequestMessage
   | GuestServiceStatusMessage
+  | GuestProjectIconMessage
   | GuestFileReadMessage
   | GuestFileWriteMessage
   | GuestFileListMessage
