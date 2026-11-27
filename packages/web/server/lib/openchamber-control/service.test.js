@@ -401,6 +401,7 @@ describe('OpenChamber control service', () => {
       daily: ' 09:00 ',
       goal: true,
       goalTokenBudget: 5000,
+      permissionAutoAccept: true,
     })).resolves.toEqual({ task: { id: 'task-1' }, created: true });
     expect(scheduledTaskService.resolveProjectID).toHaveBeenCalledWith({ projectId: undefined, directory: '/repo' });
     expect(scheduledTaskService.upsert).toHaveBeenCalledWith('project-1', expect.objectContaining({
@@ -408,6 +409,22 @@ describe('OpenChamber control service', () => {
       schedule: { kind: 'daily', times: ['09:00'] },
       execution: expect.objectContaining({ providerID: 'provider', modelID: 'model', goalEnabled: true, goalTokenBudget: 5000 }),
     }));
+    const upsertedTask = scheduledTaskService.upsert.mock.calls[0][1];
+    expect(upsertedTask.execution.permissionAutoAccept).toBe(true);
+  });
+
+  it('omits permissionAutoAccept when the schedule input does not set it', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockResolvedValue({ task: { id: 'task-2' }, created: true });
+    await expect(service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Plain',
+      prompt: 'Run checks',
+      model: 'provider/model',
+      daily: '09:00',
+    })).resolves.toEqual({ task: { id: 'task-2' }, created: true });
+    const upsertedTask = scheduledTaskService.upsert.mock.calls[0][1];
+    expect('permissionAutoAccept' in upsertedTask.execution).toBe(false);
   });
 
   it('creates an isolated task and refuses isolation with an existing session', async () => {

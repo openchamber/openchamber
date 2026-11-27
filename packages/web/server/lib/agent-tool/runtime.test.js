@@ -1163,10 +1163,11 @@ describe('managed agent tool runtime', () => {
     expect(tools.openchamber.input.properties.action.enum.filter((action) => action.startsWith('schedule.'))).toEqual([]);
     const scheduleParameters = tools.openchamber_schedule.input.properties.parameters.properties;
     expect(Object.keys(scheduleParameters)).toEqual(expect.arrayContaining(['taskId', 'daily', 'cron', 'prompt', 'model', 'projectId']));
-    for (const field of ['taskId', 'daily', 'cron', 'disabled', 'targetSessionId']) {
+    for (const field of ['taskId', 'daily', 'cron', 'disabled', 'targetSessionId', 'permissionAutoAccept']) {
       expect(tools.openchamber.input.properties.parameters.properties).not.toHaveProperty(field);
     }
     expect(scheduleParameters.disabled.type).toBe('boolean');
+    expect(scheduleParameters.permissionAutoAccept.type).toBe('boolean');
     for (const field of ['runInWorktree', 'baseBranch', 'cleanupWorktree']) {
       expect(scheduleParameters).toHaveProperty(field);
       expect(tools.openchamber.input.properties.parameters.properties).not.toHaveProperty(field);

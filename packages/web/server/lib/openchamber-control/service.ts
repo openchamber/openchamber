@@ -136,6 +136,7 @@ interface TaskExecution {
   useDefaults?: boolean;
   goalEnabled?: boolean;
   goalTokenBudget?: number;
+  permissionAutoAccept?: boolean;
 }
 type TaskSchedule =
   | { kind: 'daily'; times: string[]; timezone?: string }
@@ -310,6 +311,7 @@ const buildScheduledTask = (input: ControlInput) => {
   if (hasText(input.variant)) task.execution.variant = input.variant.trim();
   if (input.goal === true) task.execution.goalEnabled = true;
   if (goalTokenBudget !== undefined) task.execution.goalTokenBudget = goalTokenBudget;
+  if (input.permissionAutoAccept === true) task.execution.permissionAutoAccept = true;
   if (input.targetSessionId !== undefined) task.targetSessionId = targetSessionId ?? input.targetSessionId;
   if (input.runInWorktree === true) task.runInWorktree = true;
   if (input.cleanupWorktree === false) task.cleanupWorktree = false;

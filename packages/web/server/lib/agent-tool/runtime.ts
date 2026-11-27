@@ -166,7 +166,7 @@ const ACTIONS = new Set(Object.keys(AGENT_TOOL_ACTION_TITLES));
 const WEB_PARAMETER_NAMES = ['url', 'ref', 'selector', 'text', 'value', 'submit', 'direction', 'viewport', 'label', 'tabId', 'to', 'toSelector', 'key', 'paths', 'accept', 'dialog', 'gone', 'timeoutMs'];
 const MEMORY_ONLY_PARAMETER_NAMES = ['body', 'scope', 'memoryId', 'type'];
 const MEMORY_PARAMETER_NAMES = [...MEMORY_ONLY_PARAMETER_NAMES, 'title'];
-const SCHEDULE_ONLY_PARAMETER_NAMES = ['taskId', 'name', 'targetSessionId', 'daily', 'weekly', 'once', 'time', 'cron', 'timezone', 'disabled', 'runInWorktree', 'baseBranch', 'cleanupWorktree'];
+const SCHEDULE_ONLY_PARAMETER_NAMES = ['taskId', 'name', 'targetSessionId', 'daily', 'weekly', 'once', 'time', 'cron', 'timezone', 'disabled', 'permissionAutoAccept', 'runInWorktree', 'baseBranch', 'cleanupWorktree'];
 const SCHEDULE_PARAMETER_NAMES = [...SCHEDULE_ONLY_PARAMETER_NAMES, 'projectId', 'directory', 'prompt', 'model', 'variant', 'agent', 'goal', 'goalTokenBudget'];
 
 const SCHEDULE_PARAMETER_OVERRIDES = {
@@ -233,6 +233,7 @@ const ALL_PARAMETER_PROPERTIES = {
   cron: { type: 'string' },
   timezone: { type: 'string', description: 'IANA' },
   disabled: { type: 'boolean' },
+  permissionAutoAccept: { type: 'boolean', description: 'Task sessions start with permission auto-accept enabled; requires explicit true' },
   runInWorktree: { type: 'boolean', description: 'Run each run in a fresh worktree of the project (git only); conflicts with targetSessionId' },
   baseBranch: { type: 'string', description: 'Source ref the isolated run branches from (git only); default the checked-out HEAD at run time' },
   cleanupWorktree: { type: 'boolean', description: 'False keeps the run\'s worktree and branch for review; default removes them when the run settles (git only)' },
