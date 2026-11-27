@@ -1,6 +1,7 @@
 import React from 'react';
 import { create } from 'zustand';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { clearSidebarFocus } from '@/components/session/sidebar/sections/sectionActions';
 
 type MobileSidebarRowsState = {
   revealedKey: string | null;
@@ -34,7 +35,10 @@ export const useMobileSidebarRowsStore = create<MobileSidebarRowsState>()((set) 
       renamingKey: renamingGone ? null : state.renamingKey,
     };
   }),
-  reset: () => set({ revealedKey: null, armedKey: null, renamingKey: null }),
+  reset: () => {
+    clearSidebarFocus();
+    set({ revealedKey: null, armedKey: null, renamingKey: null });
+  },
 }));
 
 export const useMobileRowSwipe = (key: string) => {

@@ -3484,6 +3484,7 @@ export const dict = {
   'mobile.sessions.showMore': 'Afficher {count} de plus',
   'mobile.sessions.search.section.archived': 'Archivées',
   'mobile.sessions.clearSearchAria': 'Effacer la recherche',
+  'mobile.sessions.showAllAria': 'Afficher toutes les sessions',
   'mobile.header.noProject': 'Sélectionnez un projet',
   'mobile.header.activeSession': 'Session active',
   'mobile.header.noSession': 'Aucune session active',

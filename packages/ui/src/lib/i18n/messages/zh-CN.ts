@@ -473,6 +473,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.showMore': '再显示 {count} 个',
   'mobile.sessions.search.section.archived': '已归档',
   'mobile.sessions.clearSearchAria': '清除搜索',
+  'mobile.sessions.showAllAria': '显示所有会话',
   'mobile.header.noProject': '选择项目',
   'mobile.header.activeSession': '活动会话',
   'mobile.header.noSession': '无活动会话',

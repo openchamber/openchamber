@@ -190,6 +190,10 @@ A section that filters on live state would take a work out of its project at
 the start of every turn and give it back at its end, so the list would jump
 under the pointer. New sections keep "Also show under projects" on.
 
+### Why the attention link focuses the list on a section and does not add one
+
+`openchamber://sessions?filter=attention` (the *Waiting on me* quick action and the iOS widget's attention link) opens the phone's session list on the sessions waiting on the user. The list is narrowed by a focus section held only in `useSidebarSectionsUiStore` (`focus`, set by `focusSidebarSection`, cleared by `clearSidebarFocus`): `resolveVisibleSidebarSections` then returns that one section, so membership, facts and rows are the ones a saved section gets. The focus is the *Waiting on me* template (`sessionsFilterFocus`, needs an answer or unread) with `hideWhenEmpty` off, so an empty result still shows the section and its empty row. It is never saved: the phone sheet shows it as a chip that clears it, and closing the sheet or the tablet sidebar clears it too, so a later open shows the whole list.
+
 ### Why the built-in sections keep their show toggles
 
 Older clients read `sidebarShowPinnedSection` and its siblings. Keeping them as

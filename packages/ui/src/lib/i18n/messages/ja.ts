@@ -473,6 +473,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.showMore': 'さらに{count}件表示',
   'mobile.sessions.search.section.archived': 'アーカイブ済み',
   'mobile.sessions.clearSearchAria': '検索をクリア',
+  'mobile.sessions.showAllAria': 'すべてのセッションを表示',
   'mobile.header.noProject': 'プロジェクトを選択',
   'mobile.header.activeSession': 'アクティブなセッション',
   'mobile.header.noSession': 'アクティブなセッションがありません',

@@ -385,6 +385,7 @@ export const dict = {
   'mobile.sessions.showMore': 'הצג עוד {count}',
   'mobile.sessions.search.section.archived': 'בארכיון',
   'mobile.sessions.clearSearchAria': 'נקה חיפוש',
+  'mobile.sessions.showAllAria': 'הצג את כל ההפעלות',
   'mobile.header.noProject': 'בחר פרויקט',
   'mobile.header.activeSession': 'הפעלה פעילה',
   'mobile.header.noSession': 'אין הפעלה פעילה',

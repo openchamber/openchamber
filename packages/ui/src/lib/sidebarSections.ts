@@ -296,3 +296,7 @@ export const createSidebarSectionFromTemplate = (template: SidebarSectionTemplat
     case 'blank': return base;
   }
 };
+
+export const sessionsFilterFocus = (filter: 'all' | 'attention' | 'recent' | undefined, waitingName: string): CustomSidebarSection | null => (
+  filter === 'attention' ? { ...createSidebarSectionFromTemplate('waiting', waitingName), hideWhenEmpty: false } : null
+);

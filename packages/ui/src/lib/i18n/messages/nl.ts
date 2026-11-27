@@ -472,6 +472,7 @@ export const dict = {
   'mobile.sessions.showMore': 'Nog {count} tonen',
   'mobile.sessions.search.section.archived': 'Gearchiveerd',
   'mobile.sessions.clearSearchAria': 'Zoekopdracht wissen',
+  'mobile.sessions.showAllAria': 'Alle sessies tonen',
   'mobile.header.noProject': 'Kies een project',
   'mobile.header.activeSession': 'Actieve sessie',
   'mobile.header.noSession': 'Geen actieve sessie',

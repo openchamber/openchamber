@@ -215,7 +215,7 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - Android: `res/xml/shortcuts.xml` holds the same actions, and `android.app.shortcuts` must be
   declared on the launcher activity — the shortcut service ignores an application-level copy, which
   silently yields an empty long-press menu with no error anywhere. `MainActivity` needs the
-  `openchamber` VIEW intent filter for New session to arrive. Dictate targets the unexported
+  `openchamber` VIEW intent filter for New session and Waiting on me to arrive. Dictate targets the unexported
   `DictateShortcut` activity alias instead, so no other app can start the microphone; the
   launcher may, because it starts shortcuts as this app.
 - `Info.plist`: `CFBundleURLTypes` scheme `openchamber`, `NSCameraUsageDescription`.

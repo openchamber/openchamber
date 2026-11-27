@@ -66,10 +66,10 @@ public class LauncherShortcutsTest {
             parser.close();
         }
 
-        assertEquals(Arrays.asList("new-session", "dictate"), ids);
+        assertEquals(Arrays.asList("new-session", "waiting", "dictate"), ids);
         // Dictate carries no link: a link is something any app can open, and it must not start the mic.
-        assertEquals(Arrays.asList("openchamber://new", null), deepLinks);
-        assertEquals(Arrays.asList(MainActivity.class.getName(), DictateShortcut.ALIAS), targets);
+        assertEquals(Arrays.asList("openchamber://new", "openchamber://sessions?filter=attention", null), deepLinks);
+        assertEquals(Arrays.asList(MainActivity.class.getName(), MainActivity.class.getName(), DictateShortcut.ALIAS), targets);
 
         // The alias resolves to MainActivity and no other app can start it.
         ActivityInfo alias = packageManager.getActivityInfo(
@@ -79,6 +79,7 @@ public class LauncherShortcutsTest {
 
         Resources resources = context.getResources();
         assertFalse(resources.getString(R.string.shortcut_new_session).trim().isEmpty());
+        assertFalse(resources.getString(R.string.shortcut_waiting).trim().isEmpty());
         assertFalse(resources.getString(R.string.shortcut_dictate).trim().isEmpty());
     }
 }

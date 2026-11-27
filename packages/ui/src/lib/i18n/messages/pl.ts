@@ -474,6 +474,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.sessions.showMore': 'Pokaż jeszcze {count}',
   'mobile.sessions.search.section.archived': 'Zarchiwizowane',
   'mobile.sessions.clearSearchAria': 'Wyczyść wyszukiwanie',
+  'mobile.sessions.showAllAria': 'Pokaż wszystkie sesje',
   'mobile.header.noProject': 'Wybierz projekt',
   'mobile.header.activeSession': 'Aktywna sesja',
   'mobile.header.noSession': 'Brak aktywnej sesji',

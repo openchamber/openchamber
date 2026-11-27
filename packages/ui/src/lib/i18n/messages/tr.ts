@@ -396,6 +396,7 @@ export const dict = {
   'mobile.sessions.showMore': '{count} tane daha göster',
   'mobile.sessions.search.section.archived': 'Arşivlenenler',
   'mobile.sessions.clearSearchAria': 'Aramayı temizle',
+  'mobile.sessions.showAllAria': 'Tüm session\'ları göster',
   'mobile.header.noProject': 'Bir proje seç',
   'mobile.header.activeSession': 'Etkin session',
   'mobile.header.noSession': 'Etkin session yok',
