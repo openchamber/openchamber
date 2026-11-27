@@ -9,7 +9,7 @@ import { createTerminalSocketUpgradeHandler } from './socket-upgrade.js';
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { terminalPlainText } from './plain-text.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
-import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
+import { buildTerminalShellLaunch, createTerminalShellResolver, getTerminalShellLoginArgs, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
 import { bunVersionRunsBunPty } from './bun-pty-support.js';
@@ -426,11 +426,11 @@ export function createTerminalRuntime({
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         stripAppImageArgv0Leak(env);
         stripAppImageLauncherEnv(env);
-        const shellLaunch = buildTerminalShellLaunch(executable, { mode, command, loginShell });
+        const shellLaunch = buildTerminalShellLaunch(executable, { mode, command, loginShell: loginShell && getTerminalShellLoginArgs(executable) !== null });
         const launch = resolvePosixPtyLaunch(shellLaunch.executable, shellLaunch.args);
         const options: PtyOptions = { name: 'xterm-256color', cwd, cols, rows, env };
         if (process.platform === 'win32') options.useConpty = true;
-        return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, shellExecutable: executable, loginShell };
+        return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, shellExecutable: executable, loginShell: loginShell && getTerminalShellLoginArgs(executable) !== null };
       } catch (error) { lastError = error; }
     }
     throw lastError ?? new Error('No executable shell found');
