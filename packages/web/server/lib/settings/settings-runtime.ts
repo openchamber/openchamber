@@ -4,6 +4,7 @@ import { createSettingsFileState, SettingsWriteConflict } from './settings-file-
 import { createSessionProjectRegistrar } from './settings-session-project.js';
 import { createExclusiveSettingsSave } from './settings-exclusive-save.js';
 import { backupHiddenLegacyProfile } from './settings-legacy-profile-backup.js';
+import { createSettingsFileReplace } from './settings-file-replace.js';
 import { createRuntimeSettingsApplier } from './settings-reconciliation.js';
 import type { SettingsDocument, createSettingsHelpers } from './settings-helpers.js';
 import type { SettingsProject, createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
@@ -40,7 +41,7 @@ export type SettingsRuntimeDependencies = Pick<Normalization,
   | 'normalizeManagedRemoteTunnelPresetTokens'> & Pick<Helpers,
   'sanitizeSettingsUpdate' | 'mergePersistedSettings' | 'formatSettingsResponse'> & {
   refreshCanonicalPaths?: (...documents: SettingsDocument[]) => Promise<void>;
-  fsPromises: Pick<typeof fsModule, 'readFile' | 'writeFile' | 'mkdir' | 'readdir' | 'access' | 'rename' | 'rm' | 'stat' | 'realpath' | 'copyFile' | 'chmod'>;
+  fsPromises: Pick<typeof fsModule, 'readFile' | 'writeFile' | 'open' | 'mkdir' | 'readdir' | 'access' | 'rename' | 'rm' | 'stat' | 'realpath' | 'copyFile' | 'chmod'>;
   path: Pick<typeof pathModule, 'join' | 'dirname' | 'relative' | 'isAbsolute' | 'resolve' | 'basename'>;
   crypto: Pick<typeof cryptoModule, 'createHash'>;
   SETTINGS_FILE_PATH: string;
@@ -619,42 +620,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     return parsed;
   };
 
-  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-  const isTransientWindowsReplaceError = (error: unknown): error is { code: 'EPERM' | 'EACCES' | 'EBUSY' } => {
-    if (process.platform !== 'win32' || !hasErrorCode(error)) {
-      return false;
-    }
-    return error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'EBUSY';
-  };
-
-  const replaceFile = async (tmp: string, target: string) => {
-    const maxAttempts = process.platform === 'win32' ? 6 : 1;
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        await fsPromises.rename(tmp, target);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (!isTransientWindowsReplaceError(error) || attempt === maxAttempts) {
-          break;
-        }
-        await sleep(25 * attempt);
-      }
-    }
-
-    if (!isTransientWindowsReplaceError(lastError)) {
-      throw lastError;
-    }
-
-    try {
-      await fsPromises.copyFile(tmp, target);
-    } finally {
-      await fsPromises.rm(tmp, { force: true }).catch(() => {});
-    }
-  };
+  const { replaceFile, flushToDisk } = createSettingsFileReplace(fsPromises);
 
   const cleanupOrphanedSettingsTempFiles = async (directory: string) => {
     try {
@@ -683,13 +649,14 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     if (source && settingsFileState.getRevision(source) !== publicationRevision) {
       throw new SettingsWriteConflict(`${path.basename(filePath)} changed before publication`);
     }
-    if (source === 'settings') await backupHiddenLegacyProfile({ fsPromises, path, settingsFilePath: SETTINGS_FILE_PATH, settingsFileState, replaceFile }, text);
+    if (source === 'settings') await backupHiddenLegacyProfile({ fsPromises, path, settingsFilePath: SETTINGS_FILE_PATH, settingsFileState, replaceFile, flushToDisk }, text);
     const directory = path.dirname(filePath);
     const created = await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
     if (created && process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
+      await flushToDisk(tmp);
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
       if (source) {
         const latest = await settingsFileState.readForWrite(source);
@@ -1170,5 +1137,6 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     watchSettingsFiles: settingsFileState.watch,
     reconcileExternalSettings: exclusive.createReconcile(enqueue),
     subscribeTakenInSettings: exclusive.subscribeTakenIn,
+    takeSetAsideSettingsFiles: settingsFileState.takeSetAsideFiles,
   };
 };

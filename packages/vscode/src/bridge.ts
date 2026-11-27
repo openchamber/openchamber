@@ -17,6 +17,7 @@ import {
   loadSkillBody,
   persistSettings,
   readSettings,
+  withSetAsideSettingsFiles,
   magicPrompts,
   projectSetupStore,
 } from './bridge-settings-runtime';
@@ -131,7 +132,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       },
     );
     if (configResponse) {
-      return configResponse;
+      return type === 'api:config/settings:get' ? withSetAsideSettingsFiles(configResponse) : configResponse;
     }
     const systemResponse = await handleSystemBridgeMessage(
       { id, type, payload },

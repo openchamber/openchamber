@@ -18,12 +18,13 @@ const parseDocument = (text: string): SettingsDocument => {
   }
 };
 
-export const backupHiddenLegacyProfile = async ({ fsPromises, path, settingsFilePath, settingsFileState, replaceFile }: {
+export const backupHiddenLegacyProfile = async ({ fsPromises, path, settingsFilePath, settingsFileState, replaceFile, flushToDisk }: {
   fsPromises: Pick<typeof fsModule, 'readFile' | 'writeFile' | 'rm'>;
   path: Pick<typeof pathModule, 'join' | 'dirname'>;
   settingsFilePath: string;
   settingsFileState: Pick<ReturnType<typeof createSettingsFileState>, 'readAccepted'>;
   replaceFile: (tmp: string, target: string) => Promise<void>;
+  flushToDisk: (filePath: string) => Promise<void>;
 }, nextText: string) => {
   const current = settingsFileState.readAccepted('settings');
   const preferences = settingsFileState.readAccepted('preferences');
@@ -44,6 +45,7 @@ export const backupHiddenLegacyProfile = async ({ fsPromises, path, settingsFile
   const tmp = `${backupPath}.tmp-${process.pid}-${Date.now()}`;
   try {
     await fsPromises.writeFile(tmp, JSON.stringify({ ...kept, ...Object.fromEntries(missing) }, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await flushToDisk(tmp);
     await replaceFile(tmp, backupPath);
   } finally {
     await fsPromises.rm(tmp, { force: true }).catch(() => {});

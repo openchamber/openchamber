@@ -1541,6 +1541,49 @@ describe('settings runtime: preferences.json split', () => {
     }
   });
 
+  it.each([
+    ['NUL bytes', '\0'.repeat(2048)],
+    ['nothing', ''],
+    ['whitespace', ' \r\n'],
+  ])('moves aside a preferences.json holding only %s, reseeds it and saves profile keys again', async (_label, blank) => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      const preferencesPath = path.join(tempRoot, 'preferences.json');
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ projects: [], fontSize: 115 }));
+      await fsPromises.writeFile(preferencesPath, blank);
+
+      expect(await runtime.readSettingsFromDisk()).toMatchObject({ fontSize: 115 });
+      await runtime.persistSettings({ notifyOnCompletion: false });
+
+      expect((await readJson(preferencesPath)).fields).toMatchObject({ fontSize: { value: 115 }, notifyOnCompletion: { value: false } });
+      const [backup, ...others] = runtime.takeSetAsideSettingsFiles();
+      expect(others).toEqual([]);
+      expect(backup).toMatch(/^preferences\.json\.damaged-/);
+      expect(await fsPromises.readFile(path.join(tempRoot, backup), 'utf8')).toBe(blank);
+      expect(runtime.takeSetAsideSettingsFiles()).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('moves aside a settings.json holding only NUL bytes and saves again', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '\0'.repeat(512));
+
+      await runtime.readSettingsFromDiskMigrated();
+      await runtime.persistSettings({ desktopKeepAwakeEnabled: true, fontSize: 120 });
+
+      expect(await readJson(settingsFilePath)).toMatchObject({ desktopKeepAwakeEnabled: true, fontSize: 120 });
+      const setAside = runtime.takeSetAsideSettingsFiles();
+      expect(setAside).toHaveLength(1);
+      expect(setAside[0]).toMatch(/^settings\.json\.damaged-/);
+      expect(await fsPromises.readdir(tempRoot)).toContain(setAside[0]);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('treats an unreadable preferences.json as failure: no seed, no overwrite, profile writes refused, instance still served', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     try {

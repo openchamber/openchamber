@@ -6,6 +6,7 @@ import type { ToasterProps } from "sonner"
 import { formatMessage, getLocaleDirection, useI18nStore } from "@/lib/i18n"
 import { buttonVariants } from "@/components/ui/button-variants"
 import { Spinner } from "@/components/ui/spinner"
+import { useSetAsideSettingsFilesToast } from "@/hooks/useSetAsideSettingsFilesToast"
 
 type ToastPosition = NonNullable<ToasterProps["position"]>
 
@@ -120,6 +121,7 @@ const Toaster = ({ position = "bottom-right", layout = "corner", ...props }: Toa
   const shadow = isDark ? SHADOW_DARK : SHADOW_LIGHT
   const [container, setContainer] = React.useState<HTMLElement | null>(null)
   usePinnedToastStyles(container, shadow)
+  useSetAsideSettingsFilesToast()
   const layoutClassNames = layout === "banner" ? BANNER_CLASS_NAMES : CORNER_CLASS_NAMES
 
   return (
