@@ -150,7 +150,6 @@ const useCommentMenu = (comment: ReferenceCommentItem, actions: ScopedCommentAct
                 placeholder={t('sourceBoard.comment.edit')}
                 disabled={busy !== null}
                 autoFocus
-                maxLines={4}
                 aria-label={t('sourceBoard.comment.edit')}
             />
             <div className="flex items-center justify-end gap-2">

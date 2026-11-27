@@ -37,6 +37,10 @@ Each opening starts with the remembered tab and an empty search. Remounting esta
 
 Host text is Markdown source, where mentions name host users and file paths remain text. Prompt token resolution changes that meaning, and pasted-image uploads have no destination in a source-control text write.
 
+### Why host text editors take the body's type and one shared line count
+
+The editor writes what the description and comments render as: `typography-markdown`, the same 14 px the rendered body uses, instead of the 16 px browser default the composer host would otherwise inherit. Both host-text editors are the same component and take one line count (`REFERENCE_EDITOR_MAX_LINES`, 12 lines), because per-call-site counts (a body at 8, a comment at 4) had left both too short to read the text being written. The count is not a prop: a call site that sets its own can silently shrink the window again.
+
 ### Why PR statuses subscribe through the store and not an effect
 
 React checks the store version again after subscribing. This catches an answer that arrives between rendering a cached list and subscribing, which an effect subscription can miss and leave its row and preview loading.

@@ -63,6 +63,31 @@ describe('a host item text edited in the composer editor', () => {
         });
     };
 
+    /** The editor's height cap is measured from the line height its CSS resolves; happy-dom loads no CSS. */
+    const withLineHeight = async (lineHeight: string, run: () => Promise<void>) => {
+        const original = globalThis.getComputedStyle;
+        Object.defineProperty(globalThis, 'getComputedStyle', {
+            configurable: true,
+            writable: true,
+            // SAFETY: the stub answers only `lineHeight`, the single property ComposerEditor's height cap reads; the real style object is returned for every other element.
+            value: (element: Element) => element instanceof HTMLElement && element.classList.contains('cm-content')
+                ? ({ lineHeight } as CSSStyleDeclaration)
+                : original(element),
+        });
+        try {
+            await run();
+        } finally {
+            Object.defineProperty(globalThis, 'getComputedStyle', { configurable: true, writable: true, value: original });
+        }
+    };
+
+    test("draws Markdown at the body's type and the preview height both host-text editors share", async () => {
+        // 21px is the used line height of --text-markdown at the default zoom.
+        await withLineHeight('21px', () => show());
+        expect(host.querySelector('.composer-editor')?.className).toContain('typography-markdown');
+        expect(host.querySelector<HTMLElement>('.cm-scroller')?.style.maxHeight).toBe('252px');
+    });
+
     test('shows the Markdown source it was given', async () => {
         await show();
         expect(host.querySelector('[contenteditable]')?.textContent).toContain('First line');
