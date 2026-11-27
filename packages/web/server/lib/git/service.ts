@@ -18,6 +18,7 @@ import { DIRECTORY_UNREACHABLE, directoryReachability, directoryUnreachableError
 import { GIT_LAUNCH_DIRECTORY, gitArgsIn, launchesFrom } from './git-launch.js';
 import { assertLinkedRepositoryReachable, assertPathReachable, assertRepositoryReachable, directoryExists, execFileAsync, realpathOf } from './reachable-disk.js';
 import { readWorktreeTopologyFingerprint } from './worktree-fingerprint.js';
+import { isLinkedWorktreeAnswer, WORKTREE_TYPE_ARGS } from './worktree-type.js';
 import { createWorktreeRegistry } from './worktree-registry.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
@@ -6567,11 +6568,7 @@ export async function getLog(directory: string, options: LogOptions = {}) {
 export async function isLinkedWorktree(directory: string) {
   const git = await createGit(directory);
   try {
-    const [gitDir, gitCommonDir] = await Promise.all([
-      git.raw(['rev-parse', '--git-dir']).then((output) => output.trim()),
-      git.raw(['rev-parse', '--git-common-dir']).then((output) => output.trim())
-    ]);
-    return gitDir !== gitCommonDir;
+    return isLinkedWorktreeAnswer(normalizeDirectoryPath(directory), await git.raw(WORKTREE_TYPE_ARGS));
   } catch (error) {
     console.error('Failed to determine worktree type:', error);
     return false;
