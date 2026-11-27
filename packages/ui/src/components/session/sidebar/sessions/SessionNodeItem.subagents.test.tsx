@@ -124,16 +124,19 @@ afterEach(async () => {
   }
 });
 
+// The expander is the chevron span; the row's actions menu trigger carries aria-expanded too.
+const expander = () => host.querySelector('[role="button"][aria-expanded]');
+
 test('a parent of spawned sessions keeps its expander while those sessions are listed', async () => {
   useSessionDisplayStore.setState({ showSubagentSessions: true });
   await render(rowProps());
-  expect(host.querySelector('[aria-expanded]')).not.toBeNull();
+  expect(expander()).not.toBeNull();
 });
 
 test('a parent whose only children are spawned sessions has no expander while they are hidden', async () => {
   useSessionDisplayStore.setState({ showSubagentSessions: false });
   await render(rowProps());
-  expect(host.querySelector('[aria-expanded]')).toBeNull();
+  expect(expander()).toBeNull();
 });
 
 test('a parent expanded before its subagents were hidden still reports their pending permission', async () => {
