@@ -17,6 +17,7 @@ import type { QuotaProviderId } from '@/types';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSession } from '@/lib/router/openSessionFromRoute';
+import { requestTrackerItemOpen } from '@/lib/trackerItemRequests';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 import type { SavedInstanceSwitchOutcome } from './mobileConnections';
@@ -96,6 +97,10 @@ const execute = (intent: NavigationIntent): boolean => {
       void openSession(intent.sessionId, { directory: intent.directory ?? null, messageId: intent.messageId ?? null });
       return true;
 
+    case 'tracker-item':
+      requestTrackerItemOpen({ url: intent.url, directory: intent.directory ?? null });
+      return true;
+
     case 'new-session': {
       const store = useSessionUIStore.getState();
       store.openNewSessionDraft();
@@ -172,7 +177,7 @@ export const createDeepLinkQueue = <Intent extends { type: string; serverId?: st
     if (switching) return switching;
     if (!pending || waitingForSwitchedRuntime) return Promise.resolve();
     const intent = pending;
-    if (intent.type === 'session' && intent.serverId && switchToServer) {
+    if (intent.serverId && switchToServer) {
       switching = switchThenFlush(switchToServer, intent.serverId);
       return switching;
     }
@@ -223,7 +228,6 @@ const notificationTapDataSchema = z.object({
   serverId: z.string().min(1).optional().catch(undefined),
   sessionId: z.string().min(1).optional().catch(undefined),
   url: z.string().optional().catch(undefined),
-  deeplink: z.string().optional().catch(undefined),
 });
 
 export type NotificationTapData = z.input<typeof notificationTapDataSchema>;
@@ -231,10 +235,10 @@ export type NotificationTapData = z.input<typeof notificationTapDataSchema>;
 export const notificationTapIntent = (data: NotificationTapData | null | undefined): DeepLinkIntent | null => {
   const parsed = notificationTapDataSchema.safeParse(data ?? {});
   if (!parsed.success) return null;
-  const { serverId, sessionId, url, deeplink } = parsed.data;
-  const fromUrl = parseDeepLink(url ?? deeplink);
+  const { serverId, sessionId, url } = parsed.data;
+  const fromUrl = parseDeepLink(url);
   const intent: DeepLinkIntent | null = fromUrl ?? (sessionId ? { type: 'session', sessionId } : null);
-  if (intent?.type === 'session' && serverId) intent.serverId = serverId;
+  if ((intent?.type === 'session' || intent?.type === 'tracker-item') && serverId) intent.serverId = serverId;
   return intent;
 };
 

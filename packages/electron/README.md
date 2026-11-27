@@ -554,6 +554,20 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   in the window that shows its instance and raises that window; the
   receiving window is brought forward first only when it already shows the
   same instance, so the local window does not jump in front of a remote one.
+  A pull request notification (`itemUrl`, an http(s) address, and `directory`;
+  main checks the address and opens nothing itself) waits in main
+  (`notification-tracker-item.mjs`), the newest one only and for a minute at
+  most, and main sends the main window `openchamber:tracker-item-waiting`, which
+  carries nothing, unless the window is loading: a page on its way out must not
+  take the click. The listener (`useDesktopTrackerItemClicks`) takes the click
+  with `desktop_take_pending_tracker_item` on that nudge and whenever it mounts,
+  so a click made while the main window is missing, loading, on a startup or
+  recovery screen or remounting its main view opens once a listener is there.
+  A Mini Chat has no Tracker and takes none. A missing main window is opened. The
+  renderer hands a notification of another instance to
+  `desktop_open_host_tracker_item`, which opens it in that instance's window,
+  reusing an open one, the way `desktop_open_host_session` does for sessions;
+  a new window starts on the web route `?item=&itemDir=`.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - Theme-file selection uses the local `~/.vscode/extensions` directory when present.
   The local-page-gated `desktop_pick_theme_file` command returns only the selected

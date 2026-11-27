@@ -155,8 +155,15 @@ hides the text is the **push key** (`push-seal.js`). A current iOS or Android ap
 generic scenario title in the clear, an empty body, and `data.enc`: AES-256-GCM of what the
 phone shows. That is the session name as title and what happened as body: the agent's reply,
 the question, the command or file a permission is for, the error, the goal outcome
-(`runtime.js` → `toApnsGenericPayload` → `sealed`, at most 250 characters). The iOS
-Notification Service Extension and Android's `SealedPushMessagingService` open it on the device.
+(`runtime.js` → `toApnsGenericPayload` → `sealed`, at most 250 characters). A pull request
+notification also seals `url`, the link a tap follows (`openchamber://tracker-item?url=<the pull
+request>&dir=<its project folder>`), since it names the repository. The iOS
+Notification Service Extension and Android's `SealedPushMessagingService` open it on the device;
+the extension writes the link into the notification's `userInfo.url`, the service into the tap
+intent's `url` extra, and only a link that starts with `openchamber://` and came out of a blob
+this phone's key opened; both drop a `url` that arrived in the clear. A `simctl push` to the
+iOS Simulator is added by CoreSimulatorBridge straight to the notification list and never runs
+the extension, so the sealed path can only be seen with a real APNs push. The app reads `url` before `sessionId` (`deepLinkNavigation.ts`).
 
 Who can read what:
 
@@ -168,7 +175,8 @@ Who can read what:
 
 An app that registered without a key gets the generic title and the session name in the clear,
 and no message content. Enterprise mode sends no sealed text and drops the session name, so
-every phone shows only the scenario title.
+every phone shows only the scenario title. Neither gets a pull request's link, so a tap on
+such a notification opens the app as before.
 
 ## Android (FCM)
 

@@ -13,6 +13,28 @@ test('a notification names its session and the server that sent it', () => {
   expect(notificationTapIntent({})).toBeNull();
 });
 
+test('a link outside the sealed url field does not decide what a tap opens', () => {
+  const clear = { sessionId: 'ses-b', deeplink: 'openchamber://tracker-item?url=https%3A%2F%2Fgithub.com%2Facme%2Fapp%2Fpull%2F7' };
+  expect(notificationTapIntent(clear)).toEqual({ type: 'session', sessionId: 'ses-b' });
+});
+
+test('a pull request notification tap opens its pull request on the server that sent it', async () => {
+  const data = { serverId: 'srv-b', url: 'openchamber://tracker-item?url=https%3A%2F%2Fgithub.com%2Facme%2Fapp%2Fpull%2F7&dir=%2Fwork%2Fapp' };
+  const intent = notificationTapIntent(data);
+  expect(intent).toEqual({ type: 'tracker-item', url: 'https://github.com/acme/app/pull/7', directory: '/work/app', serverId: 'srv-b' });
+  const opened: string[] = [];
+  const switchCalls: string[] = [];
+  const queue = createDeepLinkQueue<DeepLinkIntent>((next) => {
+    if (next.type === 'tracker-item') opened.push(next.url);
+    return true;
+  });
+  await queue.setReady(true, async (serverId) => { switchCalls.push(serverId); return 'active'; });
+  if (!intent) throw new Error('no intent');
+  await queue.apply(intent);
+  expect(switchCalls).toEqual(['srv-b']);
+  expect(opened).toEqual(['https://github.com/acme/app/pull/7']);
+});
+
 test('a notification tap switches once, waits for the new runtime, then opens its session', async () => {
   const opened: string[] = [];
   const queue = createDeepLinkQueue<DeepLinkIntent>((intent) => {

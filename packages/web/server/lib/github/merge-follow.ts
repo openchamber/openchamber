@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { isTrackedItemInput, parseTrackedItem, trackedItemKey } from '../tracked-items/items.js';
+import { resolvePrimaryWorktreeRoot } from '../git/service.js';
+import { isTrackedItemInput, parseTrackedItem, threadInstance, trackedItemKey } from '../tracked-items/items.js';
 import type { ServerTrackedItemState, TrackedThread } from '../tracked-items/contracts.js';
 import type { createTrackedItemsService } from '../tracked-items/service.js';
 import type { MutationRecord, MutationResult } from '../source-control/mutation-storage.js';
@@ -11,14 +12,15 @@ import type { GitHubEnvelope } from './contracts.js';
 type MergeSnapshot = z.infer<typeof snapshotSchema>;
 type MergeEntry = Omit<z.infer<typeof entrySchema>, 'item'> & { item: TrackedThread };
 type MergeEvent = 'merged' | 'closed' | 'removed' | 'checks-failed';
-export interface MergeNotification { item: TrackedThread; event: MergeEvent }
+export interface MergeNotification { item: TrackedThread; event: MergeEvent; url: string; directory: string | null }
 interface MergeFollowOptions {
   dataDir: string;
   notify: (notification: MergeNotification) => void | Promise<void>;
+  resolveProjectDirectory?: (directory: string) => Promise<string | null | undefined>;
   now?: () => number;
 }
 interface MergeMutation {
-  context: Pick<ProviderMutationContext, 'provider' | 'instance' | 'accountId'>;
+  context: Pick<ProviderMutationContext, 'provider' | 'instance' | 'accountId'> & { directory?: string | undefined };
   kind: string;
   input: { cancel?: unknown; method?: unknown };
 }
@@ -40,7 +42,10 @@ const snapshotSchema = z.object({
   isInMergeQueue: z.boolean().optional(),
   autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
 });
-const entrySchema = z.object({ item: z.unknown(), startedAt: z.number(), observedAt: z.number().optional(), last: snapshotSchema });
+const entrySchema = z.object({
+  item: z.unknown(), directory: z.string().min(1).optional(), startedAt: z.number(), observedAt: z.number().optional(), last: snapshotSchema,
+});
+const pullRequestUrl = (item: TrackedThread) => `https://${threadInstance(item)}/${item.owner}/${item.repo}/pull/${item.number}`;
 
 export function mergeFollowEvents(previous: MergeSnapshot, next: MergeSnapshot): MergeEvent[] {
   if (next.state === 'merged') return ['merged'];
@@ -51,7 +56,9 @@ export function mergeFollowEvents(previous: MergeSnapshot, next: MergeSnapshot):
   return events;
 }
 
-export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: MergeFollowOptions) {
+const primaryWorktreeOf = async (directory: string) => (await resolvePrimaryWorktreeRoot(directory)).root;
+
+export function createMergeFollowRuntime({ dataDir, notify, resolveProjectDirectory = primaryWorktreeOf, now = Date.now }: MergeFollowOptions) {
   const file = path.join(dataDir, 'github-merge-follow.json');
   const entries = new Map<string, MergeEntry>();
   const cancelling = new Map<string, number>();
@@ -62,6 +69,12 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: Me
   const attachedService = () => {
     if (trackedItems === null) throw new Error('Tracked items service is not attached');
     return trackedItems;
+  };
+  const projectDirectoryOf = async (directory: string | undefined) => {
+    const folder = directory?.trim();
+    if (!folder) return undefined;
+    const project = await resolveProjectDirectory(folder).catch(() => null);
+    return project?.trim() || folder;
   };
   const serialize = (operation: () => Promise<void>) => {
     const result = queue.then(operation);
@@ -111,7 +124,7 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: Me
       const events = mergeFollowEvents(entry.last, next).filter((event) => event !== 'removed' || !cancelling.has(record.key));
       if (next.state === 'merged' || next.state === 'closed') entries.delete(record.key);
       else entries.set(record.key, { ...entry, observedAt, last: next });
-      for (const event of events) notifications.push({ item: entry.item, event });
+      for (const event of events) notifications.push({ item: entry.item, event, url: pullRequestUrl(entry.item), directory: entry.directory ?? null });
     }
     if (!changed) return;
     try { await persist(); }
@@ -152,6 +165,10 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: Me
       const item = parseTrackedItem({ provider: 'github', kind: 'pull', instance: context.instance, accountId: context.accountId,
         owner: record.target.project.owner, repo: record.target.project.name, number: record.target.number });
       if (!item) return;
+      const outcome = record.result?.outcome;
+      const directory = !input.cancel && !record.result?.merged && WAITING_OUTCOMES.includes(outcome)
+        ? await projectDirectoryOf(context.directory)
+        : undefined;
       return serialize(async () => {
         await loaded;
         const key = trackedItemKey(item);
@@ -164,11 +181,10 @@ export function createMergeFollowRuntime({ dataDir, notify, now = Date.now }: Me
           interest();
           return;
         }
-        const outcome = record.result?.outcome;
         if (!WAITING_OUTCOMES.includes(outcome)) return;
         if (!entries.has(key) && entries.size >= 200) throw new Error('Too many followed pull requests');
         const previous = entries.get(key);
-        entries.set(key, { item, startedAt: now(), last: {
+        entries.set(key, { item, directory, startedAt: now(), last: {
           state: 'open', headSha: record.target.headSha,
           isInMergeQueue: outcome === 'queued',
           autoMergeRequest: outcome === 'auto-merge' ? { enabledAt: new Date(now()).toISOString(), mergeMethod: String(input.method).toUpperCase() } : null,

@@ -1,4 +1,5 @@
 import { getRuntimeUrlResolver } from './runtime-url';
+import { notificationPropertiesSchema } from './notifications/notificationShapes';
 import { runtimeFetch } from './runtime-fetch';
 import { useAuthSessionStore, waitForAuthSession } from './runtime-auth-expiry';
 import { getRuntimeExtraHeadersSync } from './runtime-auth';
@@ -191,18 +192,6 @@ type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infe
 const eventStreamReadySchema = z.object({ connectionId: z.string().min(1).optional() });
 const sourceControlActivitySchema = z.object({ directory: z.string().min(1) });
 const spaceStreamConnectedSchema = z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), status: z.literal('connected') });
-
-const notificationPropertiesSchema = z.object({
-  title: z.string().optional(),
-  body: z.string().optional(),
-  tag: z.string().optional(),
-  kind: z.string().optional(),
-  sessionId: z.string().optional(),
-  directory: z.string().optional(),
-  requireHidden: z.boolean().optional(),
-  showWhenFocused: z.boolean().optional(),
-  toastOnly: z.boolean().optional(),
-});
 
 type OpenChamberEvent =
   | AppearanceChangedEvent

@@ -47,7 +47,12 @@ This module provides notification message preparation utilities for the web serv
 ### Trigger runtime API (runtime.js)
 
 `pushPluginNotification({ title, body, tag, sessionId })` is the push half of `POST /api/notifications/emit` and `notify.send`, see *Plugin notification route*. It skips while the desktop window is focused outside `always` mode, as every kind does.
-`notifyPullRequest({ item, event })` delivers user merge-follow events through the same native, UI, web-push, APNs and extension-channel fanout. `notifyOnPullRequests` is a profile setting, default on, independent of completion/error notifications. It is checked on the server before every delivery. Fixed event titles follow the interface locale (`pull-request-locales.js`); the body names the repository and PR number. Enterprise-mode push and extension deliveries strip that reference through the existing fanout boundary. Notifications have kind `pull-request`, no session id, and never wake an agent. Existing click routing accepts sessions only, so these notifications currently bring the app forward without selecting a PR.
+`notifyPullRequest({ item, event, url, directory })` (`pull-request-notice.ts`) delivers user merge-follow events through the same native, UI, web-push, APNs and extension-channel fanout. `notifyOnPullRequests` is a profile setting, default on, independent of completion/error notifications. It is checked on the server before every delivery. Fixed event titles follow the interface locale (`pull-request-locales.js`); the body names the repository and PR number. Enterprise-mode push and extension deliveries strip that reference through the existing fanout boundary. Notifications have kind `pull-request`, no session id, and never wake an agent. A click opens the pull request (`url` and `directory` come from `../github/merge-follow.js`):
+  - The desktop notification and the UI event carry `itemUrl` and `directory`. Both stay on this machine and its own windows, so enterprise mode leaves them in, as it leaves the body.
+  - Web push gets the route `/?item=<url>&itemDir=<directory>` as `data.url` (`push-fanout.ts` `itemWebRoute`), which the service worker already follows; in enterprise mode `data.url` stays `/`.
+  - The phone gets `openchamber://tracker-item?url=…&dir=…` only inside the sealed content (`itemPhoneLink`, see `APNS.md`); in enterprise mode, or for a phone without a push key, there is none.
+  - Extension channels get no address, in either mode.
+  - A follow saved before the folder was stored has no `directory`; its click opens the pull request in the browser, since the app cannot tell which project it belongs to.
 `notifyShareAnswer({ sessionId, label, title, summary })` announces an answer to a shared page (`../share-pages`) once OpenCode admitted it into its session. It obeys the completion toggle (`notifyOnCompletion`); there is no setting of its own. Answers delivered within 2 s of each other (at most 10 s in all, such as a night's picked up at start) collapse into one notification about the newest session: "<label> answered “<title>”" with the answer's summary, or "N answers to shared pages" with the names; both texts come from `template-locales.js` (`shareAnswerTitle`, `shareAnswersTitle`). Kind and push type `share-answer`, tag `share-<sessionId>`.
 - Every open window shows it as a toast, whatever the presence: the UI event always goes out, with `showWhenFocused` and `toastOnly`. `toastOnly` is true while another window is in use (`isAnyUiVisible`, the desktop's focus) or system notifications are off; a window then shows the toast and no system notification of its own (`packages/ui` `sync/share-answer-toast.ts`).
 - The desktop notification, web push, APNs and extension channels follow the usual presence and `notificationMode` rules, through `fanoutPush` and `sendToChannels`. The label and the page title are conversation content, like a session name: enterprise mode strips them from push and channels through that same boundary, and the desktop notification and toast keep them.
@@ -383,6 +388,18 @@ An auto-accepted permission's reply can take longer than the debounce, so the se
 ### Why goal and review loops announce settlement and not each turn
 
 Their intermediate turns are loop progress, so their settlement owns the completion notice; unreadable goal metadata falls through to normal notification behavior. The review check captures the turn-end time before awaiting reads so a review that settles during those reads remains distinguishable from a later turn. A user-stopped review stays quiet because the user already handled it.
+
+### Why the phone gets a pull request's link sealed and not in the clear
+
+The clear part of a push passes through the relay, Apple and Google, and the link names the repository and the pull request. Sealing it keeps them as blind to it as to the body; the cost is that a phone without a push key, or a server in enterprise mode, opens only the app on a tap.
+
+### Why a pull request notification carries its project's folder and not the merge folder
+
+A merge is often started from a worktree, and "Archive a worktree after its PR is merged" archives it right after. Its path would then resolve to no project and the click would go to the browser. The follow stores the repository's primary worktree (`resolvePrimaryWorktreeRoot`) when it starts, while the worktree still exists; the UI needs the folder only to find the project.
+
+### Why the click does not read "Open issues and pull requests in OpenChamber"
+
+That setting (`openTrackerLinksOnBoard`) decides where links in chat open. The notification is OpenChamber's own and its click already brings the app forward, so it opens the pull request in OpenChamber whenever the pull request's project is open here, and in the browser otherwise (decided in OPE-381).
 
 ### Why pull-request and plugin tags use a digest and not the reference they name
 

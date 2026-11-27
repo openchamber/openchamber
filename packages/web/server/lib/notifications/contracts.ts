@@ -18,6 +18,7 @@ export interface NotificationPayload {
   kind?: string;
   sessionId?: string | undefined;
   directory?: string | undefined;
+  itemUrl?: string | undefined;
   requireHidden?: boolean;
   showWhenFocused?: boolean;
   toastOnly?: boolean;

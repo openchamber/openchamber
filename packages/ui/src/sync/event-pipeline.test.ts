@@ -197,10 +197,12 @@ describe("createEventPipeline", () => {
       [
         { type: "openchamber:notification", properties: { kind: "agent-complete", sessionId: "ses_1", title: "Done" } },
         { type: "openchamber:permission-auto-accept.updated", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } as never },
+        { type: "openchamber:notification", properties: { kind: "pull-request", title: "Merged", itemUrl: "https://github.com/acme/app/pull/7", directory: "/work/app" } },
       ],
-      2,
+      3,
     )
     expect(events[0]).toEqual({ type: "openchamber.notification", properties: { kind: "agent-complete", sessionId: "ses_1", title: "Done" } })
+    expect(events[2]).toEqual({ type: "openchamber.notification", properties: { kind: "pull-request", title: "Merged", itemUrl: "https://github.com/acme/app/pull/7", directory: "/work/app" } })
     expect(events[1]).toEqual({ type: "openchamber.permission-auto-accept", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } })
   })
 

@@ -19,14 +19,26 @@ const buildSessionTargetUrl = (sessionId?: string): string | null => {
   return `/?session=${encodeURIComponent(trimmed)}`;
 };
 
+const buildTrackerItemTargetUrl = (itemUrl?: string, directory?: string): string | null => {
+  const url = itemUrl?.trim() ?? '';
+  if (!url) return null;
+  const params = new URLSearchParams({ item: url });
+  const folder = directory?.trim() ?? '';
+  if (folder) params.set('itemDir', folder);
+  return `/?${params.toString()}`;
+};
+
 type NotificationTarget = {
   url: string;
-  sessionId: string;
+  sessionId?: string;
 };
 
 const getNotificationTarget = (payload?: NotificationPayload): NotificationTarget | undefined => {
   const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : '';
-  if (!sessionId) return undefined;
+  if (!sessionId) {
+    const url = buildTrackerItemTargetUrl(payload?.itemUrl, payload?.directory);
+    return url ? { url } : undefined;
+  }
   const url = buildSessionTargetUrl(sessionId);
   if (!url) return undefined;
   return { url, sessionId };
@@ -264,6 +276,7 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
         kind: payload?.kind,
         sessionId: payload?.sessionId,
         directory: payload?.directory,
+        itemUrl: payload?.itemUrl,
         runtimeKey: payload?.runtimeKey,
         requireHidden: payload?.requireHidden,
         showWhenFocused: payload?.showWhenFocused,

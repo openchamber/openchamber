@@ -544,6 +544,30 @@ preview's footer holds actions instead of what the agent gets.
   worktree session or group outside the root resolves before the live
   worktree map has loaded (`SessionGroupSection`, `SessionNodeItem`). A
   badge's `+N` does nothing; its tooltip lists the others.
+- A click on a pull request notification (desktop, web push, a page's own
+  notification, the phone) opens the same way through `requestTrackerItemOpen`
+  (`lib/trackerItemRequests.ts`), answered by `useTrackerItemRequestAnswers`
+  (`hooks/`) through `TrackerItemRequests` (`sourceBoard/trackerItemRequest.tsx`),
+  mounted in `WindowLayout` for main windows and, below the mobile actions
+  provider, in `MobileAppScope`; VS Code mounts nothing. The same component
+  takes the desktop shell's clicks (`useDesktopTrackerItemClicks`). It does
+  not read `openTrackerLinksOnBoard`. It waits until the provider list and the
+  projects are known, so a click that starts the app does not send an open
+  project's item to the browser. A recognised item whose project is not open
+  here opens in the browser: through the service worker's window for a tab that
+  was already open, and on the web, in a tab the worker opened for the click
+  (`itemTab=1`), by replacing that tab's history entry with the item's address,
+  since the browser blocks a new window there; an installed web app keeps its
+  window. The phone app's WebView refuses a window no tap opened, so there the
+  page navigates to the item once the app is active and Capacitor hands the
+  address to the system browser. It waits for that at most 5 seconds: a tap the
+  user walked away from must not open the browser hours later. With a new chat on screen the request waits
+  until that chat has its own folder (`prepareChatDraftDirectory`), since its
+  side panel moves there and a tab opened before would stay in the Chats
+  root's panel, out of sight. An address that is no issue, pull request or tracker item, or whose
+  host is neither the provider's own nor a connected account's instance, is
+  dropped, since a route or a phone link can be crafted: the providers' path
+  patterns alone match a pull request path on any host.
 - A PR's review threads read as the comment that opened them with the
   replies under it (`ReferenceCommentItem.thread`); a reply is not an entry of
   its own. A resolved thread folds to one line ("Resolved · N replies") and

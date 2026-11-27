@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { findReusableHostWindowIndex, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, readTrackerItemTarget, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, resolveWindowHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification, windowRouteEvent, withWindowRoute } from './notification-host-routing.mjs';
 
 test('local runtime key resolves to a local host entry', () => {
   assert.deepEqual(resolveHostEntryForRuntimeKey('local', {
@@ -243,4 +243,29 @@ test('a deep link host id resolves like a notification runtime key', () => {
 test('a flat forwarded payload is stamped the same way', () => {
   const stamped = stampForwardedNotification({ title: 't', runtimeKey: 'host:x' }, null);
   assert.equal(stamped.runtimeKey, 'host:x');
+});
+
+test('a forwarded pull request notification keeps the address and folder its click opens', () => {
+  const stamped = stampForwardedNotification({ payload: {
+    title: 'Merged', kind: 'pull-request', itemUrl: 'https://github.com/acme/app/pull/7', directory: '/work/app',
+  } }, 'h1');
+  assert.deepEqual(readTrackerItemTarget(stamped), {
+    url: 'https://github.com/acme/app/pull/7', directory: '/work/app', runtimeKey: 'host:h1',
+  });
+});
+
+test('a click target is only a plain web address', () => {
+  for (const itemUrl of ['javascript:alert(1)', 'file:///etc/passwd', 'openchamber://session/x', 'https://user:pass@github.com/a/b/pull/1', 'not a url', '', undefined]) {
+    assert.equal(readTrackerItemTarget({ itemUrl, directory: '/work/app' }), null, String(itemUrl));
+  }
+});
+
+test('a host window opens a session or a tracker item through its route', () => {
+  assert.equal(withWindowRoute('http://127.0.0.1:3000/', { sessionId: 'ses_a', messageId: 'msg_1' }), 'http://127.0.0.1:3000/?session=ses_a&message=msg_1');
+  const opened = new URL(withWindowRoute('openchamber-ui://app/index.html', { trackerItem: { url: 'https://github.com/acme/app/pull/7', directory: '/work/app' } }));
+  assert.equal(opened.searchParams.get('item'), 'https://github.com/acme/app/pull/7');
+  assert.equal(opened.searchParams.get('itemDir'), '/work/app');
+  assert.equal(opened.searchParams.has('session'), false);
+  assert.deepEqual(windowRouteEvent({ trackerItem: { url: 'https://github.com/acme/app/pull/7' } }), ['openchamber:open-tracker-item', { url: 'https://github.com/acme/app/pull/7' }]);
+  assert.deepEqual(windowRouteEvent({ sessionId: 'ses_a' }), ['openchamber:open-session', { sessionId: 'ses_a' }]);
 });
