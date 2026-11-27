@@ -2,7 +2,7 @@ import React from 'react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getInlineStartSide, useI18n } from '@/lib/i18n';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
@@ -27,12 +27,7 @@ export const TitlebarLeftControls: React.FC = () => {
     useUIStore.getState().closeMainSurfaces();
     useSessionUIStore.getState().openNewSessionDraft();
   }, []);
-  const tabsShown = useUIStore((state) => state.sessionTabsEnabled && !(
-    state.isScheduledTasksDialogOpen || state.isArchivePageOpen || state.isIntegrationsCatalogOpen
-    || state.isUsageStatsPageOpen || state.isSourceBoardOpen || state.isOverviewOpen
-    || state.worktreesPageProjectId !== null || (state.isolatedSpacesEnabled && state.spacesPageProjectId !== null)
-    || state.runOverviewKey !== null || state.openGuestPageId !== null
-  ));
+  const tabsShown = useUIStore((state) => state.sessionTabsEnabled && !isChatCoveredByPage(state));
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {

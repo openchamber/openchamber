@@ -1,6 +1,6 @@
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import type { Session } from '@/lib/opencode/model';
 import { normalizePath } from '../utils';
 
@@ -22,8 +22,8 @@ export function useSessionRowPlace({
   folderOwnerKey,
 }: SessionRowPlaceInput) {
   const isCurrentSession = useSessionUIStore((state) => state.currentSessionId === session.id);
-  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
-  const isActive = isCurrentSession && !runOverviewOpen;
+  const chatCovered = useUIStore(isChatCoveredByPage);
+  const isActive = isCurrentSession && !chatCovered;
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
   const sessionProjectId = ownerProjectId === undefined ? projectId : ownerProjectId;
@@ -38,7 +38,7 @@ export function useSessionRowPlace({
   return {
     isCurrentSession,
     isActive,
-    runOverviewOpen,
+    chatCovered,
     sessionDirectory,
     sessionProjectId,
     projectRootDirectory,

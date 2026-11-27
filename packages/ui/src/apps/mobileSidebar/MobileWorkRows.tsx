@@ -430,7 +430,7 @@ export const MobileDraftRow: React.FC<{
   const actions = useMobileSidebarActions();
   const { draft } = row;
   const { revealed } = useMobileRowSwipe(row.key);
-  const { isOpen, firstLine, attachmentCount, label, open, discard } = useSessionDraftRow(draft, actions.close);
+  const { selected, firstLine, attachmentCount, label, open, discard } = useSessionDraftRow(draft, actions.close);
   const projectNamed = useZoneProjectNames();
   const mixedProject = useMixedRowProject(draft.projectId ?? null, row.detailed && row.mixed);
   const branch = useGitBranchLabel(row.detailed ? draft.directory : null);
@@ -446,7 +446,7 @@ export const MobileDraftRow: React.FC<{
   const attachment = firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="size-3 shrink-0 text-muted-foreground" /> : null;
   const detailed = row.detailed && Boolean(mixedProject || branch || attachment);
   const titleText = (
-    <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label italic', isOpen ? MOBILE_ACTIVE_TITLE_CLASS : 'oc-title-rest')}>
+    <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label italic', selected ? MOBILE_ACTIVE_TITLE_CLASS : 'oc-title-rest')}>
       {label}
     </span>
   );
@@ -457,8 +457,8 @@ export const MobileDraftRow: React.FC<{
       actionsWidth={ROW_ACTION_SLOT_WIDTH}
       revealed={revealed}
       onRevealedChange={setRevealed}
-      dataActiveSession={isOpen}
-      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', isOpen && MOBILE_ACTIVE_ROW_CLASS)}
+      dataActiveSession={selected}
+      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', selected && MOBILE_ACTIVE_ROW_CLASS)}
       actions={(
         <MobileSwipeAction
           icon="close"

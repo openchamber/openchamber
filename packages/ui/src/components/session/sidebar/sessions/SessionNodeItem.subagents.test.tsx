@@ -13,6 +13,7 @@ import { isWaitingPageRevealPending, takeWaitingPageReveal } from '@/sync/reques
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { setSyncRefs } from '@/sync/sync-refs';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { sessionExpansionKey } from '../sessionSidebarRowModel';
 import type { SessionNode } from '../types';
 import type { SessionNodeItemProps } from './SessionNodeItem';
@@ -243,6 +244,31 @@ test('the row stands in for an open session it hides, and only for that one', as
   await render({ ...rowProps(), expandedParents: new Set([sessionExpansionKey('project', false, 'ses_parent')]) });
   await act(async () => useSessionUIStore.setState({ currentSessionId: 'ses_subagent' }));
   expect(row()?.getAttribute('aria-current')).toBeNull();
+});
+
+test('a page over the chat takes the selection from the open session, and closing it gives it back', async () => {
+  const initialUI = useUIStore.getState();
+  await render(rowProps());
+  const row = () => host.querySelector('[data-session-row]');
+  await act(async () => useSessionUIStore.setState({ currentSessionId: 'ses_parent' }));
+  try {
+    for (const openPage of [
+      () => useUIStore.getState().setOpenGuestPage('hello-kit'),
+      () => useUIStore.getState().setArchivePageOpen(true),
+      () => useUIStore.getState().setUsageStatsPageOpen(true),
+      () => useUIStore.getState().setScheduledTasksDialogOpen(true),
+      () => useUIStore.getState().setSourceBoardOpen(true),
+    ]) {
+      expect(row()?.getAttribute('aria-current')).toBe('page');
+      await act(async () => openPage());
+      expect(row()?.getAttribute('aria-current')).toBeNull();
+      expect(row()?.className).not.toContain('oc-selected');
+      await act(async () => useUIStore.getState().closeMainSurfaces());
+    }
+    expect(row()?.className).toContain('oc-selected');
+  } finally {
+    useUIStore.setState(initialUI, true);
+  }
 });
 
 test('a double click on the badge opens the waiting session and leaves the row out of rename', async () => {

@@ -29,6 +29,7 @@ export { DEFAULT_SELECTION_APPROVAL_TEXT } from './ui/preferences';
 export { DEFAULT_EDITOR_FONT_SIZE } from './ui/preferences';
 export { DEFAULT_CONTEXT_EDITOR_TREE_WIDTH, DEFAULT_GIT_SIDEBAR_WIDTH, clampGitSidebarWidth } from './ui/preferences';
 export type { ContextPanelMode } from '@/lib/surfaces/modes';
+export { isChatCoveredByPage } from './ui/navigationActions';
 
 export const useUIStore = create<UIStore>()(
   devtools(

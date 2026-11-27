@@ -38,7 +38,7 @@ import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { isChatCoveredByPage, useUIStore } from '@/stores/useUIStore';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { findBlockingRequestTarget, openBlockingRequestTarget } from '@/sync/sync-context';
 import type { BlockingRequestKind } from '@/sync/session-request-hooks';
@@ -86,8 +86,8 @@ export const MobileSessionRow: React.FC<{
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const aiRename = useSessionAiRenameAction(session.id, session.directory, revealed || renaming);
   const isCurrent = useSessionUIStore((state) => state.currentSessionId === session.id);
-  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
-  const active = isCurrent && !runOverviewOpen;
+  const chatCovered = useUIStore(isChatCoveredByPage);
+  const active = isCurrent && !chatCovered;
   const isUnread = useSessionUnread(session.id);
   const markedUnread = useSessionMarkedUnread(session.id);
   const turnActivity = useSessionTurnActivity(session.id);
@@ -100,7 +100,7 @@ export const MobileSessionRow: React.FC<{
   const showSubagentSessions = useSessionDisplayStore((state) => state.showSubagentSessions);
   const badgeDirectory = directory || normalizePath(row.groupDirectory);
   const pendingRequests = usePendingRequests(node, expanded, showSubagentSessions, badgeDirectory);
-  const showsOpenHiddenSession = useShowsOpenHiddenSession(node, expanded, showSubagentSessions, runOverviewOpen);
+  const showsOpenHiddenSession = useShowsOpenHiddenSession(node, expanded, showSubagentSessions, chatCovered);
   const highlighted = active || showsOpenHiddenSession;
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
