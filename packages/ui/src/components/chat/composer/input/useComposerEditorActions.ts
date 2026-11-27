@@ -15,6 +15,7 @@ import type { useComposerColumn } from './useComposerColumn';
 import type { useComposerAutocompleteState } from './useComposerAutocompleteState';
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
+import { carryColumnLevelToAgent } from '../../columnAgentLevel';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getCycledPrimaryAgentName } from '../../mobileControlsUtils';
@@ -44,7 +45,7 @@ type Dependencies = {
     largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteGesture'>;
     sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'clearAbortPrompt' | 'isBtwActive' | 'btwSessionId' | 'currentSessionId' | 'abortCurrentOperation' | 'pickSessionAgent' | 'inputMode'>;
     sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleOpenMobilePanel'>;
-    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentProviderId' | 'currentModelId' | 'agents' | 'currentAgentName' | 'setAgent'>;
+    selection: Pick<ReturnType<typeof useComposerSelection>, 'currentProviderId' | 'currentModelId' | 'agents' | 'currentAgentName' | 'setAgent' | 'pinnedComposerSelection'>;
     language: Pick<ReturnType<typeof useComposerLanguage>, 'pastedSessionIds' | 'linkPastedSessionId' | 'setOpenSharedPageKey'>;
     referenceDrafts: Pick<ReturnType<typeof useComposerReferenceDrafts>, 'receivedPageBases' | 'updateLinkedReferences'>;
 };
@@ -75,7 +76,7 @@ export function useComposerEditorActions({
         pickSessionAgent, inputMode,
     } = sessionScope;
     const { handleOpenMobilePanel } = sessionLifecycle;
-    const { currentProviderId, currentModelId, agents, currentAgentName, setAgent } = selection;
+    const { currentProviderId, currentModelId, agents, currentAgentName, setAgent, pinnedComposerSelection } = selection;
     const { pastedSessionIds, linkPastedSessionId, setOpenSharedPageKey } = language;
     const { receivedPageBases, updateLinkedReferences } = referenceDrafts;
 
@@ -113,8 +114,15 @@ export function useComposerEditorActions({
             pickSessionAgent(currentSessionId, nextAgentName);
         }
 
-        if (!columnPinned) setAgent(nextAgentName);
-    }, [agents, columnPinned, currentAgentName, currentModelId, currentProviderId, currentSessionId, setAgent, pickSessionAgent]);
+        if (!columnPinned) {
+            setAgent(nextAgentName, { pick: true });
+            return;
+        }
+        const pinnedModel = pinnedComposerSelection?.model;
+        if (currentSessionId && pinnedModel) {
+            carryColumnLevelToAgent(currentSessionId, nextAgentName, pinnedModel, pinnedComposerSelection.variant, { fillUnremembered: false });
+        }
+    }, [agents, columnPinned, currentAgentName, currentModelId, currentProviderId, currentSessionId, pinnedComposerSelection, setAgent, pickSessionAgent]);
 
     const dictationHeightHostRef = React.useRef<HTMLDivElement | null>(null);
 

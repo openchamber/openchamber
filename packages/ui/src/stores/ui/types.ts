@@ -349,6 +349,7 @@ export interface UIStore {
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
   savePastedImagesAsFiles: boolean;
+  keepModelOnAgentSwitch: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
@@ -627,6 +628,7 @@ export interface UIStore {
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
   setSavePastedImagesAsFiles: (value: boolean) => void;
+  setKeepModelOnAgentSwitch: (value: boolean) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;

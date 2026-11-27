@@ -2592,6 +2592,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Allow prompting subagent sessions',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Save pasted images as files',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'A pasted or attached image is saved on the machine where OpenCode runs, and its path goes into the message, so the agent can open, send or edit it. A model that can\'t read images gets its images as paths even with this off.',
+  'settings.openchamber.visual.field.keepModelOnAgentSwitch': 'Keep the model and thinking level when switching agents',
+  'settings.openchamber.visual.field.keepModelOnAgentSwitchInfo': 'Switching between Plan, Build and other primary agents leaves the model and thinking level as they are. An agent with its own model set in its configuration still switches to that model, and subagents keep their own models.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Show starters on new session screen',
   'settings.openchamber.visual.field.draftStartersVisibleAria': 'Show starters on the new session screen',
   'settings.openchamber.visual.field.showToolFileIconsAria': 'Show tool file icons',

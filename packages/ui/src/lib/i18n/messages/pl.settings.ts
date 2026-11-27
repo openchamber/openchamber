@@ -1393,6 +1393,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Zezwalaj na prompty w sesjach podagentów',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Zapisuj wklejone obrazy jako pliki',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Wklejony lub załączony obraz jest zapisywany na komputerze, na którym działa OpenCode, a jego ścieżka trafia do wiadomości, więc agent może go otworzyć, wysłać lub edytować. Model, który nie odczytuje obrazów, dostaje je jako ścieżki nawet przy wyłączonej opcji.',
+  'settings.openchamber.visual.field.keepModelOnAgentSwitch': 'Zachowaj model i poziom myślenia przy zmianie agenta',
+  'settings.openchamber.visual.field.keepModelOnAgentSwitchInfo': 'Przełączanie między Plan, Build i innymi głównymi agentami zostawia model i poziom myślenia bez zmian. Agent, który ma własny model w konfiguracji, nadal przełącza się na ten model, a podagenci zachowują własne modele.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Pokazuj startery na ekranie nowej sesji',
   'settings.openchamber.visual.field.draftStartersVisibleAria': 'Pokazuj startery na ekranie nowej sesji',
   'settings.openchamber.visual.field.showToolFileIcons': 'Pokaż ikony plików narzędzi',

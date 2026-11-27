@@ -148,7 +148,7 @@ type BooleanSettingsKey =
   | 'confirmFileTreeMove' | 'layoutAnimations' | 'openLinksInBrowserPanel' | 'agentBrowserSharesLogins'
   | 'openTrackerLinksOnBoard' | 'diffWrapLines' | 'diffHideWhitespace' | 'allowPromptingSubagentSessions' | 'referencePreviewNewestFirst'
   | 'referencePreviewCollapseDescription'
-  | 'savePastedImagesAsFiles' | 'showOpenCodeRestartConfirm' | 'sessionTabsEnabled' | 'sessionTabsPerWorkspace'
+  | 'savePastedImagesAsFiles' | 'keepModelOnAgentSwitch' | 'showOpenCodeRestartConfirm' | 'sessionTabsEnabled' | 'sessionTabsPerWorkspace'
   | 'terminalCloseOnExit' | 'terminalOpenOnProjectAction' | 'sessionRecapEnabled' | 'sessionSuggestionEnabled'
   | 'sessionWorkEnabled' | 'sessionWorkIncludesPinned' | 'sessionReviewOfferEnabled' | 'sessionGoalEnabled' | 'sessionGoalDefaultBudgetEnabled' | 'sessionCostAlertsEnabled'
   | 'collapsibleThinkingBlocks' | 'showTextJustificationActivity' | 'showDeletionDialog' | 'nativeNotificationsEnabled'
@@ -973,7 +973,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.mobileReturnKeySends === true || candidate.mobileReturnKeySends === false) {
       result.mobileReturnKeySends = candidate.mobileReturnKeySends;
     }
-    for (const key of ['showOpenCodeUpdateNotifications', 'useGlobalOpenCodeService', 'agentWebToolEnabled', 'diffWrapLines', 'diffHideWhitespace', 'referencePreviewNewestFirst', 'referencePreviewCollapseDescription'] as const) {
+    for (const key of ['showOpenCodeUpdateNotifications', 'keepModelOnAgentSwitch', 'useGlobalOpenCodeService', 'agentWebToolEnabled', 'diffWrapLines', 'diffHideWhitespace', 'referencePreviewNewestFirst', 'referencePreviewCollapseDescription'] as const) {
       if (isBoolean(candidate[key])) result[key] = candidate[key];
     }
     if (isString(candidate.browserProvider) && candidate.browserProvider.trim()) {

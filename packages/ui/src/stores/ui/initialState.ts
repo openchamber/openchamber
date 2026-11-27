@@ -235,6 +235,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'showSplitAssistantMessageActions'
   | 'allowPromptingSubagentSessions'
   | 'savePastedImagesAsFiles'
+  | 'keepModelOnAgentSwitch'
   | 'draftStartersVisible'
   | 'isExpandedInput'
   | 'reportUsage'
@@ -472,6 +473,7 @@ export const createInitialUIState = (): Pick<UIStore,
   showSplitAssistantMessageActions: false,
   allowPromptingSubagentSessions: false,
   savePastedImagesAsFiles: false,
+  keepModelOnAgentSwitch: false,
   draftStartersVisible: true,
   isExpandedInput: false,
   reportUsage: true,

@@ -88,6 +88,7 @@ export const createPreferenceActions: UIStoreSlice<
   | 'setShowSplitAssistantMessageActions'
   | 'setAllowPromptingSubagentSessions'
   | 'setSavePastedImagesAsFiles'
+  | 'setKeepModelOnAgentSwitch'
   | 'setReportUsage'
   | 'setShortcutOverride'
   | 'clearShortcutOverride'
@@ -439,6 +440,10 @@ export const createPreferenceActions: UIStoreSlice<
 
   setSavePastedImagesAsFiles: (value) => {
     set({ savePastedImagesAsFiles: value });
+  },
+
+  setKeepModelOnAgentSwitch: (value) => {
+    set({ keepModelOnAgentSwitch: value });
   },
 
   setReportUsage: (value) => {

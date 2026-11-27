@@ -2534,6 +2534,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.allowPromptingSubagentSessions": "Дозволити запити в сесіях субагентів",
   "settings.openchamber.visual.field.savePastedImagesAsFiles": "Зберігати вставлені зображення як файли",
   "settings.openchamber.visual.field.savePastedImagesAsFilesInfo": "Вставлене чи вкладене зображення зберігається на машині, де працює OpenCode, а його шлях потрапляє в повідомлення, щоб агент міг його відкрити, надіслати чи змінити. Модель, яка не читає зображення, отримує їх шляхами навіть з вимкненим налаштуванням.",
+  "settings.openchamber.visual.field.keepModelOnAgentSwitch": "Зберігати модель і рівень мислення при зміні агента",
+  "settings.openchamber.visual.field.keepModelOnAgentSwitchInfo": "Перемикання між Plan, Build та іншими основними агентами залишає модель і рівень мислення як є. Агент, у конфігурації якого задано власну модель, і далі перемикається на неї, а субагенти працюють на своїх моделях.",
   "settings.openchamber.visual.field.draftStartersVisible": "Показувати стартери на екрані нової сесії",
   "settings.openchamber.visual.field.draftStartersVisibleAria": "Показувати стартери на екрані нової сесії",
   "settings.openchamber.visual.field.showToolFileIconsAria": "Показати значки файлів інструментів",

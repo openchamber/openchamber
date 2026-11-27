@@ -1,7 +1,8 @@
-import { type ConfigSlice, type DirectoryScopedConfig, type CurrentVariantSelection } from './types';
+import { type ConfigSlice, type DirectoryScopedConfig, type CurrentVariantSelection, type SetAgentOptions } from './types';
 import { isUnchangedSelection, resolveVariantFromSelection } from './selectionResolution';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { useUIStore } from '@/stores/useUIStore';
 import { findProviderModel, modelHasVariant, parseModelString, resolveInheritedDefaultVariant } from './selectionResolution';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { resolveEffortChoice, readRememberedEffort } from '@/lib/modelEfforts';
@@ -10,7 +11,7 @@ import { fromDirectoryKey } from './directories';
 import { getProjectDefaultsForConfigDirectory } from './projectDefaults';
 
 export const createAgentSelection: ConfigSlice<'setAgent'> = (set, get) => ({
-    setAgent: (agentName: string | undefined, options?: { keepModel?: boolean }) => {
+    setAgent: (agentName: string | undefined, options?: SetAgentOptions) => {
         const {
             agents,
             providers,
@@ -133,6 +134,7 @@ export const createAgentSelection: ConfigSlice<'setAgent'> = (set, get) => ({
             const resolveVariantSelectionForModel = (
                 providerId: string,
                 modelId: string,
+                includeSaved = true,
             ): CurrentVariantSelection => {
                 const model = findProviderModel(providers, providerId, modelId);
                 const variantOptions = model ? modelVariantNames(model) : undefined;
@@ -159,6 +161,7 @@ export const createAgentSelection: ConfigSlice<'setAgent'> = (set, get) => ({
                         variantOptions,
                     )
                     : [agentVariant, configuredVariant, inheritedDefault].find(isAvailable);
+                if (!includeSaved) return { override: undefined, inherited };
 
                 const savedVariant = currentSessionId
                     ? useSelectionStore.getState().getAgentModelVariantForSession(
@@ -186,8 +189,40 @@ export const createAgentSelection: ConfigSlice<'setAgent'> = (set, get) => ({
                 useSelectionStore.getState().saveAgentModelForSession(currentSessionId, currentAgentName, livePick.providerId, livePick.modelId);
             }
 
+            const targetPin = agent?.model?.providerID && agent.model.id ? agent.model : undefined;
+            const targetPinListed = Boolean(targetPin && findCatalogModel(
+                providers.find((provider) => provider.id === targetPin.providerID)?.models,
+                targetPin.id,
+            ));
+            const pickKeepsModel = Boolean(options?.pick && useUIStore.getState().keepModelOnAgentSwitch);
+            const keepsShownModel = pickKeepsModel && !targetPinListed && Boolean(currentProviderId && currentModelId);
+            const appliesPinFirst = pickKeepsModel && targetPinListed;
+
+            const keepShownModel = (): void => {
+                const live = get();
+                const { inherited } = resolveVariantSelectionForModel(currentProviderId, currentModelId, false);
+                const liveOverride = live.currentVariantSelection.override;
+                const override = liveOverride !== undefined
+                    ? liveOverride
+                    : resolveVariantFromSelection({ override: undefined, inherited }) === live.currentVariant
+                        ? undefined
+                        : live.currentVariant ?? null;
+                applyResolvedModelSelection(currentProviderId, currentModelId, { override, inherited }, live.selectionSource);
+                if (!currentSessionId) return;
+                const selection = useSelectionStore.getState();
+                selection.pickSessionModel(currentSessionId, currentProviderId, currentModelId);
+                selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
+                selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
+                selection.saveAgentModelVariantForSession(currentSessionId, agentName, currentProviderId, currentModelId, override);
+            };
+
             const resolveAgentModel = (): void => {
-                if (currentSessionId) {
+                if (keepsShownModel) {
+                    keepShownModel();
+                    return;
+                }
+
+                if (currentSessionId && !appliesPinFirst) {
                     const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                     if (existingAgentModel) {
                         applyResolvedModelSelection(
@@ -213,6 +248,9 @@ export const createAgentSelection: ConfigSlice<'setAgent'> = (set, get) => ({
                             resolveVariantSelectionForModel(providerID, modelID),
                             "auto",
                         );
+                        if (appliesPinFirst && currentSessionId) {
+                            useSelectionStore.getState().saveAgentModelForSession(currentSessionId, agentName, providerID, modelID);
+                        }
                         return;
                     }
                 }

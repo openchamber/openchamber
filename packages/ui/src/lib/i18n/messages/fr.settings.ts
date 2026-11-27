@@ -2423,6 +2423,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Autoriser les requêtes dans les sessions de sous-agents',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Enregistrer les images collées comme fichiers',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Une image collée ou jointe est enregistrée sur la machine où s’exécute OpenCode, et son chemin est ajouté au message pour que l’agent puisse l’ouvrir, l’envoyer ou la modifier. Un modèle qui ne lit pas les images les reçoit sous forme de chemins même quand cette option est désactivée.',
+  'settings.openchamber.visual.field.keepModelOnAgentSwitch': 'Conserver le modèle et le niveau de réflexion en changeant d\'agent',
+  'settings.openchamber.visual.field.keepModelOnAgentSwitchInfo': 'Passer de Plan à Build ou à un autre agent principal laisse le modèle et le niveau de réflexion tels quels. Un agent dont la configuration définit son propre modèle passe toujours à ce modèle, et les sous-agents gardent leurs propres modèles.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Afficher les raccourcis sur l’écran de nouvelle session',
   'settings.openchamber.visual.field.draftStartersVisibleAria': 'Afficher les raccourcis sur l’écran de nouvelle session',
   'settings.openchamber.visual.field.showToolFileIconsAria': 'Afficher les icônes des fichiers d\'outils',

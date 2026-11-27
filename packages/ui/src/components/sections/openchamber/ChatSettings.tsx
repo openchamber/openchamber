@@ -408,6 +408,8 @@ const ComposerTab: React.FC = () => {
   const setAllowPromptingSubagentSessions = useUIStore((state) => state.setAllowPromptingSubagentSessions);
   const savePastedImagesAsFiles = useUIStore((state) => state.savePastedImagesAsFiles);
   const setSavePastedImagesAsFiles = useUIStore((state) => state.setSavePastedImagesAsFiles);
+  const keepModelOnAgentSwitch = useUIStore((state) => state.keepModelOnAgentSwitch);
+  const setKeepModelOnAgentSwitch = useUIStore((state) => state.setKeepModelOnAgentSwitch);
   const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
   const setInputSpellcheckEnabled = useUIStore((state) => state.setInputSpellcheckEnabled);
   const inputHistoryScope = useInputHistoryStore((state) => state.scope);
@@ -547,6 +549,17 @@ const ComposerTab: React.FC = () => {
             settingsItem="chat.save-pasted-images"
           />
         </div>
+      </SettingsSection>
+
+      <SettingsSection title={t('settings.layout.chat.section.agentSwitching')}>
+        <SettingsCheckboxRow
+          checked={keepModelOnAgentSwitch}
+          onChange={setKeepModelOnAgentSwitch}
+          label={t('settings.openchamber.visual.field.keepModelOnAgentSwitch')}
+          ariaLabel={t('settings.openchamber.visual.field.keepModelOnAgentSwitch')}
+          info={t('settings.openchamber.visual.field.keepModelOnAgentSwitchInfo')}
+          settingsItem="chat.keep-model-on-agent-switch"
+        />
       </SettingsSection>
 
       <SettingsSection title={t('settings.layout.chat.section.draftsAndHistory')} contentClassName="space-y-3">

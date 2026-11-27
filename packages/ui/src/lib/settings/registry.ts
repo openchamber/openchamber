@@ -454,6 +454,7 @@ export const SETTINGS_REGISTRY = {
   largeTextPasteBehavior: field({ scope: 'profile', parse: parseLargeTextPasteBehavior, ui: uiStore('largeTextPasteBehavior', (v) => useUIStore.getState().setLargeTextPasteBehavior(v)) }),
   documentAttachBehavior: field({ scope: 'profile', parse: parseDocumentAttachBehavior, ui: uiStore('documentAttachBehavior', (v) => useUIStore.getState().setDocumentAttachBehavior(v)) }),
   savePastedImagesAsFiles: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('savePastedImagesAsFiles', (v) => useUIStore.getState().setSavePastedImagesAsFiles(v)) }),
+  keepModelOnAgentSwitch: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('keepModelOnAgentSwitch', (v) => useUIStore.getState().setKeepModelOnAgentSwitch(v)) }),
   followUpBehavior: field({
     scope: 'profile',
     parse: parseFollowUpBehavior,

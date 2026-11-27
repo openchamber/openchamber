@@ -442,6 +442,7 @@ const uiStorePersistOptions = {
     showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
     allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
     savePastedImagesAsFiles: state.savePastedImagesAsFiles,
+    keepModelOnAgentSwitch: state.keepModelOnAgentSwitch,
     draftStartersVisible: state.draftStartersVisible,
     shortcutOverrides: state.shortcutOverrides,
     fileEditorKeymap: state.fileEditorKeymap,

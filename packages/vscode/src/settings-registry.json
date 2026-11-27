@@ -666,6 +666,9 @@
     "savePastedImagesAsFiles": {
       "scope": "profile"
     },
+    "keepModelOnAgentSwitch": {
+      "scope": "profile"
+    },
     "followUpBehavior": {
       "scope": "profile"
     },

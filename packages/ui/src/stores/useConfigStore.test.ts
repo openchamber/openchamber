@@ -1812,6 +1812,154 @@ describe('useConfigStore provider persistence', () => {
     });
   });
 
+  describe('[issue-6058] keeping the model and level on an agent switch', () => {
+    const SESSION = 'ses_6058_keep_model';
+    const sonnet = provider('anthropic', 'sonnet', ['low', 'high']);
+    const opus = provider('openai', 'opus', ['low', 'medium', 'high']);
+
+    const onPlanWithSonnetLow = (agents: Agent[]) => {
+      useSessionUIStore.setState({ currentSessionId: SESSION });
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [sonnet, opus],
+        agents,
+        settingsDefaultModel: 'openai/opus',
+        settingsDefaultVariant: 'high',
+        currentAgentName: 'plan',
+        currentProviderId: 'anthropic',
+        currentModelId: 'sonnet',
+        currentVariant: 'low',
+        currentVariantSelection: { override: 'low', inherited: undefined },
+        selectionSource: 'manual',
+        directoryScoped: {},
+      });
+    };
+    const shown = () => {
+      const state = useConfigStore.getState();
+      return [state.currentAgentName, `${state.currentProviderId}/${state.currentModelId}`, state.currentVariant];
+    };
+
+    afterEach(() => {
+      useUIStore.setState({ keepModelOnAgentSwitch: false });
+    });
+
+    test('a switch keeps what is on screen even when the session remembers another model for that agent', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      // Build ran on Opus/high earlier in this session.
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'openai', 'opus');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'openai', 'opus', 'high');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet', 'high');
+      useUIStore.setState({ keepModelOnAgentSwitch: true, lastUsedEfforts: {} });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'anthropic/sonnet', 'low']);
+      // Recorded for Build too, so reopening the session or the composer's
+      // per-agent restore shows the same pair instead of Opus/high.
+      const selection = useSelectionStore.getState();
+      expect(selection.getAgentModelForSession(SESSION, 'build')).toEqual({ providerId: 'anthropic', modelId: 'sonnet' });
+      expect(selection.getAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet')).toBe('low');
+      expect(selection.getSessionModelSelection(SESSION)).toEqual({ providerId: 'anthropic', modelId: 'sonnet' });
+      // Carrying a level is not choosing one: the model's memory stays as it was.
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({});
+    });
+
+    test('an agent that pins a model still brings it, and one whose pin is not listed keeps what is on screen', () => {
+      onPlanWithSonnetLow([
+        testAgent('plan'),
+        testAgent('build', { model: { providerID: 'openai', modelID: 'opus' }, variant: 'medium' }),
+        testAgent('review', { model: { providerID: 'gone', modelID: 'removed' } }),
+      ]);
+      // Sonnet was picked on Build earlier in this session; the pin still wins.
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'anthropic', 'sonnet');
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
+      // ModelControls' per-agent restore reads this right after the switch.
+      expect(useSelectionStore.getState().getAgentModelForSession(SESSION, 'build')).toEqual({ providerId: 'openai', modelId: 'opus' });
+
+      useConfigStore.getState().setAgent('review', { pick: true });
+      expect(shown()).toEqual(['review', 'openai/opus', 'medium']);
+    });
+
+    test('back on the session agent after a pinned one, the kept model is what the next send switches to', () => {
+      onPlanWithSonnetLow([
+        testAgent('plan'),
+        testAgent('build', { model: { providerID: 'openai', modelID: 'opus' }, variant: 'medium' }),
+      ]);
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+      useConfigStore.getState().setAgent('plan', { pick: true });
+
+      expect(shown()).toEqual(['plan', 'openai/opus', 'medium']);
+      // Plan is the record's agent, so no agent pick carries the model: the
+      // model pick has to, or the send keeps the session on Sonnet.
+      expect(useSelectionStore.getState().getSessionModelPick(SESSION)).toEqual({ providerId: 'openai', modelId: 'opus' });
+    });
+
+    test('a draft carries the level an agent pinned for its model as a choice on the next agent', () => {
+      useSessionUIStore.setState({ currentSessionId: null });
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [sonnet, opus],
+        agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'opus' }, variant: 'medium' }), testAgent('build')],
+        settingsDefaultModel: 'anthropic/sonnet',
+        settingsDefaultVariant: 'high',
+        currentAgentName: 'plan',
+        currentProviderId: 'openai',
+        currentModelId: 'opus',
+        currentVariant: 'medium',
+        currentVariantSelection: { override: undefined, inherited: 'medium' },
+        selectionSource: 'auto',
+        directoryScoped: {},
+      });
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
+      // Build inherits nothing for Opus, so the level has to travel as a choice.
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: 'medium', inherited: undefined });
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentModelId).toBe('opus');
+    });
+
+    test('a level the next agent inherits anyway stays inherited and replaces the level saved for it', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      useConfigStore.setState({ settingsDefaultModel: 'anthropic/sonnet', settingsDefaultVariant: 'high', currentVariant: 'high', currentVariantSelection: { override: undefined, inherited: 'high' } });
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet', 'low');
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'anthropic/sonnet', 'high']);
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: undefined, inherited: 'high' });
+      expect(useSelectionStore.getState().getAgentModelVariantForSession(SESSION, 'build', 'anthropic', 'sonnet')).toBe(undefined);
+    });
+
+    test('restoring an open session is no switch: its agent comes back with its own model', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'openai', 'opus');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'openai', 'opus', 'medium');
+      useUIStore.setState({ keepModelOnAgentSwitch: true });
+
+      useConfigStore.getState().setAgent('build');
+
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
+    });
+
+    test('with the setting off the agent gets back its own model and level, as before', () => {
+      onPlanWithSonnetLow([testAgent('plan'), testAgent('build')]);
+      useSelectionStore.getState().saveAgentModelForSession(SESSION, 'build', 'openai', 'opus');
+      useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, 'build', 'openai', 'opus', 'medium');
+
+      useConfigStore.getState().setAgent('build', { pick: true });
+
+      expect(shown()).toEqual(['build', 'openai/opus', 'medium']);
+    });
+  });
+
   test('loadAgents does not fetch OpenCode config directly', async () => {
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,

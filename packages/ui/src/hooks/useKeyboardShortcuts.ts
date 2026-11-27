@@ -273,7 +273,7 @@ export const useKeyboardShortcuts = () => {
       if (sessionId) {
         useSelectionStore.getState().pickSessionAgent(sessionId, next);
       }
-      config.setAgent(next);
+      config.setAgent(next, { pick: true });
       state.addRecentAgent(next);
     },
     toggle_terminal: () => {

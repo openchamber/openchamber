@@ -36,6 +36,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 - The composer is moving off CodeMirror, so nothing new builds on CodeMirror.
 - A quote is exactly what the user selected and is never widened implicitly.
 - No usage timers that resend a prompt. Quota exhaustion is handled by a fallback provider or model and by switching accounts.
+- Switching primary agents keeps each agent's own model and level by default. Keeping the model and level on screen instead is an opt-in setting (`keepModelOnAgentSwitch`); an agent that pins a model still brings it, and subagents keep their own ([#6058](https://github.com/openchamber/openchamber/issues/6058)).
 - A model that can't read images always gets images as saved files and their paths, with no setting. `savePastedImagesAsFiles` only adds the saved copy for models that read images (Discord report on browser annotation screenshots, 2026-11).
 
 ## Sessions and sidebar

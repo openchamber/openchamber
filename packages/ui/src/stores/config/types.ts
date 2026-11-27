@@ -48,6 +48,11 @@ export type CurrentVariantSelection = {
     inherited: string | null | undefined;
 };
 
+export type SetAgentOptions = {
+    keepModel?: boolean;
+    pick?: boolean;
+};
+
 export interface ConfigStore {
 
     activeDirectoryKey: string;
@@ -177,7 +182,7 @@ export interface ConfigStore {
     cycleCurrentVariant: () => string | undefined;
     getCurrentModelVariants: () => string[];
     getDefaultVariantForModel: (providerId: string, modelId: string, directory?: string | null) => string | undefined;
-    setAgent: (agentName: string | undefined, options?: { keepModel?: boolean }) => void;
+    setAgent: (agentName: string | undefined, options?: SetAgentOptions) => void;
     applyDefaultModelAgentSelection: (options?: { projectDefaultAgent?: string; projectDefaultModel?: string; projectDefaultVariant?: string }) => void;
     resolveDirectoryDefaultSelection: (directory: string) => Promise<DirectoryDefaultSelection | null>;
     dropStaleAutoSelection: () => void;

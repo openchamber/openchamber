@@ -54,6 +54,7 @@ import { useSessionMessagesSelector, useSessionRenderable, useSessionSelector } 
 import type { State } from '@/sync/types';
 import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
+import { carryColumnLevelToAgent } from './columnAgentLevel';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, getEffortTone, getEffortToneClass, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
@@ -1293,11 +1294,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (selection) {
             if (!controlledSessionId) return;
             pickSessionAgent(controlledSessionId, agentName);
-            if (
-                currentProviderId && currentModelId && selection.variant !== undefined
-                && getAgentModelVariantForSession(controlledSessionId, agentName, currentProviderId, currentModelId) === undefined
-            ) {
-                saveAgentModelVariantForSession(controlledSessionId, agentName, currentProviderId, currentModelId, selection.variant);
+            if (currentProviderId && currentModelId) {
+                carryColumnLevelToAgent(controlledSessionId, agentName, { providerId: currentProviderId, modelId: currentModelId }, selection.variant, { fillUnremembered: true });
             }
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
@@ -1312,7 +1310,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             if (currentSessionId) {
                 pickSessionAgent(currentSessionId, agentName);
             }
-            setAgent(agentName);
+            setAgent(agentName, { pick: true });
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
                 setAgentMenuOpen(false);
@@ -1330,10 +1328,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentModelId,
         currentProviderId,
         currentSessionId,
-        getAgentModelVariantForSession,
         isCompact,
         pickSessionAgent,
-        saveAgentModelVariantForSession,
         setAgent,
         setAgentMenuOpen,
         selection,
