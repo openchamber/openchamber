@@ -48,7 +48,7 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | --- | --- |
 | `toast({ kind, message })` | mostra um aviso no app. `kind` é `info`, `success` ou `error`. |
 | `openUrl(url)` | abre uma URL no navegador do usuário |
-| `openSurface(surfaceId)` | leva o app para aquela tela. No celular, seu painel abre como a aba dele na área de trabalho quando o manifesto define `panel.mobile`, e a chamada é rejeitada com `UNSUPPORTED` caso contrário. |
+| `openSurface(surfaceId, options?)` | abre um painel. Em `openSurface("notes", { tab: "todos" })`, `tab` seleciona `notes`, `todos` ou `plans` no conhecimento do projeto. `openSurface("plugin:<id>", { item })` usa o ID da extensão no manifesto e entrega um `GuestItem` ao próprio painel por meio de `onItem`. As duas opções funcionam mesmo se o painel já estiver aberto ou em outra janela. No celular, o painel da extensão exige `panel.mobile` no manifesto. Versões anteriores do host ignoram `options`. Se sua extensão depende de `{ tab }` ou `{ item }`, use a versão numérica da primeira versão compatível (`2.8.2`) como mínimo de `engines.openchamber` no manifesto. Compile o painel receptor com o SDK da primeira versão compatível ou de uma versão mais recente para que ele possa confirmar o recebimento. No celular, sair do Status do trabalho pode remover o quadro de origem antes que ele receba o resultado. |
 | `writeClipboard(text)` | copia texto. De 1 a 32000 caracteres. |
 | `compose({ text, mode? })` | coloca texto na caixa de chat sem enviar. `mode` é `append` (padrão) ou `replace`. De 1 a 16000 caracteres após remover espaços. |
 | `attach({ ... })` | coloca um chip na caixa de chat, no mesmo lugar onde caem os itens do GitHub e do Linear. Só um chip por vez. |

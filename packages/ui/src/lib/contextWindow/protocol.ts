@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { HOST_REQUEST_ERROR_CODES, PROJECT_KNOWLEDGE_TABS } from '@openchamber/sdk';
+import { guestItemSchema } from '@openchamber/sdk/schemas';
 import { ROUTED_CONTEXT_ACTIONS } from './routing';
 
 const CONTEXT_WINDOW_CHANNEL = 'openchamber.context-window';
@@ -49,6 +51,13 @@ const attachedFileSchema = z.object({
   original: z.object({ mimeType: z.string(), dataUrl: z.string(), saveOnSend: z.boolean().optional() }).optional(),
 });
 
+const guestSurfaceDestinationSchema = z.union([
+  z.strictObject({ tab: z.enum(PROJECT_KNOWLEDGE_TABS) }),
+  z.strictObject({ guestId: z.string(), installationKey: z.string(), item: guestItemSchema }),
+]);
+
+export type GuestSurfaceDestination = z.infer<typeof guestSurfaceDestinationSchema>;
+
 export const contextWindowMessageSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('panel-hello'), ownerId: z.string() }),
   z.object({ kind: z.literal('panel-gone'), ownerId: z.string() }),
@@ -62,6 +71,24 @@ export const contextWindowMessageSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('follow'), ownerId: z.string(), state: followStateSchema }),
   z.object({ kind: z.literal('action'), ownerId: z.string(), action: z.enum(ROUTED_CONTEXT_ACTIONS), args: z.array(z.unknown()) }),
   z.object({
+    kind: z.literal('guest-open-surface'),
+    ownerId: z.string(),
+    requestId: z.string(),
+    directory: z.string().min(1),
+    runtimeKey: z.string(),
+    expiresAt: z.number(),
+    destination: guestSurfaceDestinationSchema,
+  }),
+  z.object({
+    kind: z.literal('guest-surface-opened'),
+    ownerId: z.string(),
+    requestId: z.string(),
+    result: z.discriminatedUnion('ok', [
+      z.object({ ok: z.literal(true) }),
+      z.object({ ok: z.literal(false), code: z.enum(HOST_REQUEST_ERROR_CODES), message: z.string() }),
+    ]),
+  }),
+  z.object({
     kind: z.literal('attach'),
     ownerId: z.string(),
     requestId: z.string(),
@@ -74,6 +101,7 @@ export const contextWindowMessageSchema = z.discriminatedUnion('kind', [
 ]);
 
 export type ContextWindowMessage = z.infer<typeof contextWindowMessageSchema>;
+export type GuestSurfaceOpenRequest = Extract<ContextWindowMessage, { kind: 'guest-open-surface' }>;
 
 export const openContextWindowChannel = (): BroadcastChannel | null => (
   'BroadcastChannel' in globalThis ? new BroadcastChannel(CONTEXT_WINDOW_CHANNEL) : null

@@ -48,7 +48,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | 在应用中显示提示消息。`kind` 为 `info`、`success` 或 `error`。 |
 | `openUrl(url)` | 在用户的浏览器中打开 URL |
-| `openSurface(surfaceId)` | 把应用切换到该界面。在手机上，清单设置了 `panel.mobile` 时，你的面板会作为它在工作区中的标签页打开，否则以 `UNSUPPORTED` 拒绝。 |
+| `openSurface(surfaceId, options?)` | 打开面板。`openSurface("notes", { tab: "todos" })` 的 `tab` 可在项目知识中选择 `notes`、`todos` 或 `plans`。`openSurface("plugin:<id>", { item })` 使用清单中的扩展 ID，并通过 `onItem` 将 `GuestItem` 传给你自己的扩展面板。面板已打开或位于独立窗口时，这两个选项也会生效。在手机上打开扩展面板需要在清单中设置 `panel.mobile`。旧版宿主会忽略 `options`。如果扩展依赖 `{ tab }` 或 `{ item }`，请将首个支持版本（`2.8.2`）的版本号设为清单中 `engines.openchamber` 的最低版本。 请使用首个支持版本或更高版本的 SDK 构建接收面板，以便它确认收到条目。在手机上，离开工作状态标签页时，发起调用的框架可能会在收到结果之前卸载。 |
 | `writeClipboard(text)` | 复制文本。1 到 32000 个字符。 |
 | `compose({ text, mode? })` | 把文本放进聊天框但不发送。`mode` 为 `append`（默认）或 `replace`。去除首尾空白后 1 到 16000 个字符。 |
 | `attach({ ... })` | 在聊天框上放一个标签，和 GitHub、Linear 条目落在同一位置。同一时间只能有一个标签。 |

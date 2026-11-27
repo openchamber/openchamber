@@ -400,8 +400,8 @@ export {
   isGuestPopoverRequest,
 } from './popover.ts';
 export type { GuestPopoverAnchor, GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest, GuestPopoverSide } from './popover.ts';
-export { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX, isGuestCommitSha } from './navigation.ts';
-export type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
+export { GUEST_COMMIT_SHA, GUEST_WALKTHROUGH_BASE_MAX, isGuestCommitSha, PROJECT_KNOWLEDGE_TABS } from './navigation.ts';
+export type { OpenCommitRequest, OpenSurfaceOptions, OpenWalkthroughRequest, ProjectKnowledgeTab } from './navigation.ts';
 export {
   clampAttachRequest,
   clampBadgeCount,

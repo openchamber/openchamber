@@ -974,6 +974,25 @@ describe('actions, commands, and badge wire shapes', () => {
     expect(parseGuestMessage({ ...envelope, type: 'open-walkthrough', id: 'w-1', payload: {} })).toBeNull();
   });
 
+  test('open-surface accepts a long manifest ID including its plugin prefix', () => {
+    const message = {
+      ...envelope, type: 'open-surface' as const, id: 's-1',
+      payload: {
+        surfaceId: `plugin:${'long-id-'.repeat(10)}panel`,
+        options: { item: { kind: 'link' as const, identifier: 'DEMO-1' } },
+      },
+    };
+    expect(parseGuestMessage(message)).toEqual(message);
+  });
+
+  test('open-surface distinguishes invalid options from an omitted destination', () => {
+    const message = { ...envelope, type: 'open-surface', id: 's-2', payload: { surfaceId: 'notes' } };
+    expect(parseGuestMessage(message)).toEqual(message);
+    expect(parseGuestMessage({
+      ...message, payload: { surfaceId: 'notes', options: { tab: 'plans', item: { kind: 'link', identifier: 'DEMO-1' } } },
+    })).toMatchObject({ payload: { surfaceId: 'notes', options: null } });
+  });
+
   test('accepts resize heights in range and drops the rest', () => {
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: 180 } })).toMatchObject({ payload: { height: 180 } });
     expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: -1 } })).toBeNull();

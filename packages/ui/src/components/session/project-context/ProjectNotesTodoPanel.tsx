@@ -1,4 +1,5 @@
 import React from 'react';
+import { PROJECT_KNOWLEDGE_TABS } from '@openchamber/sdk';
 
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
@@ -45,9 +46,8 @@ interface ProjectNotesTodoPanelProps {
   className?: string;
 }
 
-type ProjectContextTab = 'notes' | 'todos' | 'plans' | 'memory';
-
-const TAB_ORDER: ProjectContextTab[] = ['notes', 'todos', 'plans', 'memory'];
+const TAB_ORDER = [...PROJECT_KNOWLEDGE_TABS, 'memory'] as const;
+type ProjectContextTab = (typeof TAB_ORDER)[number];
 
 const SPLIT_MIN_WIDTH = 1040;
 

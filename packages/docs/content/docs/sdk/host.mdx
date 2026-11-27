@@ -48,7 +48,7 @@ Access tokens never appear here or in a `request` result.
 | --- | --- |
 | `toast({ kind, message })` | show a toast in the app. `kind` is `info`, `success`, or `error`. |
 | `openUrl(url)` | open a URL; in the desktop app a local address opens in the browser panel beside the chat |
-| `openSurface(surfaceId)` | show that screen, such as `"git"` or your own panel `"plugin:<panel id>"`. Resolves once it is on screen; a screen that is already open stays open. On the phone your panel opens as its workspace tab when the manifest sets `panel.mobile`, and rejects with `UNSUPPORTED` otherwise. |
+| `openSurface(surfaceId, options?)` | open a built-in panel or your own extension panel, optionally at a [destination](#panel-destinations) |
 | `writeClipboard(text)` | copy text. 1 to 32000 characters. |
 | `compose({ text, mode? })` | put text in the chat box without sending. `mode` is `append` (default) or `replace`. 1 to 16000 characters after trim. |
 | `attach({ ... })` | put a chip on the chat box, the same place GitHub and Linear items land. Only one chip at a time. |
@@ -77,6 +77,23 @@ Access tokens never appear here or in a `request` result.
 | `reportFileChange({ dirty, edited })` | file editors: tell OpenChamber whether there are unsaved changes and whether the document just changed |
 | `requestFileSave()` | file editors: save now, as Cmd/Ctrl+S does |
 | `reportFileUnsupported()` | file editors: this file can't be opened here, show its source instead |
+
+## Panel destinations
+
+```ts
+await host.openSurface("notes", { tab: "todos" });
+await host.openSurface("plugin:tasks-demo", { item: { kind: "link", identifier: "DEMO-12" } });
+```
+
+`notes` opens Project Knowledge. `tab` selects `notes`, `todos`, or `plans`, even when the panel is already open. The selection is shared across projects and resets when the app reloads.
+
+Use `plugin:<id>` with your extension's manifest ID. The panel receives the `GuestItem` through `onItem` as it does for an item chip click, including when the panel is already open. On the phone the manifest must set `panel.mobile` for the extension's workspace tab.
+
+Build the receiving panel with the SDK from the supporting release or later so it can confirm item delivery. On a phone, switching away from Work Status can unmount the calling frame before it receives the result.
+
+Both options also work from the main window when the context panel is detached. Leave `options` out to open the panel without changing its selection or item. An invalid destination or an item addressed to another extension rejects with `HOST_REJECTED`. A panel that cannot open here, such as in Mini Chat, rejects with `UNSUPPORTED`.
+
+Older hosts ignore `options`. If your extension relies on `{ tab }` or `{ item }`, set its manifest's `engines.openchamber` minimum to `2.8.2`.
 
 ## attach, startSession, and sessionLink
 

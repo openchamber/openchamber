@@ -155,7 +155,7 @@ Access tokens never appear in `ready` or in request results.
 | ----------------- | --------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
 | `toast` | `{ kind: 'info' \| 'success' \| 'error', message, copy?, dismiss?, persistent? }` | `Promise<void>` | Show a toast, optionally with host-owned Copy and OK buttons; see Toast buttons below |
 | `openUrl`         | `url: string`                     | `Promise<void>`                | Open an http(s) URL. In the desktop app with a project open, a local address (`localhost`, `127.0.0.1`, `[::1]`) opens in the browser panel beside the chat, and other links follow the user's setting for chat links; elsewhere the system browser opens it |
-| `openSurface`     | `surfaceId: string`               | `Promise<void>`                | Show that surface; resolves once it is on screen, rejects `NO_DIRECTORY` or `UNSUPPORTED` when it cannot open. On the phone it opens the matching workspace tab (Changes, Files, Terminal, Notes, or an extension panel that opted into the phone) and rejects `UNSUPPORTED` for anything else |
+| `openSurface`     | `surfaceId: string, options?: OpenSurfaceOptions` | `Promise<void>` | Open a built-in panel such as `notes`, or your extension panel at `plugin:<id>`. See [Panel destinations](#panel-destinations). |
 | `writeClipboard`  | `text: string`                    | `Promise<void>`                | Copy in the host (1–32000 chars)                                                      |
 | `compose`         | `{ text, mode?: 'append'          | 'replace' }`                   | `Promise<void>`                                                                       |
 | `attach`          | `AttachIssueRequest`              | `Promise<void>`                | Composer chip, alongside other attached items                                         |
@@ -210,6 +210,23 @@ Access tokens never appear in `ready` or in request results.
 `worktree` is `false` or omitted for the target directory, `true` for a generated new worktree, `{ kind: 'existing', directory }` for a known worktree belonging to the project, or `{ kind: 'new', name?, baseBranch? }`. `name` names both the branch and worktree. Omitted name/base use the host's normal defaults. First-message model/agent/variant selection is captured when the call starts.
 
 A created session returns `{ sessionId, directory, sent, linked, worktree? }`. `linked: false` means the session exists but saving the attached item failed. If a worktree was created but bootstrap or session creation failed, the result is `{ sessionId: null, sent: 'skipped', directory, worktree, failure }`, where `failure` is `bootstrap-failed` or `session-create-failed`. The worktree is retained. Inspect the result before offering Retry, which would otherwise create another worktree. The call waits up to 180 seconds; a timeout does not prove the server rolled back.
+
+### Panel destinations
+
+```ts
+await host.openSurface('notes', { tab: 'todos' });
+await host.openSurface('plugin:tasks-demo', { item: { kind: 'link', identifier: 'DEMO-12' } });
+```
+
+`notes` opens Project Knowledge. `tab` accepts `notes`, `todos`, or `plans` and changes the current selection even if Project Knowledge is already open. The selection lasts until it changes again or the app reloads.
+
+Use `plugin:<id>` with your extension's manifest ID. The panel receives a `GuestItem` through `onItem`, just as it does when opened from an item chip. An open panel receives the new item without a reload. Leave `options` out to open a panel without changing its selection or item.
+
+For `item` delivery, build the receiving panel with the SDK from the supporting release or later. The promise resolves when the receiving SDK confirms the item. On a phone, switching away from Work Status can unmount the calling frame before it receives the result.
+
+From the main window, both options also work when the context panel is detached. On the phone, `openSurface` opens the matching workspace tab. An extension panel needs `panel.mobile` in its manifest. Invalid options or an item addressed to another extension reject with `HOST_REJECTED`. Destinations in Mini Chat and outside the current project view reject with `UNSUPPORTED`. An unreachable detached window or an item the panel could not receive rejects with `HOST_UNAVAILABLE`. On desktop layouts, an open without a chat or project directory rejects with `NO_DIRECTORY`.
+
+Older hosts ignore `options`. If your extension relies on `{ tab }` or `{ item }`, set its manifest's `engines.openchamber` minimum to `2.8.2`.
 
 ### Workspace lists and subscriptions
 

@@ -2,11 +2,9 @@ import { resolveAttachMode, type GuestItem } from '@openchamber/sdk';
 import { create } from 'zustand';
 
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
 
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
-import { useGuestItemStore } from './item-store.ts';
 import { openGuestSurface } from './open-surface.ts';
 import { mayGuestShowOnPhone } from './phone.ts';
 import { useGuestsStore } from './store.ts';
@@ -38,10 +36,7 @@ export const openGuestWithItem = (
     useGuestDialogStore.getState().open(guest.id, item);
     return true;
   }
-  const key = directory ? normalizeContextPanelDirectoryKey(directory) : '';
-  if (!key && !phone) return false;
-  useGuestItemStore.getState().setPendingItem(guest.id, item);
-  const opened = openGuestSurface({ mode: pluginModeFromId(guest.id), directory: key, supported: true });
-  if (!opened.ok) useGuestItemStore.getState().takePendingItem(guest.id);
-  return opened.ok;
+  return openGuestSurface({
+    mode: pluginModeFromId(guest.id), directory: directory ?? null, supported: true, options: { item },
+  }).ok;
 };

@@ -92,7 +92,9 @@ export const resolveEffectiveDirectory = (): string | undefined => {
             ? useSessionWorktreeStore.getState().getAttachment(currentSessionId)
             : undefined,
         worktreePath: currentSessionId ? sessionUI.worktreeMetadata.get(currentSessionId)?.path : undefined,
-        fallbackDirectory: directoryState.currentDirectory,
+        fallbackDirectory: currentSessionId
+            ? sessionUI.currentSessionDirectory ?? directoryState.currentDirectory
+            : directoryState.currentDirectory,
         chatsRoot: getChatsRoot(),
     });
 };

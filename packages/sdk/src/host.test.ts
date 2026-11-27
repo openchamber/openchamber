@@ -1126,6 +1126,27 @@ describe('connectHost resolve and badge', () => {
     await sent;
   });
 
+  test('openSurface keeps the one-argument wire shape and carries an explicit destination', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame });
+    const item = { kind: 'link', identifier: 'DEMO-12' } as const;
+    const calls = [
+      host.openSurface('notes'),
+      host.openSurface('notes', { tab: 'plans' }),
+      host.openSurface('plugin:tasks-demo', { item }),
+    ].map((call) => call.catch(() => undefined));
+    try {
+      expect(frame.posted.flatMap((message) => message.type === 'open-surface' ? [message.payload] : [])).toEqual([
+        { surfaceId: 'notes' },
+        { surfaceId: 'notes', options: { tab: 'plans' } },
+        { surfaceId: 'plugin:tasks-demo', options: { item } },
+      ]);
+    } finally {
+      host.dispose();
+      await Promise.all(calls);
+    }
+  });
+
   test('setHeight sends whole pixels within the wire range', async () => {
     const parent = createFrame();
     const guest = createFrame();
@@ -1159,6 +1180,28 @@ describe('connectHost resolve and badge', () => {
     host.onItem((item) => seen.push(item));
     expect(seen).toEqual([messageItem]);
     host.dispose();
+  });
+
+  test('acknowledges an item to the host after notifying the receiving frame', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    const { port1, port2 } = new MessageChannel();
+    const item = { kind: 'link', identifier: 'DEMO-12' } as const;
+    const seen: Array<string | null> = [];
+    host.onItem((current) => seen.push(current?.kind === 'link' ? current.identifier : null));
+    try {
+      const receipt = new Promise<MessageEvent>((resolve) => { port1.onmessage = resolve; });
+      frame.dispatch(new MessageEvent('message', {
+        data: { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'item', payload: { item } },
+        ports: [port2],
+      }));
+      expect((await receipt).data).toBeNull();
+      expect(seen).toEqual(['DEMO-12']);
+    } finally {
+      port1.close();
+      port2.close();
+      host.dispose();
+    }
   });
 
   test('shells subscriptions, output reads, and stops use the wire contract', async () => {

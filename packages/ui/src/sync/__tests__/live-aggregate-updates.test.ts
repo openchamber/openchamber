@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import { OpenCode } from '@opencode/client'
 import type { Session } from '@/lib/opencode/model'
 
+import { ChildStoreManager } from '../child-store'
 import { aggregateLiveSessions } from '../live-aggregate'
+import { getAllSyncSessionMap, getSyncSessionDirectory, setSyncRefs } from '../sync-refs'
 
 // The order the aggregate promises: the freshest record per id (a later list
 // wins a tie), newest first, ties in the order ids first appear.
@@ -69,4 +72,21 @@ describe('aggregateLiveSessions', () => {
     const second = aggregateLiveSessions([{ session: [record("ses_a", 2, 1)], session_status: {} }, { session: [fresh], session_status: {} }])
     expect(second).toBe(first)
   })
+})
+
+test('imperative session lookups agree with the live view when an old worktree still has a copy', () => {
+  const manager = new ChildStoreManager()
+  const sdk = OpenCode.make({ baseUrl: 'http://localhost' })
+  const fresh = { ...record('ses_moved', 10, 0), directory: '/new-worktree' }
+  const stale = { ...record('ses_moved', 1, 0), directory: '/old-worktree' }
+  try {
+    // A later store can still hold a copy from before the move.
+    manager.ensureChild(fresh.directory, { bootstrap: false }).setState({ session: [fresh] })
+    manager.ensureChild(stale.directory, { bootstrap: false }).setState({ session: [stale] })
+    setSyncRefs(sdk, manager, fresh.directory)
+    expect(getAllSyncSessionMap().get(fresh.id)?.directory).toBe(fresh.directory)
+    expect(getSyncSessionDirectory(fresh.id)).toBe(fresh.directory)
+  } finally {
+    setSyncRefs(sdk, new ChildStoreManager(), '')
+  }
 })

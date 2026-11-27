@@ -48,7 +48,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | 앱에 토스트를 표시합니다. `kind`는 `info`, `success`, `error` 중 하나입니다. |
 | `openUrl(url)` | 사용자의 브라우저에서 URL 열기 |
-| `openSurface(surfaceId)` | 앱을 해당 화면으로 전환. 휴대폰에서는 매니페스트에 `panel.mobile`이 있으면 패널이 작업 공간 탭으로 열리고, 없으면 `UNSUPPORTED`로 거부됩니다. |
+| `openSurface(surfaceId, options?)` | 패널을 엽니다. `openSurface("notes", { tab: "todos" })`의 `tab`에는 프로젝트 지식의 `notes`, `todos`, `plans`를 지정할 수 있습니다. `openSurface("plugin:<id>", { item })`은 매니페스트의 확장 기능 ID를 사용하고, `onItem`을 통해 내 패널로 `GuestItem`을 전달합니다. 두 옵션은 패널이 이미 열려 있거나 별도 창으로 분리된 경우에도 적용됩니다. 휴대폰에서는 확장 기능 패널을 열려면 매니페스트에 `panel.mobile`이 필요합니다. 이전 호스트는 `options`를 무시합니다. 확장 기능이 `{ tab }` 또는 `{ item }`에 의존한다면 첫 지원 릴리스(`2.8.2`)의 숫자 버전을 매니페스트의 `engines.openchamber` 최소 버전으로 설정하세요. 수신 패널이 항목을 확인할 수 있도록 첫 지원 릴리스 이상의 SDK로 수신 패널을 빌드하세요. 휴대폰에서는 작업 상태에서 다른 탭으로 전환하면 호출 프레임이 결과를 받기 전에 제거될 수 있습니다. |
 | `writeClipboard(text)` | 텍스트를 복사합니다. 1자에서 32000자. |
 | `compose({ text, mode? })` | 보내지 않고 채팅창에 텍스트를 넣습니다. `mode`는 `append`(기본값) 또는 `replace`. 트림 후 1자에서 16000자. |
 | `attach({ ... })` | 채팅창에 칩을 붙입니다. GitHub와 Linear 항목이 놓이는 곳과 같은 위치입니다. 칩은 한 번에 하나만. |

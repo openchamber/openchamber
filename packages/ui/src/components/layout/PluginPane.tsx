@@ -33,15 +33,11 @@ import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import {
   answerGuestMessage,
-  buildConnectionMessage,
-  buildDirectoryMessage,
-  buildItemMessage,
-  buildReadyMessage,
   buildResolveMessage,
   buildGenerateLateMessage,
   buildSessionLifecycleMessage,
   buildSessionMessage,
-  buildSettingsMessage,
+  pushGuestHostState,
   guestSessionLifecyclePhase,
   toGuestSessionSnapshot,
 } from '@/lib/guests/host-bridge';
@@ -54,7 +50,7 @@ import { guestGenerate } from '@/lib/guests/generate';
 import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/lib/guests/generate-results';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { guestNavigationEffects } from '@/lib/guests/navigation';
-import { openGuestSurface } from '@/lib/guests/open-surface';
+import { openGuestFrameSurface } from './openGuestFrameSurface';
 import { openGuestUrl } from '@/lib/guests/open-url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -209,7 +205,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     () => (trackerProvider ? trackerGuestConnection(trackerStatus) : oauthStatus?.connection ?? EMPTY_GUEST_CONNECTION),
     [oauthStatus?.connection, trackerProvider, trackerStatus],
   );
-  const railItem = usePanelItem({ guestId, surface, headless, itemProp, panelOpen });
+  const { item: railItem, postItem } = usePanelItem({ guestId, guest, directory, surface, headless, itemProp, panelOpen });
   const item = headless ? null : itemProp !== undefined ? itemProp : railItem;
   const clearBadge = useGuestBadgeStore((state) => state.clearBadge);
   React.useEffect(() => {
@@ -322,6 +318,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
   const readyRef = React.useRef(hostState);
   readyRef.current = hostState;
+  const postItemRef = React.useRef(postItem);
+  postItemRef.current = postItem;
   const sentSessionRef = React.useRef<HostReadyContext['session'] | undefined>(undefined);
   const directoryRef = React.useRef(directory);
   directoryRef.current = directory;
@@ -368,7 +366,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const oauthPollRef = React.useRef<number | null>(null);
   const resolveWaitersRef = React.useRef(new Map<string, (outcome: GuestResolveOutcome) => void>());
   const resolveIdsRef = React.useRef(0);
-  const frameDocumentRef = React.useRef(0);
+  const frameDocumentRef = React.useRef(Symbol());
 
   const stopOauthPoll = React.useCallback(() => {
     if (oauthPollRef.current != null) {
@@ -377,8 +375,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     }
   }, []);
 
-  const postToGuest = React.useCallback((message: HostMessage) => {
-    iframeRef.current?.contentWindow?.postMessage(message, OPAQUE_FRAME_TARGET_ORIGIN);
+  const postToGuest = React.useCallback((message: HostMessage, transfer?: Transferable[]) => {
+    iframeRef.current?.contentWindow?.postMessage(message, OPAQUE_FRAME_TARGET_ORIGIN, transfer);
   }, []);
 
   const sendBackgroundAction = React.useCallback(() => {
@@ -443,13 +441,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [frameKey, src, srcDoc]);
 
   const pushHostState = React.useCallback(() => {
-    postToGuest(buildReadyMessage(readyRef.current));
-    postToGuest(buildDirectoryMessage(directoryRef.current || null));
-    postToGuest(buildSessionMessage(readyRef.current.session));
-    sentSessionRef.current = readyRef.current.session;
-    postToGuest(buildConnectionMessage(readyRef.current.connection));
-    postToGuest(buildSettingsMessage(readyRef.current.settings));
-    postToGuest(buildItemMessage(readyRef.current.item));
+    const ready = readyRef.current;
+    pushGuestHostState(postToGuest, ready, directoryRef.current || null);
+    sentSessionRef.current = ready.session;
+    postItemRef.current(ready.item, frameDocumentRef.current, postToGuest);
   }, [postToGuest]);
 
   const clearPopoverCloseTimer = React.useCallback(() => {
@@ -593,7 +588,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       if (!ownsFrame()) return;
 
       if (message.type === 'hello') {
-        frameDocumentRef.current += 1;
+        frameDocumentRef.current = Symbol();
         stopLateGenerateListening();
         acknowledgeHandshake();
         clearSubscriptions();
@@ -725,11 +720,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           directoryRef.current || effectiveDirectoryRef.current || null,
           !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
         ),
-        openSurface: (surfaceMode) => openGuestSurface({
-          mode: surfaceMode,
-          directory: directoryRef.current || effectiveDirectoryRef.current || null,
-          supported: !isVSCodeRuntime(),
-        }),
+        openSurface: (mode, options) => openGuestFrameSurface(mode, directoryRef.current || effectiveDirectoryRef.current || null, activeGuest, options),
         writeClipboard: async (text) => {
           const result = await copyTextToClipboard(text);
           return result.ok;

@@ -5,8 +5,9 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { getMiniChatRuntimeArgs, invokeDesktop, isElectronShell } from '@/lib/desktop';
+import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import type { GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
 import { afterDelay } from '@/lib/timing/afterDelay';
 import { generateUuid } from '@/lib/uuid';
 import { buildContextWindowUrl, isContextWindow, isContextWindowUrl, isWindowId } from './role';
@@ -15,8 +16,9 @@ import { withoutForeignComparisons } from '@/stores/ui/contextPanelState';
 import type { UIStore } from '@/stores/ui/types';
 import { readContextWindowRecord, writeContextWindowRecord } from './storage';
 import { setContextActionForwarder, type RoutedContextAction } from './routing';
-import { contextWindowMessageSchema, openContextWindowChannel, type ContextWindowFollowState, type ContextWindowMessage } from './protocol';
+import { contextWindowMessageSchema, openContextWindowChannel, type ContextWindowFollowState, type ContextWindowMessage, type GuestSurfaceDestination } from './protocol';
 import { useContextWindowStore } from './store';
+import { contextWindowRuntimeArgs, contextWindowRuntimeKey } from './runtime';
 
 const WINDOW_ID_KEY = 'openchamber.window-id';
 const DETACHED_KEY = 'openchamber.context-window.detached';
@@ -46,6 +48,10 @@ const closedEventSchema = z.object({ detail: z.object({ ownerId: z.string() }) }
 
 const restoreOwnersSchema = z.array(z.string()).catch([]);
 
+const GUEST_PANEL_UNAVAILABLE = {
+  ok: false, code: 'HOST_UNAVAILABLE', message: 'Could not reach the detached context panel.',
+} satisfies GuestOpenSurfaceResult;
+
 type Owner = {
   id: string;
   instance: string;
@@ -53,6 +59,7 @@ type Owner = {
   panel: Window | null;
   ready: boolean;
   queued: ContextWindowMessage[];
+  guestOpenReplies: Map<string, (result: GuestOpenSurfaceResult) => void>;
   lastFollow: string;
   cancelWait: (() => void) | null;
   returnRequested: boolean;
@@ -144,6 +151,38 @@ const forward = (action: RoutedContextAction, args: readonly unknown[]): boolean
   return true;
 };
 
+export const openGuestSurfaceInContextWindow = (
+  directory: string, destination: GuestSurfaceDestination,
+): Promise<GuestOpenSurfaceResult> => {
+  const current = owner;
+  if (!current || !useContextWindowStore.getState().detached || current.returnRequested) {
+    return Promise.resolve(GUEST_PANEL_UNAVAILABLE);
+  }
+  const requestId = generateUuid();
+  return new Promise((resolve) => {
+    const finish = (result: GuestOpenSurfaceResult) => {
+      cancelTimeout();
+      current.guestOpenReplies.delete(requestId);
+      resolve(result);
+    };
+    const cancelTimeout = afterDelay(PANEL_REPLY_MS, () => {
+      current.queued = current.queued.filter((message) => message.kind !== 'guest-open-surface' || message.requestId !== requestId);
+      finish(GUEST_PANEL_UNAVAILABLE);
+    });
+    current.guestOpenReplies.set(requestId, finish);
+    sendFollowState();
+    if (!postWhenReady({
+      kind: 'guest-open-surface', ownerId: current.id, requestId, directory, runtimeKey: contextWindowRuntimeKey(),
+      expiresAt: Date.now() + PANEL_REPLY_MS, destination,
+    })) finish(GUEST_PANEL_UNAVAILABLE);
+  });
+};
+
+const failGuestOpens = (current: Owner): void => {
+  for (const finish of current.guestOpenReplies.values()) finish(GUEST_PANEL_UNAVAILABLE);
+  current.queued = current.queued.filter((message) => message.kind !== 'guest-open-surface');
+};
+
 const stopWaiting = (): void => {
   owner?.cancelWait?.();
   if (owner) owner.cancelWait = null;
@@ -165,13 +204,17 @@ const panelReady = (): void => {
   }
   sendFollowState(true);
   const queued = owner.queued.splice(0);
-  for (const message of queued) post(message);
+  for (const message of queued) {
+    if (!post(message) && message.kind === 'guest-open-surface') {
+      owner.guestOpenReplies.get(message.requestId)?.(GUEST_PANEL_UNAVAILABLE);
+    }
+  }
 };
 
 const openPanelWindow = async (id: string): Promise<'opened' | 'blocked' | 'failed'> => {
   if (isElectronShell()) {
     try {
-      await invokeDesktop('desktop_open_context_window', { ownerId: id, ...getMiniChatRuntimeArgs() });
+      await invokeDesktop('desktop_open_context_window', { ownerId: id, ...contextWindowRuntimeArgs() });
       return 'opened';
     } catch (error) {
       console.warn('[context-window] could not open the panel window', error);
@@ -235,7 +278,7 @@ const findWebPanelWindow = (current: Owner): Window | null => {
 export const showContextPanelWindow = (): void => {
   if (!owner || !useContextWindowStore.getState().detached) return;
   if (isElectronShell()) {
-    void invokeDesktop('desktop_open_context_window', { ownerId: owner.id, ...getMiniChatRuntimeArgs() }).catch(() => {});
+    void invokeDesktop('desktop_open_context_window', { ownerId: owner.id, ...contextWindowRuntimeArgs() }).catch(() => {});
     return;
   }
   const panel = findWebPanelWindow(owner);
@@ -278,6 +321,7 @@ const returnContextPanel = (): void => {
   stopWaiting();
   owner.returnRequested = false;
   setDetached(false);
+  failGuestOpens(owner);
   if (owner.panel && !owner.panel.closed) owner.panel.close();
   owner.panel = null;
   owner.ready = false;
@@ -339,7 +383,14 @@ const onMessage = (event: MessageEvent): void => {
       owner.id = generateUuid();
       getSafeSessionStorage().setItem(WINDOW_ID_KEY, owner.id);
       stopWaiting();
+      failGuestOpens(owner);
       setDetached(false);
+      return;
+    case 'guest-surface-opened':
+      if (detached && owner.guestOpenReplies.has(message.requestId)) {
+        if (message.result.ok) revealPanelWindow();
+        owner.guestOpenReplies.get(message.requestId)?.(message.result);
+      }
       return;
     case 'attach':
       if (detached) void attachForPanel(message);
@@ -366,6 +417,7 @@ export const startContextWindowOwner = (): (() => void) => {
     panel: null,
     ready: false,
     queued: [],
+    guestOpenReplies: new Map(),
     lastFollow: '',
     cancelWait: null,
     returnRequested: false,
@@ -387,6 +439,7 @@ export const startContextWindowOwner = (): (() => void) => {
       if (state.composerAddress !== previous.composerAddress) sendFollowState();
     }),
     subscribeRuntimeEndpointChanged(() => {
+      failGuestOpens(current);
       if (useContextWindowStore.getState().detached) post({ kind: 'close', ownerId: current.id });
     }),
   ];
@@ -414,6 +467,7 @@ export const startContextWindowOwner = (): (() => void) => {
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('openchamber:context-window-closed', onDesktopClosed);
     stopWaiting();
+    failGuestOpens(current);
     setContextActionForwarder(null);
     channel.close();
     if (owner === current) owner = null;

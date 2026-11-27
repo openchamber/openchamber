@@ -129,7 +129,7 @@ test(`${variant.name}: actions and commands use the execution entry and clean up
     await act(async () => { useSessionUIStore.setState({ currentSessionId: 'another-chat' }); });
     expect(messages.filter((message) => message.type === 'action')).toHaveLength(1);
     expect(useGuestDialogStore.getState().request).toBeNull();
-    expect(useGuestItemStore.getState().pendingItemByGuest.counter).toEqual(parkedItem);
+    expect(useGuestItemStore.getState().pendingItemByGuest.counter?.item).toEqual(parkedItem);
     expect(useGuestBadgeStore.getState().countByGuest.counter).toBe(5);
     await act(async () => {
       send({ channel: 'openchamber.sdk', v: 1, type: 'action-result', id: 'wrong-id', payload: { ok: true } });

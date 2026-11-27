@@ -1,29 +1,49 @@
 import React from 'react';
-import type { GuestHostSurface, GuestItem } from '@openchamber/sdk';
+import type { GuestHostSurface, GuestItem, HostMessage } from '@openchamber/sdk';
 
-import { useGuestItemStore } from '@/lib/guests/item-store';
+import { buildItemMessage } from '@/lib/guests/host-bridge';
+import { guestPanelItemOwner, useGuestItemStore } from '@/lib/guests/item-store';
+import type { InstalledGuest } from '@/lib/guests/types';
 
-export function usePanelItem({ guestId, surface, headless, itemProp, panelOpen }: {
+export function usePanelItem({ guestId, guest, directory, surface, headless, itemProp, panelOpen }: {
   guestId: string;
+  guest: InstalledGuest | null;
+  directory: string | undefined;
   surface: GuestHostSurface;
   headless: boolean;
   itemProp: GuestItem | null | undefined;
   panelOpen: boolean;
-}): GuestItem | null {
+}) {
   const pendingItem = useGuestItemStore((state) => state.pendingItemByGuest[guestId]);
   const takePendingItem = useGuestItemStore((state) => state.takePendingItem);
-  const [railItem, setRailItem] = React.useState<GuestItem | null>(null);
+  const [railItem, setRailItem] = React.useState<ReturnType<typeof takePendingItem>>(null);
+  const owner = guest && (pendingItem?.owner || railItem?.owner) ? guestPanelItemOwner(guest, directory) : undefined;
+  const readsItems = surface === 'panel' && !headless && itemProp === undefined;
+  const delivery = readsItems && panelOpen && pendingItem?.finish && pendingItem.owner === owner ? pendingItem : null;
   const [wasPanelOpen, setWasPanelOpen] = React.useState(panelOpen);
   if (wasPanelOpen !== panelOpen) {
     setWasPanelOpen(panelOpen);
-    if (!panelOpen) setRailItem(null);
   }
+  if ((wasPanelOpen && !panelOpen) || (railItem?.owner !== undefined && railItem.owner !== owner)) setRailItem(null);
 
   React.useEffect(() => {
-    if (surface !== 'panel' || headless || itemProp !== undefined || !pendingItem) return;
-    const taken = takePendingItem(guestId);
+    if (!readsItems || !pendingItem || pendingItem.finish) return;
+    const taken = takePendingItem(guestId, owner);
     if (taken) setRailItem(taken);
-  }, [guestId, headless, itemProp, pendingItem, surface, takePendingItem]);
+  }, [guestId, owner, pendingItem, readsItems, takePendingItem]);
 
-  return railItem;
+  const postItem = (item: GuestItem | null, document: symbol, post: (message: HostMessage, transfer?: Transferable[]) => void) => {
+    const message = buildItemMessage(item);
+    if (!delivery || delivery.item !== item || useGuestItemStore.getState().pendingItemByGuest[guestId] !== delivery) {
+      post(message);
+      return;
+    }
+    const receipt = delivery.makeReceipt?.(document, () => {
+      if (useGuestItemStore.getState().pendingItemByGuest[guestId] !== delivery) return;
+      setRailItem({ item: delivery.item, owner: delivery.owner });
+      delivery.finish?.(true);
+    });
+    post(message, receipt ? [receipt] : undefined);
+  };
+  return { item: delivery?.item ?? railItem?.item ?? null, postItem };
 }

@@ -2,6 +2,7 @@
 import type { OpenCodeClient } from "@opencode/client"
 import type { Config } from "@/lib/opencode/model"
 import type { ChildStoreManager } from "./child-store"
+import { getSessionUpdatedAt } from "./live-aggregate"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
 
@@ -104,6 +105,8 @@ export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][num
     nextSlices.set(directory, sessions)
     for (const session of sessions) {
       if (!session?.id) continue
+      const current = nextSessionsById.get(session.id)
+      if (current && getSessionUpdatedAt(current) > getSessionUpdatedAt(session)) continue
       nextSessionsById.set(session.id, session)
       nextDirectoriesById.set(session.id, directory)
     }

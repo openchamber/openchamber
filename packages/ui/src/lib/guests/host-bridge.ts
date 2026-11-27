@@ -32,6 +32,7 @@ import {
   type HostRequestErrorCode,
   type HostResultPayload,
   type LateGenerateResult,
+  type OpenSurfaceOptions,
   type ResolveResultPayload,
   type SessionSnapshot,
   type StartSessionResult,
@@ -62,7 +63,7 @@ type HostBridgeEffects = {
   openSession: (sessionId: string) => void;
   toast: (request: ToastRequest) => void;
   openUrl: (url: string) => Promise<boolean>;
-  openSurface: (mode: ContextPanelMode) => GuestOpenSurfaceResult;
+  openSurface: (mode: ContextPanelMode, options?: OpenSurfaceOptions) => GuestOpenSurfaceResult | Promise<GuestOpenSurfaceResult>;
   writeClipboard: (text: string) => Promise<boolean>;
   compose: (text: string, mode: 'replace' | 'append') => void;
   attach: (issue: AttachIssueRequest) => void;
@@ -101,14 +102,14 @@ type HostBridgeEffects = {
   setPopoverAnchorActive?: (id: string, active: boolean) => void;
 };
 
-export const buildReadyMessage = (payload: HostReadyContext): HostMessage => ({
+const buildReadyMessage = (payload: HostReadyContext): HostMessage => ({
   channel: OPENCHAMBER_SDK_CHANNEL,
   v: OPENCHAMBER_SDK_API_VERSION,
   type: 'ready',
   payload,
 });
 
-export const buildDirectoryMessage = (directory: string | null): HostMessage => ({
+const buildDirectoryMessage = (directory: string | null): HostMessage => ({
   channel: OPENCHAMBER_SDK_CHANNEL,
   v: OPENCHAMBER_SDK_API_VERSION,
   type: 'directory',
@@ -122,14 +123,14 @@ export const buildSessionMessage = (session: SessionSnapshot | null): HostMessag
   payload: { session },
 });
 
-export const buildConnectionMessage = (connection: GuestConnection): HostMessage => ({
+const buildConnectionMessage = (connection: GuestConnection): HostMessage => ({
   channel: OPENCHAMBER_SDK_CHANNEL,
   v: OPENCHAMBER_SDK_API_VERSION,
   type: 'connection',
   payload: { connection },
 });
 
-export const buildSettingsMessage = (settings: GuestSettings): HostMessage => ({
+const buildSettingsMessage = (settings: GuestSettings): HostMessage => ({
   channel: OPENCHAMBER_SDK_CHANNEL,
   v: OPENCHAMBER_SDK_API_VERSION,
   type: 'settings',
@@ -142,6 +143,14 @@ export const buildItemMessage = (item: GuestItem | null): HostMessage => ({
   type: 'item',
   payload: { item },
 });
+
+export const pushGuestHostState = (post: (message: HostMessage) => void, ready: HostReadyContext, directory: string | null): void => {
+  post(buildReadyMessage(ready));
+  post(buildDirectoryMessage(directory));
+  post(buildSessionMessage(ready.session));
+  post(buildConnectionMessage(ready.connection));
+  post(buildSettingsMessage(ready.settings));
+};
 
 export const buildResolveMessage = (id: string, command: string, args: string): HostMessage => ({
   channel: OPENCHAMBER_SDK_CHANNEL,
@@ -299,10 +308,17 @@ export const answerGuestMessage = async (
         (error: Error) => errorResult(message.id, error.message, 'HOST_REJECTED'),
       );
     case 'open-surface': {
-      if (!isContextPanelMode(message.payload.surfaceId)) {
+      const { surfaceId, options } = message.payload;
+      if (!isContextPanelMode(surfaceId)) {
         return errorResult(message.id, 'Unknown surface.');
       }
-      const opened = effects.openSurface(message.payload.surfaceId);
+      if (options === null) {
+        return errorResult(message.id, 'Expected a Project Knowledge tab or an extension item.');
+      }
+      if (options?.tab !== undefined && surfaceId !== 'notes') {
+        return errorResult(message.id, 'A tab can only be selected in Project Knowledge.');
+      }
+      const opened = await effects.openSurface(surfaceId, options);
       return opened.ok ? okResult(message.id) : errorResult(message.id, opened.message, opened.code);
     }
     case 'clipboard-write': {
