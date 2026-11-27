@@ -234,9 +234,18 @@ describe("the phone's filter", () => {
     await click(filterTrigger());
     const sheet = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Filter"]');
     expect(sheet).not.toBeNull();
-    // Status, people and the labels with their search, together in the sheet.
+    // Status, people and the labels, together in the sheet.
     const groups = [...(sheet?.querySelectorAll<HTMLElement>('[role="group"]') ?? [])].map((group) => group.getAttribute('aria-label'));
     expect(groups).toEqual(['Status', 'People', 'Labels']);
+    expect(document.activeElement?.tagName).not.toBe('INPUT');
+
+    // The label section is collapsed: no search field until it is opened.
+    const labelsGroup = () => sheet?.querySelector<HTMLElement>('[role="group"][aria-label="Labels"]');
+    const labelsToggle = () => [...(labelsGroup()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])][0];
+    expect(labelsToggle()?.getAttribute('aria-expanded')).toBe('false');
+    expect(sheet?.querySelector('input')).toBeNull();
+    await click(labelsToggle());
+    expect(labelsToggle()?.getAttribute('aria-expanded')).toBe('true');
     expect(sheet?.querySelector('input')).not.toBeNull();
     expect(document.activeElement?.tagName).not.toBe('INPUT');
 

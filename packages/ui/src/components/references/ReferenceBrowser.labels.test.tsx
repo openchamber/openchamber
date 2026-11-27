@@ -206,6 +206,16 @@ const openMenu = () => click(filterTrigger());
 const closeMenu = async () => {
   if (menu()) await click(filterTrigger());
 };
+/** The labels section's disclosure row: the section names itself, chips follow. */
+const labelsToggle = () => [...(menu()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])]
+  .find((button) => button.textContent?.trim().startsWith('Labels'));
+const labelsExpanded = () => labelsToggle()?.getAttribute('aria-expanded') === 'true';
+/** The labels list inside the expanded section. */
+const labelList = () => menu()?.querySelector<HTMLElement>('[data-slot="command-list"]') ?? null;
+/** Expands the labels section, which reads the host's labels the first time. */
+const openLabels = async () => {
+  if (!labelsExpanded()) await click(labelsToggle());
+};
 /** The browser the harness last rendered, for typing the way its field does. */
 let latestBrowser: { setQuery: (value: string) => void } | null = null;
 
@@ -223,6 +233,7 @@ const groupLabel = (name: string) => [...(menu()?.querySelectorAll<HTMLElement>(
 /** Opens the panel, emptying labels an earlier test left: the selection is remembered for the app run. */
 const openFiltered = async (shown: Shown) => {
   await openMenu();
+  await openLabels();
   if (!filterTrigger()?.getAttribute('aria-label')?.includes(':')) return;
   await click(labelChoice('Clear'));
   shown.patches.length = 0;
@@ -232,11 +243,17 @@ const openFiltered = async (shown: Shown) => {
 const issueReads = (shown: Shown) => shown.reads.filter((query) => query.kind === 'issue');
 
 describe('the labels filter in the filter menu', () => {
-  test('labels are read when the panel opens, and not before', async () => {
+  test('labels are read when the section is opened, and not before', async () => {
     const shown = await show();
     await flush();
     expect(shown.labelReads).toEqual([]);
     await openMenu();
+    // The section is a collapsed row: it names itself, shows nothing and reads nothing.
+    expect(labelsToggle()?.textContent).toContain('Labels');
+    expect(labelsExpanded()).toBe(false);
+    expect(labelList()).toBeNull();
+    expect(shown.labelReads).toEqual([]);
+    await openLabels();
     expect(shown.labelReads.length).toBe(1);
     expect(shown.labelReads[0]?.project).toEqual({ owner: 'acme', repo: 'app' });
     expect(shown.labelReads[0]?.context?.directory).toBe('/work/app');
@@ -318,6 +335,7 @@ describe('the labels filter in the filter menu', () => {
     await closeMenu();
     shown.setHostLabels([{ name: 'docs' }]);
     await openMenu();
+    await openLabels();
     expect(checked('bug')).toBe(true);
     expect(checked('docs')).toBe(false);
     await click(labelChoice('bug'));
@@ -332,6 +350,7 @@ describe('the labels filter in the filter menu', () => {
     await closeMenu();
     shown.setLabelsMode('fail');
     await openMenu();
+    await openLabels();
     expect(menu()?.textContent).toContain('Could not load labels');
     expect(menu()?.textContent).toContain('This project is not readable');
     // The chosen label stays chosen, and can still be unpicked.
@@ -345,6 +364,8 @@ describe('the labels filter in the filter menu', () => {
     const shown = await show();
     shown.setLabelsMode('unsupported');
     await openMenu();
+    // The section has to be expanded before the host can refuse it.
+    await openLabels();
     expect(menu()?.textContent).toContain('Status');
     expect(menu()?.textContent).not.toContain('Labels');
     expect(menu()?.textContent).not.toContain('Could not load labels');
@@ -357,10 +378,13 @@ describe('the labels filter in the filter menu', () => {
     await openMenu();
     expect(menu()?.textContent).not.toContain('Labels');
     expect(shown.labelReads).toEqual([]);
-    // The registry settles while the panel is open: the read must still happen.
+    // The registry settles while the panel is open: the row appears, and only
+    // expanding it reads the host.
     await setProvider();
     await flush();
-    expect(menu()?.textContent).toContain('Labels');
+    expect(labelsToggle()?.textContent).toContain('Labels');
+    expect(shown.labelReads).toEqual([]);
+    await openLabels();
     expect(shown.labelReads).toHaveLength(1);
     await closeMenu();
   });
@@ -517,5 +541,61 @@ describe('the GitHub qualifiers the search text carries', () => {
   test('the search field names the qualifiers only where they work', async () => {
     await show({ advancedSearch: true });
     expect(host.querySelector('input')?.placeholder).toContain('is: label: author:');
+  });
+});
+
+describe('the provider labels section disclosure', () => {
+  test('starts collapsed and reads nothing until it is opened', async () => {
+    const shown = await show();
+    await openMenu();
+    expect(labelsToggle()?.getAttribute('aria-expanded')).toBe('false');
+    expect(labelList()).toBeNull();
+    expect(labelChoice('bug')).toBeUndefined();
+    expect(shown.labelReads).toEqual([]);
+    await closeMenu();
+  });
+
+  test('opening reads once and shows the tall label list', async () => {
+    const shown = await show();
+    await openMenu();
+    await openLabels();
+    expect(shown.labelReads).toHaveLength(1);
+    const list = labelList();
+    expect(list?.className).toContain('max-h-[14rem]');
+    expect(list?.className).toContain('pointer-coarse:max-h-[19.25rem]');
+    const rows = [...(list?.querySelectorAll<HTMLElement>('[data-slot="command-item"]') ?? [])]
+      .filter((item) => item.textContent?.trim() === 'bug' || item.textContent?.trim() === 'docs');
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.className.includes('h-8'))).toBe(true);
+    expect(rows.every((row) => row.className.includes('pointer-coarse:h-11'))).toBe(true);
+    await closeMenu();
+  });
+
+  test('closing and opening the section again does not read again', async () => {
+    const shown = await show();
+    await openMenu();
+    await openLabels();
+    expect(shown.labelReads).toHaveLength(1);
+    await click(labelsToggle());
+    expect(labelsExpanded()).toBe(false);
+    expect(labelList()).toBeNull();
+    await openLabels();
+    expect(labelsExpanded()).toBe(true);
+    expect(labelChoice('bug')).toBeDefined();
+    expect(shown.labelReads).toHaveLength(1);
+    await closeMenu();
+  });
+
+  test('an unsupported host still hides the whole section', async () => {
+    const shown = await show();
+    shown.setLabelsMode('unsupported');
+    await openMenu();
+    expect(labelsToggle()).toBeDefined();
+    await openLabels();
+    expect(labelsToggle()).toBeUndefined();
+    expect(menu()?.textContent).toContain('Status');
+    expect(menu()?.textContent).not.toContain('Labels');
+    expect(menu()?.textContent).not.toContain('Could not load labels');
+    await closeMenu();
   });
 });
