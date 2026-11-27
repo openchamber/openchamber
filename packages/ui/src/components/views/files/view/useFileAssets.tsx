@@ -1,6 +1,7 @@
 import React from 'react';
 import { readAssetBlob, runtimeAssetsNeedFetch } from '@/lib/runtime-asset';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -59,11 +60,13 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
     [runtimeKey, selectedFile?.path, usesRawAssetUrl, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
+  const relayActive = isRelayModeActive();
   const inlineHtmlPreview = runtimeAssetsNeedFetch();
   const htmlPreviewRequest = React.useMemo(
     () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
       ? {
         runtime: runtimeKey,
+        relayActive,
         path: selectedFile.path,
         directory: root || '',
         revision: String(fileContentRevision),
@@ -71,7 +74,7 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
         inlineDocument: inlineHtmlPreview,
       }
       : null),
-    [runtimeKey, selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, inlineHtmlPreview, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
+    [runtimeKey, relayActive, selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, inlineHtmlPreview, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
@@ -90,10 +93,6 @@ export function useFileAssets({ draft, fileDocument, fileKinds, fileSaving, scop
       annotateWhenLoadedRef.current = null;
     }
   }, [htmlViewMode, selectedFile?.path]);
-  React.useEffect(() => {
-    if (htmlPreview.status === 'error') setFileError(htmlPreview.message);
-    else if (htmlPreview.status === 'ready') setFileError(null);
-  }, [htmlPreview, setFileError]);
   const rawAsset = useRawAssetUrl(rawAssetRequest, setFileError, assetAuthErrorFallback);
   const isPdfAssetAuthLoading = rawAsset.loading;
 

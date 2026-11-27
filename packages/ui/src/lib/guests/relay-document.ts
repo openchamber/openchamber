@@ -18,5 +18,4 @@ export const loadRelayGuestDocument = async (
   load,
   csp: guestFramePolicy(null, origins),
   strictSubresources: true,
-  keepBaseHref: true,
 });

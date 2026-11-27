@@ -22,6 +22,10 @@ export function renderFileHtmlPreview({ fileAssets, fileDocument, tabs, runtime,
               <div className="flex h-full items-center justify-center text-muted-foreground typography-ui-label">
                 {t('common.loading')}
               </div>
+            ) : !runtime.isVSCode && htmlPreview.status === 'error' ? (
+              <div className="p-3 typography-ui text-destructive">
+                {htmlPreview.message}
+              </div>
             ) : (
             <div className="h-full overflow-hidden">
               <iframe

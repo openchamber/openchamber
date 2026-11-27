@@ -3388,10 +3388,10 @@ describe('fs html preview grants', () => {
       await mintHandler({ body: { path: pagePath }, query }, res);
       return res;
     };
-    const serve = async (url) => {
+    const serve = async (url, query = {}) => {
       const match = url.match(serveRoute.routePath);
       const res = createMockResponse();
-      await serveRoute.handler({ params: { 0: decodeURIComponent(match[1]), 1: decodeURIComponent(match[2]) }, query: {} }, res);
+      await serveRoute.handler({ params: { 0: decodeURIComponent(match[1]), 1: decodeURIComponent(match[2]) }, query }, res);
       return res;
     };
     return { mint, serve };
@@ -3432,6 +3432,12 @@ describe('fs html preview grants', () => {
 
     const secret = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/guest-auth.json`);
     expect(secret.getHeader('access-control-allow-origin')).toBeUndefined();
+
+    // Inline preview reads enforce readRoot server-side so secret bytes never enter data: URLs.
+    const inlineData = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/projects/p1/canvases/c1/data.json`, { inline: '1' });
+    expect(inlineData.statusCode).toBe(200);
+    const inlineSecret = await serve(`/api/fs/preview/${grant}/home/user/.config/openchamber/guest-auth.json`, { inline: '1' });
+    expect(inlineSecret.statusCode).toBe(403);
   });
 
   it('refuses unknown grants and files outside the workspace', async () => {

@@ -1381,6 +1381,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(413).json({ error: 'File too large to serve' });
       }
 
+      const withinReadRoot = isPathWithinRoot(canonicalPath, grant.readRoot, path, os);
+      if (req.query?.inline === '1' && !withinReadRoot) return res.status(403).json({ error: 'File is outside preview read root' });
       const ext = path.extname(canonicalPath).toLowerCase();
       const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
       const bytes = await fsPromises.readFile(canonicalPath);
@@ -1388,9 +1390,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Security-Policy', PREVIEW_SANDBOX_POLICY);
-      if (isPathWithinRoot(canonicalPath, grant.readRoot, path, os) && !res.getHeader('Access-Control-Allow-Origin')) {
-        res.setHeader('Access-Control-Allow-Origin', 'null');
-      }
+      if (withinReadRoot && !res.getHeader('Access-Control-Allow-Origin')) res.setHeader('Access-Control-Allow-Origin', 'null');
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;

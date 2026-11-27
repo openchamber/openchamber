@@ -78,42 +78,45 @@ describe('loadHtmlPreviewDocument', () => {
     await dom.happyDOM.close();
   });
 
-  const makeFetcher = (assets: Map<string, Asset>, requests: string[]): typeof runtimeFetch => async (input) => {
+  const makeFetcher = (
+    assets: Map<string, Asset>,
+    requests: Array<{ path: string; query: unknown }>,
+  ): typeof runtimeFetch => async (input, init) => {
     const path = String(input);
-    requests.push(path);
+    requests.push({ path, query: init?.query });
     const asset = assets.get(path);
     return asset ? new Response(asset.body, { headers: { 'content-type': asset.type } }) : new Response('', { status: 404 });
   };
 
-  test('inlines relative styles, scripts and images while keeping external URLs and in-page anchors', async () => {
+  test('inlines relative styles, scripts and images with inline=1, base isolation and fragment nav handler', async () => {
     const prefix = '/api/fs/preview/grant-9/';
-    const requests: string[] = [];
+    const requests: Array<{ path: string; query: unknown }> = [];
     const assets = new Map<string, Asset>([
       [`${prefix}repo/my%20site/report.html`, {
         type: 'text/html',
-        body: '<!doctype html><html><head><link rel="stylesheet" href="style.css"><script src="app.js"></script><script src="https://cdn.example.com/chart.js"></script></head><body><a href="#summary">Summary</a><a href="other.html">Other</a><img src="img/plot.svg"></body></html>',
+        body: '<!doctype html><html><head><link rel="stylesheet" href="style.css"><script src="app.js"></script><script src="https://cdn.example.com/chart.js"></script></head><body><a href="#summary">Summary</a><img src="img/plot.svg"></body></html>',
       }],
       [`${prefix}repo/my%20site/style.css`, { type: 'text/css', body: 'body { background: url(img/plot.svg); }' }],
       [`${prefix}repo/my%20site/app.js`, { type: 'text/javascript', body: 'window.ready = true;' }],
       [`${prefix}repo/my%20site/img/plot.svg`, { type: 'image/svg+xml', body: '<svg/>' }],
     ]);
 
-    const html = await loadHtmlPreviewDocument('grant-9', '/repo/my site/report.html', new AbortController().signal, makeFetcher(assets, requests));
+    const html = await loadHtmlPreviewDocument('grant-9', '/repo/my site/report.html', new AbortController().signal, undefined, makeFetcher(assets, requests));
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    expect(doc.querySelector('base[href]')).toBeNull();
+    expect(doc.querySelector('base')?.getAttribute('href')).toBe('https://preview.invalid/api/fs/preview/grant-9/repo/my%20site/report.html');
+    expect(doc.querySelector('script[data-openchamber-inline-nav]')?.textContent).toContain('scrollIntoView');
     expect(decodeDataUrl(doc.querySelector('link')?.getAttribute('href') ?? '')).toContain('data:image/svg+xml;base64,');
     expect(decodeDataUrl(doc.querySelector('script[src^="data:"]')?.getAttribute('src') ?? '')).toBe('window.ready = true;');
     expect(doc.querySelector('script[src^="https://"]')?.getAttribute('src')).toBe('https://cdn.example.com/chart.js');
     expect(doc.querySelector('img')?.getAttribute('src')).toBe('data:image/svg+xml;base64,PHN2Zy8+');
-    const links = Array.from(doc.querySelectorAll('a')).map((a) => a.getAttribute('href'));
-    expect(links).toEqual(['#summary', 'https://preview.invalid/api/fs/preview/grant-9/repo/my%20site/other.html']);
-    expect(requests.filter((path) => path === `${prefix}repo/my%20site/img/plot.svg`)).toHaveLength(1);
+    expect(requests.every((r) => JSON.stringify(r.query) === JSON.stringify({ inline: '1' }))).toBe(true);
+    expect(requests.filter((r) => r.path === `${prefix}repo/my%20site/img/plot.svg`)).toHaveLength(1);
   });
 
   test('keeps rendering when subresources are missing or outside the preview prefix', async () => {
     const prefix = '/api/fs/preview/grant-10/';
-    const requests: string[] = [];
+    const requests: Array<{ path: string; query: unknown }> = [];
     const assets = new Map<string, Asset>([
       [`${prefix}repo/index.html`, {
         type: 'text/html',
@@ -121,20 +124,38 @@ describe('loadHtmlPreviewDocument', () => {
       }],
     ]);
 
-    const html = await loadHtmlPreviewDocument('grant-10', '/repo/index.html', new AbortController().signal, makeFetcher(assets, requests));
+    const html = await loadHtmlPreviewDocument('grant-10', '/repo/index.html', new AbortController().signal, undefined, makeFetcher(assets, requests));
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
     expect(doc.querySelector('p')?.textContent).toBe('Hello');
     expect(doc.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe('https://preview.invalid/favicon.ico');
     expect(doc.querySelector('img')?.getAttribute('src')).toBe('https://preview.invalid/api/fs/preview/grant-10/repo/missing.png');
-    expect(requests).not.toContain('/favicon.ico');
+    expect(requests.map((r) => r.path)).not.toContain('/favicon.ico');
+  });
+
+  test('rejects an aborted body stream instead of returning partial HTML', async () => {
+    const controller = new AbortController();
+    const stream = new ReadableStream<Uint8Array<ArrayBuffer>>({
+      start(streamController) {
+        streamController.enqueue(new TextEncoder().encode('<p>partial</p>'));
+      },
+      pull() {
+        controller.abort();
+        return new Promise(() => {});
+      },
+    });
+    const fetcher: typeof runtimeFetch = async () => new Response(stream, { headers: { 'content-type': 'text/html' } });
+
+    await expect(
+      loadHtmlPreviewDocument('grant-12', '/repo/index.html', controller.signal, undefined, fetcher),
+    ).rejects.toThrow();
   });
 
   test('fails when the root HTML page cannot be read or is not HTML', async () => {
     const missing = makeFetcher(new Map(), []);
-    await expect(loadHtmlPreviewDocument('grant-11', '/repo/missing.html', new AbortController().signal, missing)).rejects.toThrow('404');
+    await expect(loadHtmlPreviewDocument('grant-11', '/repo/missing.html', new AbortController().signal, undefined, missing)).rejects.toThrow('404');
 
     const nonHtml: typeof runtimeFetch = async () => new Response('plain', { headers: { 'content-type': 'text/plain' } });
-    await expect(loadHtmlPreviewDocument('grant-11', '/repo/index.html', new AbortController().signal, nonHtml)).rejects.toThrow('not HTML');
+    await expect(loadHtmlPreviewDocument('grant-11', '/repo/index.html', new AbortController().signal, undefined, nonHtml)).rejects.toThrow('not HTML');
   });
 });

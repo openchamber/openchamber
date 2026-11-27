@@ -10,8 +10,8 @@ type InlineHtmlDocumentOptions = {
   entry: string;
   load: LoadInlineAsset;
   csp?: string;
+  headScript?: string;
   strictSubresources: boolean;
-  keepBaseHref: boolean;
   signal?: AbortSignal;
 };
 
@@ -49,8 +49,8 @@ export const inlineRelayHtmlDocument = async ({
   entry,
   load,
   csp,
+  headScript,
   strictSubresources,
-  keepBaseHref,
   signal,
 }: InlineHtmlDocumentOptions): Promise<string> => {
   const root = new URL(entry, `${origin}${prefix}`);
@@ -76,6 +76,7 @@ export const inlineRelayHtmlDocument = async ({
       while (true) {
         signal?.throwIfAborted();
         const { done, value } = await reader.read();
+        signal?.throwIfAborted();
         if (done) break;
         totalBytes += value.byteLength;
         if (totalBytes > MAX_BYTES) throw new Error('Document exceeds the resource size limit');
@@ -88,6 +89,7 @@ export const inlineRelayHtmlDocument = async ({
       signal?.removeEventListener('abort', onAbort);
       reader.releaseLock();
     }
+    signal?.throwIfAborted();
     return new Blob(chunks, { type: contentType });
   };
 
@@ -186,12 +188,16 @@ export const inlineRelayHtmlDocument = async ({
     const declaredTarget = document.querySelector('base[target]')?.getAttribute('target');
     const effectiveBase = (declaredBase ? resolveUrl(declaredBase, base, strictSubresources) : null) ?? base;
     for (const node of document.querySelectorAll('base')) node.remove();
-    if (keepBaseHref || declaredTarget) {
-      const baseElement = document.createElement('base');
-      if (keepBaseHref) baseElement.href = effectiveBase.href;
-      if (declaredTarget) baseElement.target = declaredTarget;
-      document.head.prepend(baseElement);
+    if (headScript) {
+      const script = document.createElement('script');
+      script.setAttribute('data-openchamber-inline-nav', '');
+      script.textContent = headScript;
+      document.head.prepend(script);
     }
+    const baseElement = document.createElement('base');
+    baseElement.href = effectiveBase.href;
+    if (declaredTarget) baseElement.target = declaredTarget;
+    document.head.prepend(baseElement);
     if (csp) {
       const policy = document.createElement('meta');
       policy.httpEquiv = 'Content-Security-Policy';
@@ -202,14 +208,6 @@ export const inlineRelayHtmlDocument = async ({
       for (const attribute of ['src', 'href', 'data', 'xlink:href']) {
         const value = node.getAttribute(attribute);
         if (value !== null) node.setAttribute(attribute, await resource(value, effectiveBase, ancestors));
-      }
-    }
-    if (!keepBaseHref) {
-      for (const node of document.querySelectorAll('a[href], area[href]')) {
-        const value = node.getAttribute('href')?.trim();
-        if (!value || value.startsWith('#')) continue;
-        const resolved = resolveUrl(value, effectiveBase, false);
-        if (resolved && resolved.origin === origin) node.setAttribute('href', resolved.href);
       }
     }
     for (const node of document.querySelectorAll('[poster]')) {
@@ -224,6 +222,7 @@ export const inlineRelayHtmlDocument = async ({
     for (const node of document.querySelectorAll('[style]')) {
       node.setAttribute('style', await rewriteCss(node.getAttribute('style') ?? '', effectiveBase, ancestors));
     }
+    signal?.throwIfAborted();
     const result = `<!doctype html>\n${document.documentElement.outerHTML}`;
     if (result.length > MAX_DOCUMENT_CHARS) throw new Error('Document exceeds the size limit');
     return result;
