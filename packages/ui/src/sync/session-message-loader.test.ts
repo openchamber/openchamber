@@ -4,6 +4,7 @@ import { projectInboxMessage, type InboxMessageItem } from "@/lib/opencode/proje
 import { isWaitingSteer, type Message, type Part, type Session, type UserMessage } from "@/lib/opencode/model"
 import { ChildStoreManager } from "./child-store"
 import { SessionMessageLoader, type SessionMessagePageSource } from "./session-message-loader"
+import { clearSessionPrefetch, setSessionPrefetch } from "./session-prefetch-cache"
 import { olderMessagesCursor } from "@/lib/opencode/messageCursor"
 import {
   createFirstVisibleSessionPerformanceTracker,
@@ -243,6 +244,45 @@ describe("SessionMessageLoader", () => {
     expect(loader.getSnapshot(target).status).toBe("ready")
     expect(loader.coversHistory(target)).toBe(true)
     expect(store.getState().message[target.sessionID]).toEqual([prompt.info, notice])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("coverage recorded by a previous run does not hide a transcript rebuilt from one live event", async () => {
+    const target = { directory: "/stale-coverage", sessionID: "session-stale-coverage" }
+    const history = [
+      createRecord(target.sessionID, "prompt", 1),
+      createRecord(target.sessionID, "answer", 2, "assistant"),
+    ]
+    let calls = 0
+    const { childStores, loader } = createLoader(async () => {
+      calls += 1
+      return response(history)
+    })
+    // A previous run recorded coverage, but its messages did not survive the store reset.
+    setSessionPrefetch({
+      directory: target.directory,
+      sessionID: target.sessionID,
+      limit: history.length,
+      complete: true,
+      runtimeKey: "runtime-a",
+    })
+    const store = childStores.ensureChild(target.directory, { bootstrap: false })
+    const liveStep: Message = {
+      id: "live-step", sessionID: target.sessionID, role: "assistant",
+      time: { created: 3 }, agent: "build", providerID: "test", modelID: "test",
+    }
+    store.setState({ message: { [target.sessionID]: [liveStep] } })
+
+    expect(loader.coversHistory(target)).toBe(false)
+    await loader.ensure(target, { reason: "navigation" })
+
+    expect(calls).toBe(1)
+    expect(store.getState().message[target.sessionID].map((message) => message.id)).toEqual([
+      "prompt", "answer", "live-step",
+    ])
+    expect(loader.coversHistory(target)).toBe(true)
+    clearSessionPrefetch(target.directory, [target.sessionID], "runtime-a")
     loader.dispose()
     childStores.disposeAll()
   })

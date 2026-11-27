@@ -47,7 +47,10 @@ export const resolveSessionPlaceholder = ({
         return <DraftWelcome exiting={draftPresentationExiting} />;
     }
 
-    const showHydrationSkeleton = isSessionHydrating && !sessionIsWorking && (messageCount === 0 || loadStatus === 'error');
+    // The history read is independent of whether the agent is running. Gating this on
+    // `!sessionIsWorking` hid both the skeleton and the error card, so a busy session whose
+    // transcript had not loaded rendered as an empty body with no way to retry.
+    const showHydrationSkeleton = isSessionHydrating && (messageCount === 0 || loadStatus === 'error');
     if (showHydrationSkeleton) {
         if (spaceStopped && effectiveSessionDirectory) {
             return <SpaceChatPlaceholder directory={effectiveSessionDirectory} />;
