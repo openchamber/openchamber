@@ -426,7 +426,16 @@ server announces both ends of that wait (`openchamber.session-assist`,
 or dropped by a new turn; the end re-checks the waiting directory at once. A
 wait whose end this client never hears stops holding the directory after five
 minutes. With the recap and the suggestion off nothing waits. A directory
-without a store is left to OpenCode's own sweep. The directory the user is in
+without a store is left to OpenCode's own sweep. When the window finds nothing,
+it asks OpenCode before releasing (`lib/opencode/location-work.ts`): a session
+in a turn or a running background job there (a subagent counts for its parent
+and its child) holds the directory the same way, re-checked at its delay, and
+the window's own checks run once more on the answer. The reads are global
+routes (`session.active`, `experimental.job.list`, `session.get`), sent without
+a directory outside isolated spaces, so they start no location and skip the
+folder trust check. A job list OpenCode does not have (before 2.3) counts as no
+jobs, and a session deleted meanwhile is skipped; any other failed read
+releases nothing. The directory the user is in
 is never released, and the server's reads without a directory of their own go
 to that same directory (`noteCurrentDirectory` in the server lifecycle), so a
 left project is not started again by them. Another client still showing the directory gets
@@ -434,6 +443,20 @@ left project is not started again by them. Another client still showing the dire
 failed release is ignored: OpenCode's own sweep still applies. The rule is the
 same on every surface; VS Code includes managed Chats in windows without a
 workspace folder.
+
+### Why the release asks OpenCode and not only the window
+
+A release disposes the location for every client, and OpenCode cancels what
+still runs there: a waiting question or permission ends as "Interaction
+cancelled because the location shut down". The window's stores hold only what
+it has seen, so work another client started, or work whose events this window
+missed, looked idle. OpenCode's own sweep keeps a location for exactly the
+active executions and running background jobs, and the release now reads the
+same two lists before it evicts. Leaving the release to OpenCode's hour-long
+sweep alone was rejected: every chat, worktree and project opened would keep
+its MCP servers for that hour. The window's checks stay first, because they
+also hold for OpenChamber's own waits OpenCode does not know about, and they
+skip the server reads while the window already sees work.
 
 ## Committing a revert
 
