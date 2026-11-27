@@ -7,8 +7,42 @@ on:
     types: [created]
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.access.outputs.allowed }}
+    steps:
+      - name: Generate access-check token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
+          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+          permission-metadata: read
+
+      - name: Check commenter access
+        id: access
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          # `author_association` hides private org members, so ask for the
+          # repository permission itself. Maintain reads as write here.
+          permission="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${COMMENTER}/permission" --jq '.permission' 2>/dev/null)" || permission="none"
+          case "$permission" in
+            admin|write) echo "allowed=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::notice::${COMMENTER} has ${permission} access; bot commands need write access."
+              echo "allowed=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
   opencode:
+    needs: gate
     if: |
+      needs.gate.outputs.allowed == 'true' &&
       !startsWith(github.event.comment.body, '/oc-review') &&
       !contains(github.event.comment.body, ' /oc-review') &&
       (contains(github.event.comment.body, ' /oc') ||
