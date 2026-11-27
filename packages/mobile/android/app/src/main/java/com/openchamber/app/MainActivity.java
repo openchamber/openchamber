@@ -4,9 +4,14 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
+import android.view.View;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
 import java.util.ArrayList;
 import java.util.UUID;
@@ -194,5 +199,33 @@ public class MainActivity extends BridgeActivity {
         // content. Swap in ours before the bridge resolves the WebView by id.
         setContentView(R.layout.activity_main);
         super.load();
+        keepKeyboardFromPaddingTheWebView();
+    }
+
+    /**
+     * Before Android 11, adjustResize already shrinks the window to the space above the keyboard.
+     * Capacitor's SystemBars, on a WebView 140 or newer, then pads the WebView's parent by the
+     * keyboard height again, and a keyboard-high gap shows between the page and the keyboard.
+     * SystemBars installs its listener while the bridge is created, so replacing it here, after
+     * super.load(), is what takes it out. The page needs no safe-area insets on these versions:
+     * the window already sits below the status bar and above the keyboard.
+     */
+    private void keepKeyboardFromPaddingTheWebView() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return;
+        }
+        View parent = (View) getBridge().getWebView().getParent();
+        ViewCompat.setOnApplyWindowInsetsListener(parent, (view, insets) -> {
+            view.setPadding(0, 0, 0, 0);
+            // Zeroed, not consumed: Chromium keeps recalculating safe areas from unconsumed insets
+            // (https://issues.chromium.org/issues/461332423), which is why SystemBars does the same.
+            return new WindowInsetsCompat.Builder(insets)
+                .setInsets(
+                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout(),
+                    Insets.NONE
+                )
+                .build();
+        });
+        ViewCompat.requestApplyInsets(parent);
     }
 }

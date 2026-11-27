@@ -26,6 +26,21 @@ The simulator build uses `cap copy ios` to update bundled web assets without reg
 
 `ios-sim-dev.mjs` resolves the package-local `serve-sim` executable even when invoked outside `bun run`, where the package bin directory is absent from PATH.
 
+## Android keyboard and window insets
+
+### Ownership
+
+On Android the keyboard resizes the window natively (`windowSoftInputMode="adjustResize"`); the page does no keyboard layout of its own there (`mobileNativeChrome.ts` only toggles `oc-keyboard-open`). `MainActivity.keepKeyboardFromPaddingTheWebView` owns what happens to the insets between the window and the WebView on Android 10 and older.
+
+### Invariants
+
+- With the keyboard open on Android 10 or older, the WebView's parent has no bottom padding: the window is already as tall as the space above the keyboard.
+- Android 11 and newer keep Capacitor's `SystemBars` handling untouched.
+
+### Why SystemBars is replaced on Android 10 and older and not configured away
+
+With a WebView 140 or newer and `viewport-fit=cover` (`mobile.html`), `SystemBars` pads the WebView's parent by the keyboard height on every API level. Before Android 11, `adjustResize` has already shrunk the window, so the keyboard height is taken out twice and a keyboard-high gap of the window background shows above the keyboard (seen on a Honor 9X, Android 10, WebView 158, with "Show layout bounds"). `insetsHandling: "disable"` would also switch off the edge-to-edge handling Android 15 and newer need, and the config is the same for every version. The activity therefore replaces the listener `SystemBars` installs during `bridge.create()`, only below API 30. Capacitor 8.6 installs that listener on the decor view instead, so a Capacitor upgrade needs this method rechecked.
+
 ## Dev-server preview
 
 The workspace drawer's Browser tab (id `preview`) shows a dev server running on
