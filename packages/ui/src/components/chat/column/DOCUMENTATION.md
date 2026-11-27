@@ -42,6 +42,10 @@ The heading takes its width from the padded column so a long project name cannot
 
 A cross-worktree worker can load its transcript through its parent's directory without joining that directory's session list. The global record already carries its ownership metadata, so a missing live record cannot expose an editable composer.
 
+### Why the digest popover is opaque instead of glass
+
+The digest is a page of text read over the transcript, not a menu, and a phone showed the transcript's own digest lines reading through it: the glass fill is about half transparent, so wherever the WebView skipped or softened the backdrop blur the panel's text sat over the text behind it. It now takes the opaque floating surface (`oc-popup-opaque` with `oc-glass-floating`, the fill of the always-on-screen surfaces) and keeps the height, scroller and form behaviour; nothing behind it can be read, in any theme. The glass classes stay the default for menus and popovers whose content is short and known; a popup this tall on top of live text does not use them.
+
 ### Why the digest popover's scroller is a block and not a flex column
 
 On touch screens `mobile.css` gives every `.flex.flex-col` `min-height: 0`. With the scroller as a flex column under the popover's height cap, each section is a flex item that can shrink, so on a phone a long section shrank below its text and the next one was drawn over it. As a block, the sections keep their full height and only the scroller scrolls; `space-y-3` spaces them 12 px apart, the same as `gap-3` in a column.

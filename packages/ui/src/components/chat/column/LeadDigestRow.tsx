@@ -5,8 +5,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
-import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
+import { opaquePopupClass } from '@/components/ui/dropdown-menu.styles';
 import { Input } from '@/components/ui/input';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useI18n } from '@/lib/i18n';
@@ -252,7 +251,7 @@ export const LeadDigestRow: React.FC<{ sessionId: string | null; directory: stri
           <Popover.Popup
             ref={popupRef}
             initialFocus={popupRef}
-            className={cn(dropdownMenuPopupClass, 'data-[starting-style]:scale-[0.98] data-[ending-style]:scale-[0.98] [&:not([data-ending-style])]:duration-150 flex max-h-[min(60vh,var(--available-height))] w-[calc(var(--anchor-width)-1.5rem)] flex-col focus-visible:outline-none')}
+            className={cn(opaquePopupClass, 'data-[starting-style]:scale-[0.98] data-[ending-style]:scale-[0.98] [&:not([data-ending-style])]:duration-150 flex max-h-[min(60vh,var(--available-height))] w-[calc(var(--anchor-width)-1.5rem)] flex-col focus-visible:outline-none')}
           >
             <div className="min-h-0 space-y-3 overflow-y-auto px-4 py-3">
               {digest.needsYou.length > 0 ? (
@@ -301,7 +300,6 @@ export const LeadDigestRow: React.FC<{ sessionId: string | null; directory: stri
                 </Button>
               </div>
             ) : null}
-            <GlassRedrawGuard />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>

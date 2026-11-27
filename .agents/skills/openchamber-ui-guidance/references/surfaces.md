@@ -16,6 +16,7 @@ the source of the values. Its comments say why each value is what it is.
 | Choice of one among a few | `SettingsChipGroup`, or `SortableTabsStrip variant="active-pill"` for tabs | A recessed track (`oc-recessed`) with the chosen option raised. Independent toggles stay chips. |
 | Menu, popover, autocomplete, floating comment field | `oc-glass-popover oc-glass-floating` | No border and no extra `shadow-*` on it or a wrapper: either replaces the light. |
 | Surface always on screen over the transcript (composer, status pills) | `oc-surface-floating` + `oc-glass-floating` | Opaque on purpose: a blur there is redrawn every streamed frame. The composer adds `oc-composer-sheen`. |
+| Popover whose body is a live document read over the transcript (the lead digest) | `opaquePopupClass` (`oc-popup-opaque oc-glass-floating`) | Opaque on purpose, same reason: its sections update and scroll while turns land behind it, and its text must stay legible even where the runtime never paints the backdrop. It never renders `<GlassRedrawGuard />`, because nothing is blurred. |
 | Panel in the layout beside the chat (context panel card, work status card) | `oc-panel-edge` | A hairline ring and a short shadow (the raised level's, the composer's: `--oc-elevation-raised-shadow`), plus a faint lit top line in dark themes. Its page colour is the sidebar's (the theme's muted surface; halfway to it in light themes): JS-painted surfaces inside take it from `usePageColors`; it gains the full dropdown edge only while floating over the chat. |
 | Modal window | `DialogContent` (`oc-modal-shadow`) | Canvas tone (`bg-background`), the same as the Settings window; a sticky header inside paints `bg-background` too. No `border`: the shadow carries the half-pixel ring. Focus on open goes to the first text field, else the window, so no ring lands on the close cross. |
 | Banner: warning, error, info | status background fill | No border. A very faint fill gets a stronger tint rather than a border back. |
@@ -55,7 +56,7 @@ used as a fill inside a tile it makes a dark hole with a visible edge.
   `dropdownMenuPopupClass` renders `<GlassRedrawGuard />` inside, as the shared
   menus do; better, it uses `ContextMenuContent` or `DropdownMenuContent`.
   Without the guard Chromium keeps a stale backdrop and the page behind reads
-  through the glass unblurred.
+  through the glass unblurred. A popup on `opaquePopupClass` needs neither.
 - **A call site's own shadow replaces the light.** `oc-raised`, `oc-field`,
   `oc-tile*` and `oc-raised-button` sit in `@layer components`, so any
   `shadow-*` utility on the same element wins. That is how a chromeless field
