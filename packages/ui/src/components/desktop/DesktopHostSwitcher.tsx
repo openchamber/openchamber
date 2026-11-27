@@ -54,6 +54,7 @@ import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useHostSwitcherRechecks } from '@/hooks/useHostSwitcherRechecks';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -368,30 +369,10 @@ export function DesktopHostSwitcherDialog({
     void probeAll(allHosts);
   }, [open, allHosts, probeAll]);
 
-  React.useEffect(() => {
-    if (!open || !isDesktopShell()) {
-      return;
-    }
-    let cancelled = false;
-    const run = async () => {
-      const statuses = await getSshStatusById();
-      if (!cancelled) {
-        setSshStatusesById(statuses);
-      }
-    };
-    void run();
-    const interval = window.setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      void run();
-    }, 1_500);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [open]);
+  const plainHosts = React.useMemo(() => allHosts.filter((host) => !sshHostIds[host.id] && !host.relay), [allHosts, sshHostIds]);
+  const pollSshStatuses = React.useCallback(async () => setSshStatusesById(await getSshStatusById()), []);
+  const rechecking = open && isDesktopShell();
+  useHostSwitcherRechecks(rechecking ? plainHosts : null, rechecking ? pollSshStatuses : null);
 
   const connectSshHost = React.useCallback((host: DesktopHost) => connectDesktopSshHost(host, {
     ready: sshStatusesById[host.id]?.phase === 'ready',
@@ -470,6 +451,7 @@ export function DesktopHostSwitcherDialog({
         } else if (host.relay) {
           activateRelay(host.relay);
         }
+        setSwitchModal((prev) => ({ ...prev, open: false, hostId: null }));
         onHostSwitched?.();
         setSwitchingHostId(null);
         return;
@@ -516,15 +498,17 @@ export function DesktopHostSwitcherDialog({
         relayProbeTunnel?.close();
         return;
       }
-      setSwitchModal((prev) => ({ ...prev, open: false, hostId: null }));
       setSwitchingHostId(null);
       if (!transport) {
-        toast.error(t(
+        const message = t(
           finalStatus.status === 'relay-limit' ? 'desktopHostSwitcher.toast.relayLimit' : 'desktopHostSwitcher.toast.instanceUnreachable',
           { host: redactSensitiveUrl(host.label) },
-        ));
+        );
+        setSwitchModal((prev) => ({ ...prev, error: message }));
+        toast.error(message);
         return;
       }
+      setSwitchModal((prev) => ({ ...prev, open: false, hostId: null }));
       if (transport === 'relay' && host.relay) {
         activateRelay(host.relay, relayProbeTunnel);
       } else {
@@ -765,7 +749,7 @@ export function DesktopHostSwitcherDialog({
     await desktopSshDisconnect(hostId).catch(() => {});
   }, [switchModal.hostId, switchModal.kind, switchingHostId]);
 
-  const retrySshSwitch = React.useCallback(() => {
+  const retrySwitch = React.useCallback(() => {
     const hostId = switchModal.hostId;
     if (!hostId) return;
     const host = allHosts.find((item) => item.id === hostId);
@@ -900,7 +884,7 @@ export function DesktopHostSwitcherDialog({
                 const sshStatus = sshStatusesById[host.id] || null;
                 const statusKind: HostDisplayStatus = isSsh
                   ? sshPhaseToHostStatus(sshStatus?.phase)
-                  : (status?.status ?? (isActive && isRuntimeConnected ? 'ok' : 'checking'));
+                  : (status?.status ?? (isActive && isRuntimeConnected ? 'ok' : statusSnapshot.pendingHostIds.has(host.id) ? 'checking' : null));
                 const isEditing = editingId === host.id;
                 const effectiveUrl = isLocal ? localOrigin : (normalizeHostUrl(host.url) || host.url);
                 const displayLabel = host.id === LOCAL_HOST_ID
@@ -1134,7 +1118,7 @@ export function DesktopHostSwitcherDialog({
             <Button
               type="button"
               size="sm"
-              onClick={retrySshSwitch}
+              onClick={retrySwitch}
               disabled={!switchModal.hostId}
             >
               {t('desktopHostSwitcher.actions.retry')}

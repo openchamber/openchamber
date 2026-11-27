@@ -181,6 +181,25 @@ describe('desktop host statuses', () => {
     expect(isDesktopHostStatusPending('remote')).toBe(false);
   });
 
+  test('a background recheck shows its hosts as pending without locking Refresh', async () => {
+    // Issue 7710: the open switcher rechecks rows on an interval. Rows read
+    // "Checking" from the pending set; Refresh spins only for runs the user started.
+    probeResults['https://remote.example'] = { status: 'ok', latencyMs: 9 };
+    let releaseProbe!: () => void;
+    probeGate = new Promise<void>((resolve) => { releaseProbe = resolve; });
+    const run = probeDesktopHosts([host('remote', 'https://remote.example')], { background: true });
+    await Promise.resolve();
+
+    expect(getDesktopHostStatusSnapshot().pendingHostIds.has('remote')).toBe(true);
+    expect(getDesktopHostStatusSnapshot().isProbing).toBe(false);
+    expect(isDesktopHostStatusPending('remote')).toBe(false);
+
+    releaseProbe();
+    await run;
+    expect(getDesktopHostStatusSnapshot().pendingHostIds.has('remote')).toBe(false);
+    expect(getDesktopHostStatusSnapshot().byHostId.remote?.status).toBe('ok');
+  });
+
   test('a status recorded by the switch flow ends the pending state', async () => {
     let releaseProbe!: () => void;
     probeGate = new Promise<void>((resolve) => { releaseProbe = resolve; });
