@@ -4913,7 +4913,7 @@ const buildMacMenu = (locale = 'en') => {
       ],
     },
     {
-      label: t('window'),
+      ...roleItem('windowMenu', 'window'),
       submenu: [
         roleItem('minimize', 'minimize'),
         roleItem('zoom', 'zoom'),

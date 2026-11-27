@@ -19,6 +19,7 @@ Sections: Runtimes and backends, Platform scope, Localization, Composer, Session
 
 ## Platform scope
 
+- macOS window switching uses the native Window menu and standard keyboard shortcut. An in-app window switcher is outside the agreed scope (session decision, 2026-11-27).
 - Multi-tenancy, a second auth system and hosting infrastructure are built by the core maintainers only (#3438).
 - Scheduled git sync of agents or dotfiles is a cron or launchd job on the user's side (#4323).
 - A catalog of agents pulled from git repositories is declined as one company's need (#4501); it fits an extension. A bundle of agent, plugin and ready MCP server would be considered. Private skills catalogs exist (#4494).
