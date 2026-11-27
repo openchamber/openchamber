@@ -3,19 +3,7 @@ import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { EditPermissionMode } from "./types/sessionTypes";
 import { getAgentDefaultEditPermission } from "./utils/permissionUtils";
-import { extractTokensFromMessage } from "./utils/tokenUtils";
-import { calculateContextUsage } from "./utils/contextUtils";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
-
-interface ContextUsage {
-    totalTokens: number;
-    percentage: number;
-    contextLimit: number;
-    outputLimit?: number;
-    normalizedOutput?: number;
-    thresholdLimit: number;
-    lastMessageId?: string;
-}
 
 interface ContextState {
 
@@ -27,8 +15,6 @@ interface ContextState {
     sessionAgentModelVariantSelections: Map<string, Map<string, Map<string, string | null>>>;
  
     currentAgentContext: Map<string, string>;
-
-    sessionContextUsage: Map<string, ContextUsage>;
 
     sessionAgentEditModes: Map<string, Map<string, EditPermissionMode>>;
     hasHydrated: boolean;
@@ -46,15 +32,6 @@ interface ContextActions {
 
     saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | null | undefined) => void;
     getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | null | undefined;
-
-
-    getContextUsage: (sessionId: string, contextLimit: number, outputLimit: number, messages: Map<string, { info: any; parts: any[] }[]>) => ContextUsage | null;
-
-    updateSessionContextUsage: (sessionId: string, contextLimit: number, outputLimit: number, messages: Map<string, { info: any; parts: any[] }[]>) => void;
-
-    initializeSessionContextUsage: (sessionId: string, contextLimit: number, outputLimit: number, messages: Map<string, { info: any; parts: any[] }[]>) => void;
-
-    pollForTokenUpdates: (sessionId: string, messageId: string, messages: Map<string, { info: any; parts: any[] }[]>, maxAttempts?: number) => void;
 
     getCurrentAgent: (sessionId: string) => string | undefined;
 
@@ -78,7 +55,6 @@ export const useContextStore = create<ContextStore>()(
                 sessionAgentModelSelections: new Map(),
                 sessionAgentModelVariantSelections: new Map(),
                 currentAgentContext: new Map(),
-                sessionContextUsage: new Map(),
                 sessionAgentEditModes: new Map(),
                 hasHydrated: typeof window === "undefined",
 
@@ -196,171 +172,6 @@ export const useContextStore = create<ContextStore>()(
                     return modelMap.get(`${providerId}/${modelId}`);
                 },
  
-                getContextUsage: (sessionId: string, contextLimit: number, outputLimit: number, messages: Map<string, { info: any; parts: any[] }[]>) => {
-                    if (!sessionId) return null;
-
-                    const limitsUsage = calculateContextUsage(0, contextLimit, outputLimit);
-                    const safeContext = limitsUsage.contextLimit;
-                    const normalizedOutput = limitsUsage.normalizedOutput ?? 0;
-                    const thresholdLimit = limitsUsage.thresholdLimit;
-
-                    if (safeContext === 0 || thresholdLimit === 0) {
-                        return null;
-                    }
-
-                    const sessionMessages = messages.get(sessionId) || [];
-                    const assistantMessages = sessionMessages.filter(m => m.info.role === 'assistant');
-
-                    if (assistantMessages.length === 0) return null;
-
-                    const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
-                    const lastMessageId = lastAssistantMessage.info.id;
-
-                    const scheduleUsageUpdate = (usage: ContextUsage) => {
-                        const runUpdate = () => {
-                            set((state) => {
-                                const existing = state.sessionContextUsage.get(sessionId) as ContextUsage | undefined;
-                        if (
-                            existing &&
-                            existing.totalTokens === usage.totalTokens &&
-                            existing.percentage === usage.percentage &&
-                            existing.contextLimit === usage.contextLimit &&
-                            (existing.outputLimit ?? 0) === (usage.outputLimit ?? 0) &&
-                            (existing.normalizedOutput ?? 0) === (usage.normalizedOutput ?? 0) &&
-                            existing.thresholdLimit === usage.thresholdLimit &&
-                            existing.lastMessageId === usage.lastMessageId
-                        ) {
-                            return state;
-                        }
-
-                                const newContextUsage = new Map(state.sessionContextUsage);
-                                newContextUsage.set(sessionId, usage);
-                                return { sessionContextUsage: newContextUsage };
-                            });
-                        };
-
-                        if (typeof queueMicrotask === 'function') {
-                            queueMicrotask(runUpdate);
-                        } else if (typeof window !== 'undefined') {
-                            window.setTimeout(runUpdate, 0);
-                        } else {
-                            setTimeout(runUpdate, 0);
-                        }
-                    };
-
-                    const cachedUsage = get().sessionContextUsage.get(sessionId) as ContextUsage | undefined;
-                    if (cachedUsage && cachedUsage.lastMessageId === lastMessageId) {
-                        const cachedOutput = cachedUsage.normalizedOutput ?? cachedUsage.outputLimit ?? 0;
-                        const limitsChanged =
-                            cachedUsage.contextLimit !== safeContext ||
-                            cachedOutput !== normalizedOutput ||
-                            cachedUsage.thresholdLimit !== thresholdLimit;
-
-                        if (limitsChanged && cachedUsage.totalTokens > 0) {
-                            const newPercentage = (cachedUsage.totalTokens / thresholdLimit) * 100;
-                            const recalculated: ContextUsage = {
-                                totalTokens: cachedUsage.totalTokens,
-                                percentage: Math.min(newPercentage, 100),
-                                contextLimit: safeContext,
-                                outputLimit: limitsUsage.outputLimit,
-                                normalizedOutput,
-                                thresholdLimit,
-                                lastMessageId,
-                            };
-                            scheduleUsageUpdate(recalculated);
-                            return recalculated;
-                        }
-
-                        if (!limitsChanged && cachedUsage.totalTokens > 0) {
-                            return cachedUsage;
-                        }
-                    }
-
-                    const totalTokens = extractTokensFromMessage(lastAssistantMessage);
-
-                    if (totalTokens === 0) {
-                        return cachedUsage || null;
-                    }
-
-                    const usage = calculateContextUsage(totalTokens, contextLimit, outputLimit);
-                    const result: ContextUsage = {
-                        totalTokens,
-                        percentage: usage.percentage,
-                        contextLimit: usage.contextLimit,
-                        outputLimit: usage.outputLimit,
-                        normalizedOutput: usage.normalizedOutput,
-                        thresholdLimit: usage.thresholdLimit,
-                        lastMessageId,
-                    };
-
-                    scheduleUsageUpdate(result);
-
-                    return result;
-                },
-
-                updateSessionContextUsage: (sessionId: string, contextLimit: number, outputLimit: number, messages: Map<string, { info: any; parts: any[] }[]>) => {
-                    const sessionMessages = messages.get(sessionId) || [];
-                    const assistantMessages = sessionMessages.filter(m => m.info.role === 'assistant');
-
-                    if (assistantMessages.length === 0) return;
-
-                    const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
-                    const totalTokens = extractTokensFromMessage(lastAssistantMessage);
-
-                    if (totalTokens === 0) return;
-
-                    const usage = calculateContextUsage(totalTokens, contextLimit, outputLimit);
-
-                    set((state) => {
-                        const newContextUsage = new Map(state.sessionContextUsage);
-                        newContextUsage.set(sessionId, {
-                            totalTokens,
-                            percentage: usage.percentage,
-                            contextLimit: usage.contextLimit,
-                            outputLimit: usage.outputLimit,
-                            normalizedOutput: usage.normalizedOutput,
-                            thresholdLimit: usage.thresholdLimit,
-                            lastMessageId: lastAssistantMessage.info.id,
-                        });
-                        return { sessionContextUsage: newContextUsage };
-                    });
-                },
-
-                initializeSessionContextUsage: (sessionId: string, contextLimit: number, outputLimit: number, messages: Map<string, { info: any; parts: any[] }[]>) => {
-                    const state = get();
-                    const existingUsage = state.sessionContextUsage.get(sessionId);
-
-                    if (!existingUsage || existingUsage.totalTokens === 0) {
-                        get().updateSessionContextUsage(sessionId, contextLimit, outputLimit, messages);
-                    }
-                },
-
-                pollForTokenUpdates: (sessionId: string, messageId: string, messages: Map<string, { info: any; parts: any[] }[]>, maxAttempts: number = 10) => {
-                    let attempts = 0;
-
-                    const poll = () => {
-                        attempts++;
-                        const sessionMessages = messages.get(sessionId) || [];
-                        const message = sessionMessages.find(m => m.info.id === messageId);
-
-                        if (message && message.info.role === 'assistant') {
-                            const totalTokens = extractTokensFromMessage(message);
-
-                            if (totalTokens > 0) {
-
-                                get().updateSessionContextUsage(sessionId, 0, 0, messages);
-                                return;
-                            }
-                        }
-
-                        if (attempts < maxAttempts) {
-                            setTimeout(poll, 1000);
-                        }
-                    };
-
-                    setTimeout(poll, 2000);
-                },
-
                 getCurrentAgent: (sessionId: string) => {
                     const { currentAgentContext } = get();
                     return currentAgentContext.get(sessionId);
@@ -455,7 +266,6 @@ export const useContextStore = create<ContextStore>()(
                         Array.from(agentMap.entries()).map(([agentName, modelMap]) => [agentName, Array.from(modelMap.entries())]),
                     ]),
                     currentAgentContext: Array.from(state.currentAgentContext.entries()),
-                    sessionContextUsage: Array.from(state.sessionContextUsage.entries()),
                     sessionAgentEditModes: Array.from(state.sessionAgentEditModes.entries()).map(([sessionId, agentMap]) => [sessionId, Array.from(agentMap.entries())]),
                 }),
                 merge: (persistedState: any, currentState) => {
@@ -493,7 +303,6 @@ export const useContextStore = create<ContextStore>()(
                         sessionAgentModelSelections: agentModelSelections,
                         sessionAgentModelVariantSelections: agentModelVariantSelections,
                         currentAgentContext: new Map(persistedState?.currentAgentContext || []),
-                        sessionContextUsage: new Map(persistedState?.sessionContextUsage || []),
                         sessionAgentEditModes: agentEditModes,
                         hasHydrated: true,
                     };

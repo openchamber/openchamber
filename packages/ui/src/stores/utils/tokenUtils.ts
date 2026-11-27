@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, Part } from "@/lib/opencode/model";
+import type { AssistantMessage } from "@/lib/opencode/model";
 import type { SessionContextUsage } from "../types/sessionTypes";
 
 type TokenBreakdown = {
@@ -114,32 +114,6 @@ export const isSameContextUsage = (a: SessionContextUsage | null, b: SessionCont
     return a.totalTokens === b.totalTokens
         && a.percentage === b.percentage
         && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0);
-};
-
-export const extractTokensFromMessage = (message: { info: Message; parts: Part[] }): number => {
-    const tokens = (message.info as { tokens?: number | TokenBreakdown }).tokens;
-
-    if (typeof tokens === 'number') {
-        return tokens;
-    }
-
-    if (tokens && typeof tokens === 'object') {
-        return contextTokensFromBreakdown(tokens);
-    }
-
-    const tokenPart = message.parts.find(
-        (part) => typeof (part as { tokens?: number | TokenBreakdown }).tokens !== 'undefined'
-    ) as { tokens?: number | TokenBreakdown } | undefined;
-
-    if (!tokenPart || typeof tokenPart.tokens === 'undefined') {
-        return 0;
-    }
-
-    if (typeof tokenPart.tokens === 'number') {
-        return tokenPart.tokens;
-    }
-
-    return contextTokensFromBreakdown(tokenPart.tokens);
 };
 
 type CacheHitRateResult = {
