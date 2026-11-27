@@ -710,7 +710,9 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
 
   const MESSAGE_PAGE_LIMIT = 200;
   const sessionMessages = async (client: ControlClient, sessionID: string, role: string, limit: number | undefined) => {
-    const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
+    const fetchLimit = limit === undefined
+      ? undefined
+      : Math.min(MESSAGE_PAGE_LIMIT, Math.max(100, limit * 4));
     const collected: MessageRecord[] = [];
     const seenCursors = new Set();
     let cursor;
