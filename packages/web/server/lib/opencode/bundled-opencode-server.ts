@@ -10,6 +10,7 @@ const MIN_BUNDLED_NODE_MAJOR = 22;
 const MIN_BUNDLED_NODE_MINOR_FOR_22 = 16;
 const MIN_BUNDLED_NODE_MAJOR_AFTER_22 = 24;
 const nodeCompatibilityCache = new Map<string, boolean>();
+let linuxMuslCache: boolean | null = null;
 
 export type BundledOpenCodeServerLaunch = {
   binary: string;
@@ -39,15 +40,19 @@ const isFile = (candidate: string): boolean => {
   }
 };
 
-const isLinuxMusl = (): boolean => {
-  if (process.platform !== 'linux') return false;
+const detectLinuxMusl = (): boolean => {
   try {
     const report: unknown = process.report?.getReport?.();
-    if (!isRecord(report) || !isRecord(report.header)) return false;
-    return !report.header.glibcVersionRuntime;
+    return isRecord(report) && isRecord(report.header) && !report.header.glibcVersionRuntime;
   } catch {
     return false;
   }
+};
+
+const isLinuxMusl = (): boolean => {
+  if (process.platform !== 'linux') return false;
+  linuxMuslCache ??= detectLinuxMusl();
+  return linuxMuslCache;
 };
 
 export const isSupportedBundledNodeVersion = (version: string | undefined | null): boolean => {
