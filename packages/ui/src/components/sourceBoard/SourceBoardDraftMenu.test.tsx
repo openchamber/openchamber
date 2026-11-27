@@ -165,10 +165,10 @@ describe('who gets a state menu', () => {
     return detail;
   };
 
-  test('an author without write access and a viewer the host does not grade do, a read-only viewer does not', async () => {
+  test('nobody before the read answers, then an author without write access and a viewer the host does not grade, but not a read-only viewer', async () => {
     const { canChangeReferenceState } = await import('@/components/references/referencePickerItems');
     for (const reference of [issue(), issue('completed'), pull(false)]) {
-      expect(canChangeReferenceState(reference, null)).toBe(true);
+      expect(canChangeReferenceState(reference, null)).toBe(false);
       expect(canChangeReferenceState(reference, answers())).toBe(true);
       expect(canChangeReferenceState(reference, answers(false, true))).toBe(true);
       expect(canChangeReferenceState(reference, answers(false))).toBe(true);
