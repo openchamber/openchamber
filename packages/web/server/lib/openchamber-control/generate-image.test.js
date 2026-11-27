@@ -55,6 +55,27 @@ describe('image.generate', () => {
     expect(fs.readFileSync(path.join(directory, 'art', 'hero.png'))).toEqual(PNG);
   });
 
+  it('keeps the token counts OpenCode reports, so a result without a price can be priced later', async () => {
+    const image = { type: 'image', data: PNG.toString('base64'), mime: 'image/png' };
+    const answers = [
+      { images: [image], tokens: { input: 12, output: 1290 } },
+      { images: [image], cost: 0.04, tokens: { output: 1290 } },
+      { images: [image], tokens: { input: 'many', output: Number.NaN } },
+      { images: [image], tokens: null },
+    ];
+    const { generate } = setup({ answer: () => answers.shift() });
+    const directory = makeDir();
+    const run = async () => {
+      const { images, ...rest } = await generate({ prompt: 'a lighthouse', path: 'hero.png' }, { directory });
+      return rest;
+    };
+
+    expect(await run()).toEqual({ model: 'openrouter/openai/gpt-image-2', tokens: { input: 12, output: 1290 } });
+    expect(await run()).toEqual({ model: 'openrouter/openai/gpt-image-2', cost: 0.04, tokens: { output: 1290 } });
+    expect(await run()).toEqual({ model: 'openrouter/openai/gpt-image-2' });
+    expect(await run()).toEqual({ model: 'openrouter/openai/gpt-image-2' });
+  });
+
   it('numbers the rest of several images, and saves to the temporary folder without a path', async () => {
     const directory = makeDir();
     const { generate } = setup();

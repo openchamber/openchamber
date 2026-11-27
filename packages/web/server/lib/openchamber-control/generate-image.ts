@@ -29,6 +29,7 @@ export interface GeneratedImages {
   model: string;
   images: { path: string; mime: string }[];
   cost?: number;
+  tokens?: { input?: number; output?: number };
 }
 
 export const GENERATED_IMAGE_DIRECTORY = path.join(os.tmpdir(), 'opencode', 'generated-images');
@@ -48,6 +49,9 @@ const sourcesSchema = z.union([z.string().transform((source) => [source]), z.arr
 
 const isAspect = (value: string): value is `${number}:${number}` => /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(value);
 const isFiniteCost = (value: unknown): value is number => Number.isFinite(value);
+const tokenCount = z.number().int().nonnegative().optional().catch(undefined);
+const tokensSchema = z.object({ input: tokenCount, output: tokenCount })
+  .refine((usage) => usage.input !== undefined || usage.output !== undefined);
 
 interface ImageExtensions {
   readonly [mime: string]: string;
@@ -214,6 +218,12 @@ export const createImageGenerationAction = ({
     }
     const output: GeneratedImages = { model: modelName, images: saved };
     if (isFiniteCost(result.cost)) output.cost = result.cost;
+    const tokens = tokensSchema.safeParse(result.tokens);
+    if (tokens.success) {
+      output.tokens = {};
+      if (tokens.data.input !== undefined) output.tokens.input = tokens.data.input;
+      if (tokens.data.output !== undefined) output.tokens.output = tokens.data.output;
+    }
     return output;
   }
 );
