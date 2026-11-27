@@ -1063,7 +1063,7 @@ interface GitWorktreeAPI {
   create?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
   teardown?(directory: string, payload: TeardownGitWorktreePayload): Promise<{ success: boolean }>;
-  setTitle?(directory: string, title: string, by?: 'user' | 'agent'): Promise<GitWorktreeTitleResult>;
+  setTitle?(directory: string, title: string, by?: 'user' | 'agent', session?: string): Promise<GitWorktreeTitleResult>;
   setPinned?(directory: string, pinned: boolean, list?: string | null): Promise<GitWorktreePinResult>;
   snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
   archive?(directory: string, payload: ArchiveGitWorktreePayload): Promise<GitWorktreeArchive>;

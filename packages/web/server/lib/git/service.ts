@@ -1037,7 +1037,7 @@ const isMissingDirectoryError = <Failure>(error: Failure) => {
   return /directory that does not exist|does not exist|no such file or directory/i.test(text);
 };
 
-const runGitCommand = async (cwd: string, args: string[], { env: envOverride, timeoutMs = 0 }: GitCommandOptions = {}): Promise<GitCommandResult> => {
+export const runGitCommand = async (cwd: string, args: string[], { env: envOverride, timeoutMs = 0 }: GitCommandOptions = {}): Promise<GitCommandResult> => {
   try {
     await directoryReachability.assertReachable(cwd);
     const options: import('node:child_process').ExecFileOptionsWithStringEncoding = {
@@ -4466,7 +4466,7 @@ export async function getWorktrees(directory: string) {
 const TASK_TITLE_MAX_LENGTH = 120;
 const BRANCH_TITLE_KEY_PATTERN = '^branch\\..*\\.description$';
 
-const toTaskTitle = (description: string | undefined) => {
+export const toTaskTitle = (description: string | undefined) => {
   const firstLine = String(description || '').split(/\r?\n/).find((line) => line.trim()) || '';
   return firstLine.trim().slice(0, TASK_TITLE_MAX_LENGTH);
 };
@@ -4551,7 +4551,7 @@ export async function isWorktreeDirectoryPinned(directory: string) {
   return parseBranchPin(await readGitConfigValue(directoryPath, `branch.${branch}.openchamberPinned`)) !== null;
 }
 
-const readGitConfigValue = async (directory: string, key: string) => {
+export const readGitConfigValue = async (directory: string, key: string) => {
   const result = await runGitCommand(directory, ['config', '--get', key]);
   return result.success ? String(result.stdout || '').replace(/\r?\n$/, '') : '';
 };
@@ -4567,7 +4567,7 @@ const runGitConfigWrite = async (directory: string, args: string[]) => {
   }
 };
 
-const writeGitConfigValue = async (directory: string, key: string, value: string) => {
+export const writeGitConfigValue = async (directory: string, key: string, value: string) => {
   if (value) {
     const result = await runGitConfigWrite(directory, [key, value]);
     if (!result.success) throw new Error(result.message || `Failed to write ${key}`);

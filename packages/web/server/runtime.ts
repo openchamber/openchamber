@@ -192,7 +192,8 @@ import { createInsideSpaceTaskNaming, SPACE_TASK_TITLE_ROUTE } from './lib/space
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, isWorktreeDirectoryPinned, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
+import { getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, isWorktreeDirectoryPinned, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
+import { followRenamedSession, setLinkedTaskTitle } from './lib/git/task-title-session.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { configureIntegrateSessions, readProjectPaths } from './lib/git/integrate-sessions.js';
 import { composeEnvironmentRuntime } from './lib/environment/composition.js';
@@ -1507,10 +1508,9 @@ globalMessageStreamHub.subscribeStatus((status) => {
 
 console.log('[session-assist] listening for session events');
 globalMessageStreamHub.subscribeEvent((event) => {
-  const directory = isString(event?.directory) && event.directory && event.directory !== 'global'
-    ? event.directory
-    : '';
+  const directory = isString(event?.directory) && event.directory && event.directory !== 'global' ? event.directory : '';
   for (const payload of event?.translated?.() ?? []) {
+    followRenamedSession(payload, (sessionID) => openCodeSessionClient().session.get({ sessionID }));
     agentToolRuntime?.processSessionEvent(payload);
     sessionLineage.observe(payload);
     turnDurationRecorder.processPayload(payload, directory || payload.properties?.directory || '');
@@ -2259,7 +2259,7 @@ const openChamberControlService = createOpenChamberControlService({
   workNaming: {
     nameSpaceTask: (directory, title) => insideSpaceTaskNaming?.name(directory, title) ?? null,
     listWorktrees: getWorktrees,
-    setWorktreeTaskTitle,
+    setWorktreeTaskTitle: setLinkedTaskTitle,
     readPlaceholderBranch: (directory) => readRenameableGeneratedBranch(directory),
     renamePlaceholderBranch: renameGeneratedWorktreeBranch,
   },
