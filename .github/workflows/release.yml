@@ -30,6 +30,7 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
   CONTAINER_IMAGE: ghcr.io/openchamber/openchamber
+  CONTAINER_DESCRIPTION: OpenChamber web app with OpenCode included
 
 permissions:
   contents: write
@@ -864,9 +865,15 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           provenance: false
-          # The source label links the package to this repository.
+          # The source label links the package to this repository. Title,
+          # description and license are set here because the base image's
+          # labels (bun's) are inherited otherwise.
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.title=OpenChamber
+            org.opencontainers.image.description=${{ env.CONTAINER_DESCRIPTION }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.create-release.outputs.version }}
             org.opencontainers.image.revision=${{ steps.checkout.outputs.commit }}
           outputs: type=image,name=${{ env.CONTAINER_IMAGE }},push-by-digest=true,name-canonical=true,push=${{ env.PUSH }}
@@ -929,5 +936,11 @@ jobs:
             echo "Expected 2 platform digests, found ${#sources[@]}" >&2
             exit 1
           fi
-          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          # GHCR shows a multi-architecture package's description from the
+          # index annotations, not from the platform images' labels.
+          docker buildx imagetools create "${tags[@]}" \
+            --annotation "index:org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --annotation "index:org.opencontainers.image.description=$CONTAINER_DESCRIPTION" \
+            --annotation "index:org.opencontainers.image.licenses=MIT" \
+            "${sources[@]}"
           docker buildx imagetools inspect "$CONTAINER_IMAGE:$VERSION"
