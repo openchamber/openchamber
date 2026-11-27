@@ -545,6 +545,12 @@ describe('terminal runtime', () => {
         expect(harness.processes[1].shell).toBe('/bin/bash');
         expect(harness.processes[1].args).toEqual(['-l']);
       }
+
+      const restartedWithoutLogin = createResponse();
+      await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'term-shell' }, body: { shell: 'sh', loginShell: true } }, restartedWithoutLogin);
+      expect(restartedWithoutLogin.statusCode).toBe(200);
+      expect(harness.processes).toHaveLength(3);
+      expect(harness.processes[2].args).not.toContain('-l');
     } finally {
       if (previousShell === undefined) delete process.env.OPENCHAMBER_TERMINAL_SHELL;
       else process.env.OPENCHAMBER_TERMINAL_SHELL = previousShell;
@@ -577,7 +583,9 @@ describe('terminal runtime', () => {
     } finally { await harness.runtime.shutdown(); }
   });
 
-  it('rejects invalid and unsupported login modes', async () => {
+  it('rejects invalid login modes and starts shells that cannot use login mode', async () => {
+    const previousShell = process.env.OPENCHAMBER_TERMINAL_SHELL;
+    process.env.OPENCHAMBER_TERMINAL_SHELL = '/bin/sh';
     const harness = createHarness({
       fs: {
         promises: {
@@ -589,17 +597,27 @@ describe('terminal runtime', () => {
       isExecutable: (candidate) => candidate === '/bin/sh',
     });
     try {
-      for (const [loginShell, error] of [
-        ['true', 'Invalid terminal login mode'],
-        [true, 'Terminal shell "sh" does not support login mode'],
-      ]) {
-        const response = createResponse();
-        await harness.routes.post.get('/api/terminal/create')({ body: { cwd: '/repo', shell: 'sh', loginShell } }, response);
-        expect(response.statusCode).toBe(400);
-        expect(response.body).toEqual({ error });
-      }
-      expect(harness.processes).toHaveLength(0);
-    } finally { await harness.runtime.shutdown(); }
+      const invalid = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { cwd: '/repo', shell: 'sh', loginShell: 'true' } }, invalid);
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.body).toEqual({ error: 'Invalid terminal login mode' });
+
+      const explicit = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-login-sh', cwd: '/repo', shell: 'sh', loginShell: true } }, explicit);
+      expect(explicit.statusCode).toBe(200);
+      expect(harness.processes).toHaveLength(1);
+      expect(harness.processes[0].args).not.toContain('-l');
+
+      const automatic = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-login-auto', cwd: '/repo', shell: 'auto', loginShell: true } }, automatic);
+      expect(automatic.statusCode).toBe(200);
+      expect(harness.processes).toHaveLength(2);
+      expect(harness.processes[1].args).not.toContain('-l');
+    } finally {
+      if (previousShell === undefined) delete process.env.OPENCHAMBER_TERMINAL_SHELL;
+      else process.env.OPENCHAMBER_TERMINAL_SHELL = previousShell;
+      await harness.runtime.shutdown();
+    }
   });
 
   it('preserves the running process when a replacement shell is unavailable', async () => {
@@ -1196,6 +1214,14 @@ describe('terminal runtime', () => {
       } else {
         expect(harness.processes[0].args).toEqual(['-l', '-i', '-c', 'printf ready']);
       }
+
+      const unsupported = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-command-login', cwd: '/repo', mode: 'command', command: 'printf ready', shell: 'sh', loginShell: true } }, unsupported);
+
+      expect(unsupported.statusCode).toBe(200);
+      expect(harness.processes).toHaveLength(2);
+      expect(harness.processes[1].args).not.toContain('-l');
+      expect(harness.processes[1].args).toContain('-c');
     } finally { await harness.runtime.shutdown(); }
   });
 
