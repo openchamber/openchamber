@@ -3,6 +3,7 @@ import { animate, type AnimationPlaybackControls } from 'motion';
 import type { Part } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 import { isInvisibleText } from '@/lib/invisibleText';
+import { markdownToPlainText, PLAIN_TEXT_SOURCE_CHARS } from '@/lib/markdownText';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -37,32 +38,17 @@ const cleanReasoningText = (text: string): string => {
 };
 
 const SUMMARY_MAX_CHARS = 400;
-const SUMMARY_SOURCE_CHARS = 4000;
 const EXPANDED_CONTENT_UNMOUNT_DELAY_MS = 200;
 const EXPANDED_CONTENT_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
-
-const stripMarkdown = (text: string): string =>
-    text
-        .replace(/<!--\s*-->/g, '')
-        .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, inner: string) => inner.trim())
-        .replace(/```[\w]*\n?/g, '')
-        .replace(/`([^`]+)`/g, '$1')
-        .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
-        .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
-        .replace(/^#{1,6}\s+/gm, '')
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        .replace(/^>\s?/gm, '')
-        .replace(/^[-*_]{3,}\s*$/gm, '')
-        .trim();
 
 const getReasoningSummary = (text: string): string => {
     if (!text) {
         return '';
     }
 
-    const cutShort = text.length > SUMMARY_SOURCE_CHARS;
-    const source = cutShort ? text.slice(0, SUMMARY_SOURCE_CHARS) : text;
-    const flat = stripMarkdown(source).replace(/\s+/g, ' ').trim();
+    const cutShort = text.length > PLAIN_TEXT_SOURCE_CHARS;
+    const source = cutShort ? text.slice(0, PLAIN_TEXT_SOURCE_CHARS) : text;
+    const flat = markdownToPlainText(source);
 
     if (flat.length <= SUMMARY_MAX_CHARS) {
         return cutShort && flat ? `${flat}…` : flat;

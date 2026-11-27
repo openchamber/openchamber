@@ -1,5 +1,6 @@
 import { isNumber, isString } from './inputs.js';
 import type { JsonValue } from './contracts.js';
+import { NOTIFICATION_SOURCE_CHARS, notificationPlainText } from './plainText.js';
 
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 
@@ -29,22 +30,6 @@ const resolvePositiveNumber = (value: JsonValue | undefined, fallback: number) =
   return value;
 };
 
-const normalizeNotificationPlainText = (text: string) => {
-  return text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/^[\t ]*[-*+]\s+/gm, '')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/(^|\W)__(?!\s)(.+?)__(?=\W|$)/g, '$1$2')
-    .replace(/(^|\W)\*(?!\s)(.+?)\*(?=\W|$)/g, '$1$2')
-    .replace(/(^|\W)_(?!\s)(.+?)_(?=\W|$)/g, '$1$2')
-    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
-    .replace(/\s*\n\s*/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
 export const truncateNotificationText = (text: string | null | undefined, maxLength = DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH) => {
   if (!isString(text)) {
     return '';
@@ -72,6 +57,6 @@ export const prepareNotificationLastMessage = async ({ message, settings }: {
   }
 
   const maxLastMessageLength = resolvePositiveNumber(settings?.maxLastMessageLength, DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH);
-  const plainTextMessage = normalizeNotificationPlainText(originalMessage);
+  const plainTextMessage = notificationPlainText(originalMessage.slice(0, NOTIFICATION_SOURCE_CHARS));
   return truncateNotificationText(plainTextMessage, maxLastMessageLength);
 };

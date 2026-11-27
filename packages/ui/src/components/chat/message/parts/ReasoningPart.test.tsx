@@ -270,6 +270,80 @@ describe('ReasoningTimelineBlock', () => {
     expect(markup).not.toContain('&lt;!-- --&gt;');
   });
 
+  test('keeps text the renderer shows literally in the header summary', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={'Rename snake_case_name and GRPC_METHOD_CONSTANT; match **/*.ts; call `run_task_x`; see [the_text](https://example.com/a_b_c).'}
+          blockId="reasoning-literals"
+        />
+      </TestProviders>,
+    );
+
+    // Intraword underscores are not emphasis, and a star run only pairs with an
+    // equal run, so identifiers, paths and globs reach the header unchanged.
+    expect(markup).toContain('snake_case_name');
+    expect(markup).toContain('GRPC_METHOD_CONSTANT');
+    expect(markup).toContain('**/*.ts');
+    // Code content stays verbatim; the link keeps only its text.
+    expect(markup).toContain('run_task_x');
+    expect(markup).toContain('the_text');
+    expect(markup).not.toContain('example.com');
+  });
+
+  test('drops emphasis delimiters that pair up as markdown', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={'An _italic_ and **bold** and ***both*** word, plus __strong__ text. **Key: *reason* here** and *a **b** c*.'}
+          blockId="reasoning-emphasis"
+        />
+      </TestProviders>,
+    );
+
+    expect(markup).toContain('An italic and bold and both word, plus strong text. Key: reason here and a b c.');
+  });
+
+  test('drops list and quote markers the renderer does not show', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={'* first step\n* second step\n- third_item\n1. ordered step\n> quoted line'}
+          blockId="reasoning-list"
+        />
+      </TestProviders>,
+    );
+
+    expect(markup).toContain('first step second step third_item ordered step quoted line');
+  });
+
+  test('keeps fenced and inline code content verbatim', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={'```ts\nconst snake_case = __init__; // <!-- keep -->\n```\nThen `a_b` and ``a`b`` stay.'}
+          blockId="reasoning-code"
+        />
+      </TestProviders>,
+    );
+
+    expect(markup).toContain('const snake_case = __init__; // &lt;!-- keep --&gt;');
+    expect(markup).toContain('Then a_b and a`b stay.');
+  });
+
+  test('keeps a private-use sentinel the trace itself contains', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={'literal \uE0000\uE000 sentinel and `code_span`'}
+          blockId="reasoning-sentinel"
+        />
+      </TestProviders>,
+    );
+
+    expect(markup).toContain('literal \uE0000\uE000 sentinel and code_span');
+  });
+
   test('a long trace is summarized from its start, without the fence a cut left open', () => {
     const text = `\`\`\`ts\nconst first = 1;\n${'const next = [value_of * 2;\n'.repeat(20_000)}\`\`\`\n`;
     const started = performance.now();
