@@ -6,6 +6,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
+import { useComposerRecordingPublication } from '@/hooks/useComposerRecordingPublication';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
@@ -307,6 +308,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             cleanupScroll();
         };
     }, [hasSalvageText, partialTranscript]);
+    useComposerRecordingPublication({ status, duration, error, errorReason, partialTranscript }, {
+        finish: () => confirmWith('insert'),
+        cancel: () => { void cancelDictation(); },
+        retry: () => {
+            pendingActionRef.current = 'insert';
+            void retryFailedDictation();
+        },
+        discard: discardFailedDictation,
+        acceptPartial: () => {
+            pendingActionRef.current = 'insert';
+            acceptPartialTranscript();
+        },
+        subscribeLevel,
+    });
+
     React.useEffect(() => () => {
         if (hasReportedHeightRef.current) {
             hasReportedHeightRef.current = false;

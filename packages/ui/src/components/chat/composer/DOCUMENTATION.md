@@ -1655,6 +1655,10 @@ command can leave the queue untouched and delivery can take only part of it.
   that recording even if focus moves to the other chat. Idle and unmount
   release ownership. A mic in another composer cannot start a second capture
   or confirm the owner's recording.
+  Opening a session that cannot be prompted keeps the composer mounted and
+  hidden until its recording ends (see `../column/DOCUMENTATION.md`), so the
+  same origin rules apply there: a transcript finished in the read-only chat
+  goes to the origin's draft with the same toast.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
   branch list, or the selector snaps back to the project root mid-creation. A
