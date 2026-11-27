@@ -54,6 +54,13 @@ describe('buildExtensionTrackerDescriptor', () => {
     expect(JSON.parse(JSON.stringify(descriptor))).toEqual(descriptor);
   });
 
+  it('carries the item-comment capability, off unless the contribution declares it', () => {
+    const withComments = buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution: { ...contribution, capabilities: { ...contribution.capabilities, comments: true } }, instance: null });
+    expect(withComments.capabilities.comments).toBe(true);
+    const without = buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution, instance: null });
+    expect(without.capabilities.comments).toBe(false);
+  });
+
   it('carries no link pattern while a user-typed server is not connected, and uses a fixed origin as is', () => {
     expect(buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution, instance: null }).urlPatterns).toEqual([]);
     const fixed = buildExtensionTrackerDescriptor({

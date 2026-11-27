@@ -87,6 +87,7 @@ export type TrackerDescriptor = {
     filters: { people: boolean; priority: boolean };
     projectMapping: boolean;
     sessionComments: boolean;
+    comments: boolean;
     hostAccess: boolean;
   };
   stateFilters: readonly string[];
@@ -141,6 +142,9 @@ export interface TrackerImplementation {
   get(id: string): Promise<Connected<{ item: TrackerItem | null }>>;
   states(containerId: string): Promise<Connected<{ states: TrackerWorkflowState[] }>>;
   updateState(input: { id: string; stateId: string }): Promise<Connected<{ item: TrackerItem | null }>>;
+  comments?: {
+    create(input: { identifier: string; body: string }): Promise<Connected<{ comment: { id: string } | null }>>;
+  };
   liveSummaries(identifiers: string[]): Promise<Connected<{ items: TrackerLiveSummaryWire[] }>>;
   matchUrl(url: string): string | null;
   mapping?: {

@@ -433,6 +433,30 @@ describe('reading and writing through an extension tracker', () => {
   });
 });
 
+describe('item comments on an extension tracker', () => {
+  const withComments = () => trackerGuest({ tracker: { ...contribution, capabilities: { ...contribution.capabilities, comments: true } } });
+  const create = (h, input) => h.tracker.comments.create(input);
+
+  it('forwards a comment through comments.create as the current account, upper-cased and trimmed', async () => {
+    const h = await harness({ guest: withComments() });
+    expect(await create(h, { identifier: 'PROJ-1', body: 'Looks fixed' })).toEqual({ connected: false });
+    await connect(h);
+    expect(await create(h, { identifier: 'proj-1', body: ' Looks fixed ' })).toEqual({ connected: true, comment: { id: 'c-1' } });
+    expect(h.calls.at(-1).request).toMatchObject({ method: 'comments.create', input: { identifier: 'PROJ-1', body: 'Looks fixed' } });
+    expect(h.calls.at(-1).params.granted).toEqual(['service']);
+    h.answers['comments.create'] = () => ({ ok: true, data: { comment: null } });
+    expect(await create(h, { identifier: 'PROJ-404', body: 'Hi' })).toEqual({ connected: true, comment: null });
+  });
+
+  it('refuses an empty body and an identifier of another shape', async () => {
+    const h = await harness({ guest: withComments() });
+    await connect(h);
+    await expect(create(h, { identifier: 'PROJ-1', body: '   ' })).rejects.toMatchObject({ code: 'INVALID', userError: true });
+    await expect(create(h, { identifier: 'not an id', body: 'Hi' })).rejects.toMatchObject({ code: 'INVALID', userError: true });
+    expect(h.calls.filter((call) => call.request.method === 'comments.create')).toHaveLength(0);
+  });
+});
+
 describe('session comments on an extension tracker', () => {
   const post = (h, input) => h.tracker.sessionStatus.post({ sessionOrigin: 'https://app.example.com', ...input });
 

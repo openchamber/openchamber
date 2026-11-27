@@ -6,6 +6,8 @@ import type {
   TrackerAuthStart,
   TrackerAuthStatus,
   TrackerConnectResult,
+  TrackerCommentCreateInput,
+  TrackerCommentCreateResult,
   TrackerDescriptor,
   TrackerItemResult,
   TrackerListOptions,
@@ -26,6 +28,7 @@ import { BUILT_IN_LINEAR_TRACKER, createLegacyLinearTrackerAPI } from './tracker
 import {
   authStartSchema,
   authStatusSchema,
+  commentResultSchema,
   itemResultSchema,
   listResultSchema,
   mappingResultSchema,
@@ -196,6 +199,11 @@ export const createWebTrackerAPI = ({
     async updateState(provider, input: TrackerStateUpdateInput): Promise<TrackerItemResult> {
       if (await onLegacyWire()) return legacy.updateState(provider, input);
       return call(provider, '/items/update', { method: 'POST', body: JSON.stringify({ id: input.id, stateId: input.stateId }) }, itemResultSchema, 'Failed to update tracker item');
+    },
+
+    async commentCreate(provider, input: TrackerCommentCreateInput): Promise<TrackerCommentCreateResult> {
+      if (await onLegacyWire()) return legacy.commentCreate(provider, input);
+      return call(provider, '/comments', { method: 'POST', body: JSON.stringify({ identifier: input.identifier, body: input.body }) }, commentResultSchema, 'Failed to post tracker comment');
     },
 
     async mappingGet(provider): Promise<TrackerMappingResult> {

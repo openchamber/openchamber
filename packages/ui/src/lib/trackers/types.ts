@@ -105,6 +105,8 @@ export type TrackerListResult = Connected<{ items: TrackerItemSummary[]; cursor:
 export type TrackerItemResult = Connected<{ item: TrackerItem | null }>;
 export type TrackerStatesResult = Connected<{ states: TrackerWorkflowState[] }>;
 export type TrackerStateUpdateInput = { id: string; stateId: string };
+export type TrackerCommentCreateInput = { identifier: string; body: string };
+export type TrackerCommentCreateResult = Connected<{ comment: { id: string } | null }>;
 
 export type TrackerAuthMethod = 'oauth' | 'token';
 
@@ -121,6 +123,7 @@ export type TrackerDescriptor = {
     filters: { people: boolean; priority: boolean };
     projectMapping: boolean;
     sessionComments: boolean;
+    comments: boolean;
     hostAccess: boolean;
   };
   stateFilters: string[];
@@ -168,6 +171,7 @@ export interface TrackerAPI {
   get(provider: TrackerProviderId, id: string): Promise<TrackerItemResult>;
   states(provider: TrackerProviderId, containerId: string): Promise<TrackerStatesResult>;
   updateState(provider: TrackerProviderId, input: TrackerStateUpdateInput): Promise<TrackerItemResult>;
+  commentCreate(provider: TrackerProviderId, input: TrackerCommentCreateInput): Promise<TrackerCommentCreateResult>;
   mappingGet(provider: TrackerProviderId): Promise<TrackerMappingResult>;
   mappingSet(provider: TrackerProviderId, mapping: TrackerMappingWrite): Promise<TrackerMappingResult>;
   sessionStatusPost(provider: TrackerProviderId, input: TrackerSessionStatusPostInput): Promise<TrackerSessionStatusPostResult>;

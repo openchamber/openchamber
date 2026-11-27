@@ -170,6 +170,18 @@ describe('web trackers: the neutral routes', () => {
     await expect(api.mappingGet('linear')).rejects.toThrow('does not support');
   });
 
+  it('posts an item comment with its identifier and keeps the optional answer', async () => {
+    trackerServer(() => Response.json({ connected: true, comment: { id: 'c-1' } }));
+    const api = createWebTrackerAPI({ fetch: fetchMock });
+    await expect(api.commentCreate('linear', { identifier: 'ENG-12', body: 'Fixed' })).resolves.toEqual({ connected: true, comment: { id: 'c-1' } });
+    expect(lastPath()).toBe('/api/tracker/linear/comments');
+    expect(lastBody()).toBe(JSON.stringify({ identifier: 'ENG-12', body: 'Fixed' }));
+    trackerServer(() => Response.json({ connected: true, comment: null }));
+    await expect(api.commentCreate('linear', { identifier: 'ENG-404', body: 'Fixed' })).resolves.toEqual({ connected: true, comment: null });
+    trackerServer(() => Response.json({ connected: false }));
+    await expect(api.commentCreate('linear', { identifier: 'ENG-12', body: 'Fixed' })).resolves.toEqual({ connected: false });
+  });
+
   it('sends writes with their neutral bodies', async () => {
     trackerServer((path) => Response.json(path.endsWith('/preferences') ? { sessionComments: true } : { connected: true, posted: true, commentId: 'c1' }));
     const api = createWebTrackerAPI({ fetch: fetchMock });
@@ -264,5 +276,6 @@ describe('web trackers: a server from before /api/tracker', () => {
     await api.authActivate('linear', 'org-2').catch(() => undefined);
     expect(lastBody()).toBe(JSON.stringify({ organizationId: 'org-2' }));
     await expect(api.list('jira')).rejects.toThrow('Unknown tracker');
+    await expect(api.commentCreate('linear', { identifier: 'ENG-12', body: 'Fixed' })).rejects.toThrow('not available');
   });
 });

@@ -29,6 +29,9 @@ const fakeTracker = () => ({
   get: vi.fn(async () => ({ connected: true, item })),
   states: vi.fn(async () => ({ connected: true, states: [] })),
   updateState: vi.fn(async () => ({ connected: true, item })),
+  comments: {
+    create: vi.fn(async () => ({ connected: true, comment: { id: 'c-1' } })),
+  },
   liveSummaries: vi.fn(),
   matchUrl: () => null,
   mapping: {
@@ -113,6 +116,7 @@ describe('tracker routes', () => {
       request(app).get('/api/tracker/nope/preferences'),
       request(app).put('/api/tracker/nope/preferences').send({ sessionComments: true }),
       request(app).post('/api/tracker/nope/session-status').send({ kind: 'started', sessionId: 's' }),
+      request(app).post('/api/tracker/nope/comments').send({ identifier: 'ENG-12', body: 'Fixed' }),
     ];
     for (const response of await Promise.all(calls)) {
       expect(response.status).toBe(404);
@@ -224,6 +228,17 @@ describe('tracker routes', () => {
     expect(tracker.updateState).toHaveBeenCalledWith({ id: 'ENG-12', stateId: 's-1' });
   });
 
+  it('posts an item comment through the tracker that declares the capability', async () => {
+    const commented = createApp([{ descriptor: descriptorFor('commented', { comments: true }), load: async () => tracker }]);
+    const posted = await request(commented).post('/api/tracker/commented/comments').send({ identifier: ' ENG-12 ', body: ' Fixed ' }).expect(200);
+    expect(posted.body).toEqual({ connected: true, comment: { id: 'c-1' } });
+    expect(tracker.comments.create).toHaveBeenCalledWith({ identifier: 'ENG-12', body: 'Fixed' });
+    await request(commented).post('/api/tracker/commented/comments').send({ body: 'Fixed' }).expect(400);
+    await request(commented).post('/api/tracker/commented/comments').send({ identifier: 'ENG-12', body: '   ' }).expect(400);
+    await request(commented).post('/api/tracker/commented/comments').send({ identifier: 'x'.repeat(129), body: 'Fixed' }).expect(400);
+    expect(tracker.comments.create).toHaveBeenCalledTimes(1);
+  });
+
   it('reads and writes mapping, preferences and session status', async () => {
     await request(app).get('/api/tracker/fake/mapping').expect(200);
     await request(app).put('/api/tracker/fake/mapping').send([1]).expect(400);
@@ -274,6 +289,7 @@ describe('tracker routes', () => {
       mapping: undefined,
       preferences: undefined,
       sessionStatus: undefined,
+      comments: undefined,
     };
     const limited = createApp([
       {
@@ -281,7 +297,7 @@ describe('tracker routes', () => {
         load: async () => tracker,
       },
       // Capabilities claim more than the implementation carries.
-      { descriptor: descriptorFor('bare'), load: async () => bare },
+      { descriptor: descriptorFor('bare', { comments: true }), load: async () => bare },
     ]);
     const calls = [
       request(limited).post('/api/tracker/limited/auth/activate').send({ accountId: 'known' }),
@@ -292,9 +308,11 @@ describe('tracker routes', () => {
       request(limited).get('/api/tracker/limited/preferences'),
       request(limited).put('/api/tracker/limited/preferences').send({ sessionComments: true }),
       request(limited).post('/api/tracker/limited/session-status').send({ kind: 'started', sessionId: 's' }),
+      request(limited).post('/api/tracker/limited/comments').send({ identifier: 'ENG-12', body: 'Fixed' }),
       request(limited).get('/api/tracker/bare/mapping'),
       request(limited).get('/api/tracker/bare/preferences'),
       request(limited).post('/api/tracker/bare/session-status').send({ kind: 'started', sessionId: 's' }),
+      request(limited).post('/api/tracker/bare/comments').send({ identifier: 'ENG-12', body: 'Fixed' }),
     ];
     for (const response of await Promise.all(calls)) {
       expect(response.status).toBe(404);

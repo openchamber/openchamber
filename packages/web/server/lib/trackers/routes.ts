@@ -17,6 +17,7 @@ type OAuthTracker = RegisteredTrackerImplementation & { auth: { setOAuthClient: 
 type MappingTracker = RegisteredTrackerImplementation & { mapping: NonNullable<RegisteredTrackerImplementation['mapping']> };
 type PreferencesTracker = RegisteredTrackerImplementation & { preferences: NonNullable<RegisteredTrackerImplementation['preferences']> };
 type SessionStatusTracker = RegisteredTrackerImplementation & { sessionStatus: NonNullable<RegisteredTrackerImplementation['sessionStatus']> };
+type CommentTracker = RegisteredTrackerImplementation & { comments: NonNullable<RegisteredTrackerImplementation['comments']> };
 
 const JSON_LIMIT = '16kb';
 const PEOPLE_FILTERS: ReadonlySet<string> = new Set(['any', 'me', 'created']);
@@ -27,7 +28,7 @@ const isPriorityFilter = (value: string): value is TrackerPriorityFilter => PRIO
 const isSessionStatusKind = (value: string): value is TrackerSessionStatusKind => SESSION_STATUS_KINDS.has(value);
 
 const invalid = (message: string) => new TrackerRouteError(400, 'INVALID', message);
-const BOUNDS = Object.freeze({ token: 4_096, username: 256, instance: 2_048, clientId: 512, clientSecret: 4_096, projectPath: 4_096, containerId: 256 });
+const BOUNDS = Object.freeze({ token: 4_096, username: 256, instance: 2_048, clientId: 512, clientSecret: 4_096, projectPath: 4_096, containerId: 256, identifier: 128 });
 const hasStringLength = (value: unknown): value is { length?: unknown } => isString(value);
 const bounded = <T>(value: T, max: number, name: string) => {
   if (hasStringLength(value) && Number(value.length) > max) throw invalid(`${name} is too long`);
@@ -184,6 +185,15 @@ export function registerTrackerRoutes(app: Application, { registry }: { registry
     if (!id || !stateId) throw invalid('id and stateId are required');
     return tracker.updateState({ id, stateId });
   }, (descriptor) => descriptor.capabilities.stateUpdate));
+
+  const hasComments = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is CommentTracker => descriptor.capabilities.comments && Boolean(tracker.comments);
+  app.post('/api/tracker/:provider/comments', parseJsonBody, handle('post comment', ({ req, tracker }) => {
+    const body = readBody(req);
+    const identifier = bounded(readString(body.identifier), BOUNDS.identifier, 'identifier');
+    const text = readString(body.body);
+    if (!identifier || !text) throw invalid('identifier and body are required');
+    return tracker.comments.create({ identifier, body: text });
+  }, hasComments));
 
   app.get('/api/tracker/:provider/states', handle('load workflow states', ({ req, tracker }) => {
     const containerId = queryValue(req, 'containerId');

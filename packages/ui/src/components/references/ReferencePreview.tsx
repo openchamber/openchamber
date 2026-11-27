@@ -816,10 +816,10 @@ const TrackerPreview: React.FC<{
     pinned: boolean;
     now: number;
     footer?: React.ReactNode;
-    stateControl?: React.ReactNode;
+    stateControl?: React.ReactNode; reply?: React.ReactNode;
     onOpenIssue?: (issue: TrackerItemSummary) => void;
     onRefresh?: () => Promise<void>;
-}> = ({ issue: listed, detail, purpose, pinned, now, footer: footerOverride, stateControl, onOpenIssue, onRefresh }) => {
+}> = ({ issue: listed, detail, purpose, pinned, now, footer: footerOverride, stateControl, reply, onOpenIssue, onRefresh }) => {
     const { t } = useI18n();
     const newestFirst = useReferencePreviewDisplayStore((state) => selectReferencePreviewDisplay(state).referencePreviewNewestFirst);
     const collapseDescription = useReferencePreviewDisplayStore((state) => selectReferencePreviewDisplay(state).referencePreviewCollapseDescription);
@@ -925,7 +925,7 @@ const TrackerPreview: React.FC<{
             </div>
 
             {full && capabilities.children ? <SubIssuesSection issue={full} onOpen={onOpenIssue} /> : null}
-            {detail.status === 'ready' ? <ReferenceCommentsSection state={comments} total={null} now={now} /> : null}
+            {detail.status === 'ready' ? <ReferenceCommentsSection state={comments} total={null} now={now} /> : null}{capabilities.comments ? reply : null}
         </PreviewFrame>
     );
 };
@@ -976,7 +976,7 @@ export const ReferencePreview: React.FC<{
         );
     }
     if (item.source === 'tracker') {
-        return <TrackerPreview issue={item.item} detail={trackerDetail} purpose={purpose} pinned={pinned} now={now} footer={footer} stateControl={trackerStateControl} onOpenIssue={onOpenTrackerItem} onRefresh={onRefresh} />;
+        return <TrackerPreview issue={item.item} detail={trackerDetail} purpose={purpose} pinned={pinned} now={now} footer={footer} stateControl={trackerStateControl} reply={reply} onOpenIssue={onOpenTrackerItem} onRefresh={onRefresh} />;
     }
     return (
         <ReferenceMarkdownRewriteContext.Provider value={rewriteMarkdown}>
