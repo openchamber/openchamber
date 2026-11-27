@@ -31,17 +31,10 @@ export function isMacOpenCodeAppBundlePath(candidate: string): boolean {
 }
 
 function isWindowsOpenCodeDesktopAppPath(candidate: string): boolean {
-  if (process.platform !== 'win32') {
+  if (process.platform !== 'win32' || path.extname(candidate).toLowerCase() !== '.exe') {
     return false;
   }
-  const localAppDataPath = process.env.LOCALAPPDATA;
-  if (!localAppDataPath?.trim()) {
-    return false;
-  }
-  const localAppData = path.resolve(localAppDataPath).toLowerCase();
-  const normalized = path.resolve(candidate).toLowerCase();
-  return normalized.startsWith(`${localAppData}${path.sep}`)
-    && normalized.endsWith(`${path.sep}programs${path.sep}opencode${path.sep}opencode.exe`);
+  return fs.existsSync(path.join(path.dirname(path.resolve(candidate)), 'resources', 'app.asar'));
 }
 
 export function isKnownOpenCodeDesktopAppPath(candidate: string): boolean {

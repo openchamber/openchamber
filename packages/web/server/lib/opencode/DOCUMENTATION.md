@@ -134,6 +134,10 @@ Login-shell rc files, PowerShell profiles, and PATH entries on unavailable netwo
 
 The empty-string setting clears only a previously applied settings selection. An `OPENCODE_BINARY` supplied by the user's environment remains explicit configuration and survives that clear.
 
+### Why the Windows Desktop app is recognized by its files and not its install folder
+
+OpenCode Desktop is an Electron app, and its executable cannot run as the OpenCode server, so every binary candidate is checked against it. On Windows the check is a `.exe` with `resources\app.asar` beside it. The install folder name says nothing reliable: the installer updates in place and keeps the folder name of the first install, so official installs live in `Programs\OpenCode` and also in older names such as `Programs\@opencode-aidesktop` (#7734). Current Desktop builds ship no `opencode-cli.exe`, so that file cannot be the marker. A CLI kept inside an older Desktop install, `resources\opencode-cli.exe`, still passes, because its own folder has no `resources\app.asar`. `../../../../vscode/src/opencodeCliDiscovery.ts` has the same check for the VS Code extension.
+
 ### Why Windows binary resolution prefers a baseline executable
 
 Bypassing package-manager wrappers still needs to support CPUs without AVX2. Resolution prefers the baseline platform package and unwraps shims to native executables or explicit runtime/script pairs because raw cmd shims cannot run through `spawn` with `shell: false`.

@@ -26,6 +26,17 @@ const createTempDir = (prefix) => {
   return dir;
 };
 
+// The layout an OpenCode Desktop installer leaves: OpenCode.exe with the
+// Electron bundle in resources\app.asar beside it.
+const createWindowsDesktopInstall = (folder) => {
+  const installDir = path.join(createTempDir('openchamber-localappdata-'), 'Programs', folder);
+  fs.mkdirSync(path.join(installDir, 'resources'), { recursive: true });
+  fs.writeFileSync(path.join(installDir, 'resources', 'app.asar'), '');
+  const desktopBinary = path.join(installDir, 'OpenCode.exe');
+  fs.writeFileSync(desktopBinary, '');
+  return desktopBinary;
+};
+
 const setPlatform = (platform) => {
   Object.defineProperty(process, 'platform', {
     value: platform,
@@ -545,19 +556,27 @@ describe('OpenCode env runtime', () => {
     });
   });
 
-  it('rejects known Windows OpenCode desktop app install paths', async () => {
+  // An in-place update keeps the first installer's folder name, so a Desktop
+  // install is not always in Programs\OpenCode.
+  it.each(['OpenCode', '@opencode-aidesktop'])('rejects the Windows OpenCode desktop app installed in Programs\\%s', async (folder) => {
     setPlatform('win32');
-    const localAppData = createTempDir('openchamber-localappdata-');
-    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
-    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
-    fs.writeFileSync(desktopBinary, '');
-    process.env.LOCALAPPDATA = localAppData;
+    const desktopBinary = createWindowsDesktopInstall(folder);
     const { runtime } = createRuntime({ opencodeBinary: desktopBinary });
 
     await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
       code: 'OPENCODE_BINARY_INVALID',
       message: expect.stringContaining('Windows desktop app install'),
     });
+  });
+
+  it('accepts the opencode CLI shipped inside a Windows desktop app install', async () => {
+    setPlatform('win32');
+    const desktopBinary = createWindowsDesktopInstall('@opencode-aidesktop');
+    const cliBinary = path.join(path.dirname(desktopBinary), 'resources', 'opencode-cli.exe');
+    fs.writeFileSync(cliBinary, '');
+    const { runtime } = createRuntime({ opencodeBinary: cliBinary });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(cliBinary);
   });
 
   it('bounds every login-shell probe and falls through when one overruns', () => {
@@ -646,14 +665,9 @@ describe('OpenCode env runtime', () => {
 
   it('does not auto-detect the Windows OpenCode desktop app as a CLI', () => {
     setPlatform('win32');
-    const localAppData = createTempDir('openchamber-localappdata-');
-    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
-    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
-    fs.writeFileSync(desktopBinary, '');
-    process.env.LOCALAPPDATA = localAppData;
+    process.env.OPENCODE_BINARY = createWindowsDesktopInstall('@opencode-aidesktop');
     process.env.PATH = createTempDir('openchamber-empty-path-');
     process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
-    delete process.env.OPENCODE_BINARY;
     const { runtime } = createRuntime({}, {
       spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
     });
@@ -663,13 +677,9 @@ describe('OpenCode env runtime', () => {
 
   it('skips Windows OpenCode desktop app entries returned by where.exe', () => {
     setPlatform('win32');
-    const localAppData = createTempDir('openchamber-localappdata-');
-    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
+    const desktopBinary = createWindowsDesktopInstall('@opencode-aidesktop');
     const cliBinary = path.join(createTempDir('openchamber-cli-'), 'opencode.exe');
-    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
-    fs.writeFileSync(desktopBinary, '');
     fs.writeFileSync(cliBinary, '');
-    process.env.LOCALAPPDATA = localAppData;
     process.env.PATH = createTempDir('openchamber-empty-path-');
     process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
     delete process.env.OPENCODE_BINARY;
