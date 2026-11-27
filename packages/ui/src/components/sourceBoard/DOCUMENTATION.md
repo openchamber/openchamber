@@ -65,7 +65,7 @@ The base pencil sits on the `Branch` row and Merge, Update branch and Rebase sit
 
 ### Why the close reasons need `issueCloseReasonWrite` and not `issueCloseReason`
 
-An extension or an older server can publish `issueCloseReason` while its close route drops the reason, so the issue would close with another one. Only GitHub publishes the write; everywhere else the menu keeps the single Close.
+An extension or an older server can publish `issueCloseReason` while its close route drops the reason, so the issue would close with another one. Only GitHub publishes the write; everywhere else the menu keeps the single Close. The permission behind the reasons is the one the state menu itself answers to (`writeAccess` or the item's own `viewerCanUpdate`), not `writeAccess` alone: an issue's author closes their own issue in a repository they cannot write. Checked on github.com on 2026-11-27 — a READ account's own issue answers `viewerCanUpdate: true`, and `PATCH … { state: 'closed', state_reason: 'not_planned' }` is accepted.
 
 ### Why a denied viewer keeps Close unless the host also refuses edits
 

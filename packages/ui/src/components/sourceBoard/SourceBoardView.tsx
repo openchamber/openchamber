@@ -659,7 +659,7 @@ const SourceBoardBody: React.FC<{
             commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && context
                 && canChangeReferenceState(previewItem.reference, readyValue(browser.repositoryDetail)) ? (
-                <SourceBoardStateMenuItems item={previewItem} context={context} writeAccess={readyValue(browser.repositoryDetail)?.writeAccess} onChanged={refreshRepositoryItem} />
+                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
             ) : undefined}
             commentAttachments={previewItem?.source === 'repository'
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }

@@ -623,21 +623,19 @@ const DiscussionStateMenuItems: React.FC<{
 export const SourceBoardStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
-    writeAccess?: boolean;
     onChanged: () => void;
-}> = ({ item, context, writeAccess, onChanged }) => {
+}> = ({ item, context, onChanged }) => {
     if (item.source === 'repository' && item.reference.kind === 'discussion') {
         return <DiscussionStateMenuItems discussion={item.reference} context={context} onChanged={onChanged} />;
     }
-    return <ItemStateMenuItems item={item} context={context} writeAccess={writeAccess} onChanged={onChanged} />;
+    return <ItemStateMenuItems item={item} context={context} onChanged={onChanged} />;
 };
 
 const ItemStateMenuItems: React.FC<{
     item: ReferencePickerItem;
     context: SourceControlReadContext;
-    writeAccess?: boolean;
     onChanged: () => void;
-}> = ({ item, context, writeAccess, onChanged }) => {
+}> = ({ item, context, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const repositoryItem = item.source === 'repository' && item.reference.kind !== 'discussion' ? item.reference : null;
@@ -695,7 +693,7 @@ const ItemStateMenuItems: React.FC<{
         }
     };
 
-    const asksCloseReason = writeAccess !== false && repositoryItem?.kind === 'issue' && nextState === 'closed'
+    const asksCloseReason = repositoryItem?.kind === 'issue' && nextState === 'closed'
         && descriptor.features.issueCloseReason && descriptor.features.issueCloseReasonWrite;
 
     if (!repositoryItem) return null;
