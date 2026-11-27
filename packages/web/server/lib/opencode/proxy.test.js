@@ -14,6 +14,7 @@ import {
   canonicalizeMoveBodyDirectory,
   createDirectoryQueryCanonicalizer,
   createSessionDirectoryCanonicalizer,
+  relocateSessionsFromDriveTargets,
 } from './directory-canonicalization.js';
 
 describe('createDirectoryQueryCanonicalizer', () => {
@@ -166,6 +167,72 @@ describe('createSessionDirectoryCanonicalizer', () => {
     })();
     await expect(canonicalize('/home/me/work ')).resolves.toBe('/home/me/work ');
     expect(seen).toEqual(['/home/me/work ']);
+  });
+});
+
+describe('relocateSessionsFromDriveTargets', () => {
+  const sessionClient = (pages, active = {}) => {
+    const moves = [];
+    const client = {
+      session: {
+        list: async ({ cursor }) => pages[cursor ?? 0],
+        active: async () => active,
+        move: async (input) => { moves.push(input); },
+      },
+    };
+    return { client, moves };
+  };
+  const relocate = (projects, client, platform = 'win32') => relocateSessionsFromDriveTargets({
+    projects,
+    client,
+    platform,
+    resolve: async (value) => value,
+    resolveTarget: async (value) => value.replace(/^\/r\//, '/net/share/'),
+    checkDirectory: async () => 'available',
+  });
+  const page = (directories, next = null) => ({
+    data: directories.map((directory, index) => ({ id: `${directory}#${index}`, location: { directory } })),
+    cursor: { next },
+  });
+
+  it('moves sessions stored under a mapped drive network path back under the project, on every page', async () => {
+    const { client, moves } = sessionClient([
+      page(['/net/share/work/demo', '/elsewhere'], 1),
+      page(['/net/share/work/demo/sub']),
+    ]);
+    await expect(relocate(['/r/work/demo'], client)).resolves.toBe(2);
+    expect(moves).toEqual([
+      { sessionID: '/net/share/work/demo#0', directory: '/r/work/demo' },
+      { sessionID: '/net/share/work/demo/sub#0', directory: '/r/work/demo/sub' },
+    ]);
+  });
+
+  it('leaves a running session, and one in a project added under its network path, where they are', async () => {
+    const running = sessionClient([page(['/net/share/work/demo'])], { '/net/share/work/demo#0': {} });
+    await expect(relocate(['/r/work/demo'], running.client)).resolves.toBe(0);
+    const unc = sessionClient([page(['/net/share/work/demo/other'])]);
+    await expect(relocate(['/r/work/demo', '/net/share/work/demo/other'], unc.client)).resolves.toBe(0);
+    expect([...running.moves, ...unc.moves]).toEqual([]);
+  });
+
+  it('moves a session under the drive whose network path is the deepest match', async () => {
+    const { client, moves } = sessionClient([page(['/net/share/work/demo/x'])]);
+    const nested = relocateSessionsFromDriveTargets({
+      projects: ['/s', '/r/work/demo'],
+      client,
+      platform: 'win32',
+      resolve: async (value) => value,
+      resolveTarget: async (value) => (value === '/s' ? '/net/share' : value.replace(/^\/r\//, '/net/share/')),
+      checkDirectory: async () => 'available',
+    });
+    await expect(nested).resolves.toBe(1);
+    expect(moves).toEqual([{ sessionID: '/net/share/work/demo/x#0', directory: '/r/work/demo/x' }]);
+  });
+
+  it('does nothing outside Windows', async () => {
+    const { client, moves } = sessionClient([page(['/net/share/work/demo'])]);
+    await expect(relocate(['/r/work/demo'], client, 'linux')).resolves.toBe(0);
+    expect(moves).toEqual([]);
   });
 });
 
