@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import type { GuestRequest, GuestStatusView } from '@openchamber/sdk';
 
 import type { GuestRequestProxyResult } from './oauth';
 import {
   createGuestStatusViewReader,
+  postGuestStatusAction,
   startStatusViewPolling,
   type GuestStatusViewRead,
   type StatusViewVisibility,
@@ -27,10 +28,33 @@ const answering = (bodies: string[]) => {
   return { read, requests };
 };
 
+const localizedMode = '日本語'.repeat(80);
+
+for (const [scope, sessionId, directory, query, path, expectedPath] of [
+  ['an open session', 'ses_open', '/repo', { sessionId: 'ses_open', directory: '/repo', locale: 'de' }, '/status', '/status'],
+  ['a project draft', null, '/repo', { directory: '/repo', locale: 'de' }, `/status?sessionId=ses_default&mode=${localizedMode}&%73essionId=ses_other#info`, `/status?mode=${localizedMode}#info`],
+  ['a draft without a directory', null, null, { locale: 'de' }, '/status?sessionId=ses_default', '/status'],
+] as const) {
+  test(`scopes source reads and actions for ${scope}`, async () => {
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ status: 200, body: '{"rows":[]}' }));
+    try {
+      const context = { sessionId, directory, locale: 'de' };
+      await createGuestStatusViewReader('monitor', path, context)();
+      await postGuestStatusAction('monitor', path, context, { id: 'refresh' });
+      expect(fetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+        { method: 'GET', path: expectedPath, query },
+        { method: 'POST', path: expectedPath, query, body: '{"id":"refresh"}' },
+      ]);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+}
+
 describe('createGuestStatusViewReader', () => {
   test('asks the source path with the panel directory and keeps unchanged rows', async () => {
     const service = answering([JSON.stringify(view('10%')), JSON.stringify(view('10%')), JSON.stringify(view('25%'))]);
-    const reader = createGuestStatusViewReader('monitor', '/status', { directory: '/repo', locale: 'de' }, service.read);
+    const reader = createGuestStatusViewReader('monitor', '/status', { directory: '/repo', sessionId: null, locale: 'de' }, service.read);
     const first = await reader();
     const same = await reader();
     const next = await reader();
@@ -44,7 +68,7 @@ describe('createGuestStatusViewReader', () => {
 
   test('keeps the header controls while they do not change', async () => {
     const withControls = (cpu: string) => JSON.stringify({ ...view(cpu), controls: [{ kind: 'button', id: 'refresh', label: 'Refresh' }] });
-    const reader = createGuestStatusViewReader('monitor', '/status', { directory: null, locale: 'en' }, answering([withControls('1%'), withControls('2%')]).read);
+    const reader = createGuestStatusViewReader('monitor', '/status', { directory: null, sessionId: null, locale: 'en' }, answering([withControls('1%'), withControls('2%')]).read);
     const first = await reader();
     const next = await reader();
     if (!first.ok || !next.ok) throw new Error('expected two views');
@@ -53,7 +77,7 @@ describe('createGuestStatusViewReader', () => {
   });
 
   test('tells a service that did not answer from an answer it cannot draw', async () => {
-    const reader = createGuestStatusViewReader('monitor', '/status', { directory: null, locale: 'en' }, answering(['{"rows":[{"kind":"chart"}]}', 'not json']).read);
+    const reader = createGuestStatusViewReader('monitor', '/status', { directory: null, sessionId: null, locale: 'en' }, answering(['{"rows":[{"kind":"chart"}]}', 'not json']).read);
     expect(await reader()).toEqual({ ok: false, failure: 'invalid' });
     expect(await reader()).toEqual({ ok: false, failure: 'invalid' });
     expect(await reader()).toEqual({ ok: false, failure: 'unreachable' });

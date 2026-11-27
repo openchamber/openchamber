@@ -279,7 +279,9 @@ Omit `options`, or pass `{ scope: 'instance' }`, for this existing server-owned 
 
 #### Sections the app draws
 
-With `source`, the app draws the section itself and loads no frame: `{ source: { path: '/status', interval?: 2000 }, title?: 'Resources' }`. It needs `contributes.service`; a section with a source and no `entry` needs no `panel.entry` either. While the section is shown and expanded, the app sends `GET /status` to your service, then again `interval` ms (1000 to 60000, default 2000) after each answer. The query carries `locale` (the app's language, such as `uk` or `pt-BR`) and `directory` when the panel shows a project. Answer with JSON:
+With `source`, the app draws the section itself and loads no frame: `{ source: { path: '/status', interval?: 2000 }, title?: 'Resources' }`. It needs `contributes.service`; a section with a source and no `entry` needs no `panel.entry` either. While the section is shown and expanded, the app sends `GET /status` to your service, then again `interval` ms (1000 to 60000, default 2000) after each answer. Switching sessions starts a new read even when the directory stays the same.
+
+Both `GET` and `POST` carry `locale` (the app's language, such as `uk` or `pt-BR`), `directory` when Work Status has a directory, and `sessionId` when it shows an open session. The host owns `sessionId` and drops any value in the source path for a draft without a session. Older hosts may omit `sessionId` for open sessions too. Answer `GET` with JSON:
 
 ```json
 {
@@ -298,7 +300,7 @@ With `source`, the app draws the section itself and loads no frame: `{ source: {
 
 A `line` has a `label` and optionally an `icon` (a Remixicon name; an unknown one is left out), a status `dot`, one `content`, a `value` with `valueTone`, a `badge` `{ label, tone? }`, a `tooltip`, and up to two `actions`. `content` is a `bar` (`value` 0 to 100), a `chart` (`values` oldest first, at most 120; `max`; `unit` `bytes`, `percent` or `count` for the hover label; `step` seconds between points), `chips` (one to six, each with an optional `http(s)` `url` the chip opens), `text`, or a `segmented` choice of two to four options. Actions are a `button` (`variant` `default`, `outline` or `destructive`; `confirm` asks on the first click and acts on the second), a `switch` (`checked`), or a `select`. A `note` is a line of text, `muted` by default or tinted `info`, `warning` or `error`. `controls` are header controls in the `setStatusControls` shape. Tones are `default`, `muted`, `accent`, `success`, `warning`, `error` and `info`; the app takes their colours from its theme. At most 16 rows. Row ids are unique, and so are control ids across the whole answer. Types: `GuestStatusView` and friends in `@openchamber/sdk`; the app checks answers with `guestStatusViewSchema` from `@openchamber/sdk/schemas` and shows an error instead of an answer that does not parse.
 
-When the user activates a control, the app posts `{ "id": "stop-web" }` to the same path, with `value` for a choice (`on` or `off` for a switch), and reads the section again as soon as you answer. Answer 2xx when it worked; otherwise the app shows an error toast with your `{ "message": "..." }` when the body has one. The choice shows at once and stays until a reading taken after your answer.
+When the user activates a control, the app posts `{ "id": "stop-web" }` to the same path, with `value` for a choice (`on` or `off` for a switch). While the original section remains open, the app reads it again after your reply. Answer 2xx when it worked. A non-2xx reply can provide `{ "message": "..." }` for the app's error toast. The choice shows at once and stays until a reading taken after your answer.
 
 Keep `entry` beside `source` to support OpenChamber versions that predate it: they ignore `source` and load the frame. Web, desktop and the phone, like every status section; VS Code remains unsupported.
 

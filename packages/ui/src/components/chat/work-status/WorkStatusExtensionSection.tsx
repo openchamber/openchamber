@@ -23,7 +23,8 @@ const rememberedHeights = new Map<string, number>();
 export const WorkStatusExtensionSection: React.FC<{
   guest: InstalledGuest;
   directory: string | null;
-}> = ({ guest, directory }) => {
+  sessionId: string | null;
+}> = ({ guest, directory, sessionId }) => {
   const { t } = useI18n();
   const sectionId = extensionSectionId(guest.id);
   const expanded = useUIStore(React.useCallback(
@@ -66,10 +67,10 @@ export const WorkStatusExtensionSection: React.FC<{
         <div data-guest-status-body={guest.id}>
           <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
             <GuestStatusViewBody
-              key={`${guest.id}:${directory ?? ''}`}
               guestId={guest.id}
               source={guest.statusSource}
               directory={directory}
+              sessionId={sessionId}
               onStatusControls={setStatusControls}
             />
           </ErrorBoundary>
