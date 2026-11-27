@@ -15,6 +15,27 @@ describe('GitHub mapper boundary checks', () => {
     expect(mapped).not.toHaveProperty('labels');
   });
 
+  it('accepts the head repository SSH URL GitHub hands out on each kind of host', () => {
+    const withHead = (host, sshUrl) => ({ ...pull, html_url: `https://${host}/acme/app/pull/7`, head: { ref: 'topic', repo: {
+      owner: { login: 'acme' }, name: 'app', html_url: `https://${host}/acme/app`, clone_url: `https://${host}/acme/app.git`, ssh_url: sshUrl,
+    } } });
+    for (const [host, sshUrl] of [
+      ['github.com', 'git@github.com:acme/app.git'],
+      ['github.example.com', 'ssh://git@github.example.com/acme/app.git'],
+      ['acme.ghe.com', 'acme@acme.ghe.com:acme/app.git'],
+      ['acme.ghe.com', 'ssh://acme@acme.ghe.com/acme/app.git'],
+    ]) {
+      expect(requireGitHubPullRequest(withHead(host, sshUrl), 'invalid pull').head.repo.ssh_url).toBe(sshUrl);
+    }
+    for (const [host, sshUrl] of [
+      ['acme.ghe.com', 'other@acme.ghe.com:acme/app.git'],
+      ['github.com', 'acme@github.com:acme/app.git'],
+      ['acme.ghe.com', 'acme@acme.ghe.com:acme/other.git'],
+    ]) {
+      expect(() => requireGitHubPullRequest(withHead(host, sshUrl), 'invalid pull')).toThrow('invalid pull');
+    }
+  });
+
   it('requires a real collection when a dictionary lookup names an inherited member', () => {
     const collections = {};
     expect(() => requireGitHubCheckRuns(collections.constructor)).toThrow('GitHub returned invalid check runs');

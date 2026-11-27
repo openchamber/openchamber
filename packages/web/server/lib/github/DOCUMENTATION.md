@@ -74,6 +74,18 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 - The gate is two layers. `resolveGitHubRepoFromDirectory` refuses unapproved hosts at the single choke point every remote resolution passes through (so `resolveRemoteCandidates` skips them too, and `/pr/status` reports `project: null` for GitLab-style remotes). `getOctokitOrNull(host)` re-checks before ANY token lookup as defense in depth, so a direct caller with a client-supplied host can never mint a token for an untrusted host.
 - Trusted non-github.com hosts are also github instances: `listTrustedGitHubHosts()` in `host-trust.js` enumerates the hosts gh has a stored login for plus the server's `GH_HOST`, and `GET /api/source-control/github/auth/status?instance=<host>` answers for such a host with that host's gh login as the `<host>#cli:<id>` account — a GitHub Enterprise repository can bind and read PRs with a gh login for its host and no github.com OAuth account. This adds instances, it does not relax trust: a host only appears once trusted, and `getOctokitForAccountId` still refuses every `<host>#cli:<id>` the trust gate rejects.
 
+## GitHub Enterprise Cloud (`*.ghe.com`)
+
+An Enterprise Cloud tenant with data residency is an enterprise instance like any other (its own PATs, its own gh switch, its own trust), with three differences GitHub documents and `api-host.ts` owns:
+
+- Its REST and GraphQL API is the separate host `api.<tenant>.ghe.com` (`gitHubApiBaseUrl`), where an Enterprise Server answers `/api/v3` and `/api/graphql` on its web host. Octokit, the Contents API behind uploads, and issue search results all take the API host from there. Rate-limit cooldowns map the API host back to its instance (`gitHubInstanceOfApiHost`), so `api.acme.ghe.com` cools down `acme.ghe.com` only.
+- Its SSH user is the tenant subdomain (`acme@acme.ghe.com:owner/repo.git`). Remote parsing and the head repository check accept that user on that tenant only; every other host still requires `git`.
+- Git over HTTPS uses the account bound for the tenant, the same managed transport github.com has (`managedHttpsInstances` in the descriptor). The credential resolver still requires the reference's instance to be the endpoint's origin and the account's provider-user id to be on that instance, so a tenant's token never reaches github.com, another tenant or the API host.
+
+### Why managed HTTPS for Enterprise Cloud and not for Enterprise Server
+
+GitHub runs every `*.ghe.com` tenant with Git over HTTPS on the tenant's own origin, so a PR worktree fetches its head with the bound account exactly as on github.com, forks included. An Enterprise Server may disable HTTPS Git or sit behind a proxy the server cannot reach, so its PR worktrees keep fetching a same-repository head through the primary remote's own transport, as they always did.
+
 ## Authentication
 
 GitHub Enterprise authenticates per instance, the same model GitLab uses: each instance keeps its own stored credentials and its own gh CLI switch, and github.com's device flow and Settings switch stay as they were.
@@ -127,7 +139,7 @@ GitHub Enterprise authenticates per instance, the same model GitLab uses: each i
 - Provider-neutral UI status reads first resolve the authoritative repository binding, then send its immutable read context to `GET /api/source-control/github/pr/status`.
 - The shell validates that context before exact-account credential lookup. `/api/github/pr/status` is retired and returns `SOURCE_CONTROL_CONTEXT_REQUIRED`.
 - `resources.changeRequestStatus` calls `resolveGitHubPrStatus(...)` in `packages/web/server/lib/github/pr-status.js`.
-- The resolver finds the most likely repo and PR for a local branch.
+- The resolver finds the most likely repo and PR for a local branch. When a pull list could not be read in full it falls back to search, which spans every repository the account sees on the host, so a hit counts only when the PR's repository is a repository of the checkout's network, compared by owner and name. Its head repository is not checked: `gh pr checkout` fetches a fork's head without adding the fork as a remote.
 - The provider then enriches that result with checks, mergeability, and permission-related fields, and answers a neutral `ChangeRequestStatus`.
 - The client caches and shares the result between sidebar and Git view.
 

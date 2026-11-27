@@ -1,4 +1,4 @@
-import { normalizeGitRemoteEndpoint } from './credential-resolver.js';
+import { allowsManagedHttpsInstance, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 import { createWithPlannedRemote, hydrateFollowingPlannedRemotes } from './planned-remotes.js';
 import { forkRemoteName } from './contributor-remote.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
@@ -176,8 +176,8 @@ export const createWorktreeCreation = ({
     const cli = authMethods?.cli;
     const enterprisePrimary = source.context.provider === 'github'
       && source.classification === 'same-repository'
-      && descriptor?.transport.managedHttpsInstances === 'default-only'
-      && !descriptor.instance.defaultInstances.includes(source.context.instance);
+      && descriptor !== null
+      && !allowsManagedHttpsInstance(descriptor, source.context.instance);
     if (enterprisePrimary || (cli && cli.kind === 'service' && !authMethods.pat)) {
       if (source.classification !== 'same-repository') {
         throw new WorktreeCreationError('Service-login worktrees require a head in the primary remote repository', 501, 'RUNTIME_UNSUPPORTED');

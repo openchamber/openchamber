@@ -252,6 +252,26 @@ describe('worktree creation from a change request', () => {
     });
   });
 
+  it.each(['contributor-fork', 'same-repository'])('fetches a %s head on GitHub Enterprise Cloud with the account of that instance', async (classification) => {
+    const instance = 'acme.ghe.com';
+    const context = { ...sourceRequest.context, instance };
+    const source = { ...resolvedSource, context, classification, endpoint: `https://${instance}/Alice/app.git` };
+    const { creation, dependencies } = setup({ dependencies: {
+      resolveChangeRequestSource: vi.fn(async () => source),
+      resolveSourceControlAccount: vi.fn(async () => ({ ...validAccount, providerUserId: `${instance}#42` })),
+      networkOperations: { plan: vi.fn(), execute: vi.fn(), transferContributorHead: vi.fn(async () => ({ state: 'succeeded' })), hydrateBoundCheckout: vi.fn() },
+    } });
+
+    await creation.create('/repo', { ...request, changeRequestSource: { ...sourceRequest, context } });
+
+    expect(dependencies.resolveSourceControlAccount).toHaveBeenCalledWith(context);
+    expect(dependencies.createHttpsCredentialReference).toHaveBeenCalledExactlyOnceWith({
+      provider: 'github', instance, credentialId: 'account_one', credentialRevision: 3, providerUserId: `${instance}#42`,
+    });
+    expect(dependencies.networkOperations.transferContributorHead).toHaveBeenCalledWith(expect.objectContaining({ credentialId: 'credential_reference' }));
+    expect(dependencies.networkOperations.plan).not.toHaveBeenCalled();
+  });
+
   it('refuses contributor authority supplied by the caller before reading anything', async () => {
     const { libraries, dependencies, creation } = setup();
 

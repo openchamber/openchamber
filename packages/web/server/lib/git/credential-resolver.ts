@@ -460,12 +460,14 @@ export const endpointIsInstanceOrigin = (descriptor: ProviderDescriptor | null |
     && Number(origin.port || (https ? 443 : 80)) === endpoint.port;
 };
 
+export const allowsManagedHttpsInstance = (descriptor: ProviderDescriptor, instance: string) => {
+  const policy = descriptor.transport.managedHttpsInstances;
+  return policy === 'any' || policy(instance);
+};
+
 const assertHttpsEndpoint = (descriptor: ProviderDescriptor, reference: { instance: string }, endpoint: ReturnType<typeof normalizeGitCredentialEndpoint>) => {
   if (!['https', 'http'].includes(endpoint.protocol)) throw new Error('Managed HTTPS credentials require HTTPS');
-  if (descriptor.transport.managedHttpsInstances === 'default-only'
-    && !descriptor.instance.defaultInstances.includes(reference.instance)) {
-    throw new Error('Invalid managed provider instance');
-  }
+  if (!allowsManagedHttpsInstance(descriptor, reference.instance)) throw new Error('Invalid managed provider instance');
   let instance;
   try {
     instance = descriptor.instance.origin(reference.instance);

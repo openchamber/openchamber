@@ -38,6 +38,7 @@ import {
   searchGitHubReferencesAcross,
 } from './reference-search.js';
 import { createContextCache } from './context-cache.js';
+import { repositoryOfApiUrl } from './api-host.js';
 import { readAssignablePeople } from './people.js';
 import { fetchPullStack } from './pull-stack.js';
 import { referencesField } from './references.js';
@@ -557,8 +558,7 @@ export function createGitHubResources({
           if (!isPlainObject(item) || !Number.isSafeInteger(item.number) || item.number <= 0) {
             throw invalidProviderPayload('GitHub returned an invalid issue search item');
           }
-          const match = (isProviderString(item.repository_url) ? item.repository_url : '').match(/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/);
-          const repoRef = match ? repos.find((entry) => entry.owner === match[1] && entry.repo === match[2]) : null;
+          const repoRef = isProviderString(item.repository_url) ? repositoryOfApiUrl(repos, item.repository_url, identity.instance) : null;
           if (!repoRef) throw invalidProviderPayload('GitHub issue search returned an invalid repository URL');
           try {
             const issue = await octokit.rest.issues.get({ owner: repoRef.owner, repo: repoRef.repo, issue_number: item.number });

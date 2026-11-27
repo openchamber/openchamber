@@ -1,6 +1,7 @@
 import { getRemoteUrl } from '../../git/index.js';
 import { sshHostNameOf, sshUserOf } from '../../git/ssh-host-alias.js';
 import { isTrustedGitHubHostOrStored } from '../host-trust.js';
+import { isGitHubSshUser } from '../api-host.js';
 
 export interface GitHubRepository {
   owner: string;
@@ -9,7 +10,7 @@ export interface GitHubRepository {
   url: string;
 }
 
-export const parseGitHubRemoteUrl = (raw: string | number | null | undefined): GitHubRepository | null => {
+const parseRemote = (raw: string | number | null | undefined) => {
   const value = String(raw ?? '').trim();
   if (!value) {
     return null;
@@ -17,16 +18,18 @@ export const parseGitHubRemoteUrl = (raw: string | number | null | undefined): G
 
   let host = null;
   let rest = null;
+  let sshUser = null;
 
-  const scp = value.includes('://') ? null : value.match(/^(?:git@)?([^@:/\s]+):(.+)$/);
-  if (scp && scp[2] !== undefined) {
-    host = scp[1];
-    rest = scp[2].includes(':') ? null : scp[2];
+  const scp = value.includes('://') ? null : value.match(/^(?:([^@:/\s]+)@)?([^@:/\s]+):(.+)$/);
+  if (scp && scp[3] !== undefined) {
+    sshUser = scp[1] ?? null;
+    host = scp[2];
+    rest = scp[3].includes(':') ? null : scp[3];
   } else {
     try {
       const url = new URL(value);
-      const sshGit = url.protocol === 'ssh:' && url.username === 'git';
-      if (sshGit || url.protocol === 'https:' || url.protocol === 'http:') {
+      if (url.protocol === 'ssh:' || url.protocol === 'https:' || url.protocol === 'http:') {
+        if (url.protocol === 'ssh:') sshUser = url.username;
         host = url.hostname;
         rest = url.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
       }
@@ -38,7 +41,14 @@ export const parseGitHubRemoteUrl = (raw: string | number | null | undefined): G
   if (!host || !rest) return null;
   const [owner, repo] = rest.replace(/\.git$/, '').split('/');
   if (!owner || !repo) return null;
-  return { owner, repo, host, url: `https://${host}/${owner}/${repo}` };
+  return { repository: { owner, repo, host, url: `https://${host}/${owner}/${repo}` }, sshUser };
+};
+
+const sshUserFits = (sshUser: string | null, host: string) => sshUser === null || isGitHubSshUser(sshUser, host);
+
+export const parseGitHubRemoteUrl = (raw: string | number | null | undefined): GitHubRepository | null => {
+  const parsed = parseRemote(raw);
+  return parsed && sshUserFits(parsed.sshUser, parsed.repository.host) ? parsed.repository : null;
 };
 
 const repositoryOnTrustedHost = async (repo: GitHubRepository, remoteUrl: string, resolveHostName: typeof sshHostNameOf) => {
@@ -54,9 +64,10 @@ export async function resolveGitHubRepoFromDirectory(directory: string, remoteNa
   if (!remoteUrl) {
     return { repo: null, remoteUrl: null };
   }
-  const repo = parseGitHubRemoteUrl(remoteUrl);
+  const parsed = parseRemote(remoteUrl);
+  const repo = parsed ? await repositoryOnTrustedHost(parsed.repository, remoteUrl.trim(), resolveHostName) : null;
   return {
-    repo: repo ? await repositoryOnTrustedHost(repo, remoteUrl.trim(), resolveHostName) : null,
+    repo: parsed && repo && sshUserFits(parsed.sshUser, repo.host) ? repo : null,
     remoteUrl,
   };
 }

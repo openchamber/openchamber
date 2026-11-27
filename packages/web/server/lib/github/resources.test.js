@@ -256,6 +256,29 @@ test('the GitHub picker looks up a pasted Enterprise PR URL in its named reposit
   expect(graphql).not.toHaveBeenCalled();
 });
 
+test('issue search on an enterprise instance reads results from that instance API host', async () => {
+  const issue = (number) => ({ number, title: 'Bug', html_url: `https://acme.ghe.com/acme/app/issues/${number}`, state: 'open',
+    user: { id: 1, login: 'octocat' }, labels: [], comments: 0, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
+  const resourcesOn = (instance, host, remotePath = 'acme/app') => createGitHubResources({
+    load: async () => ({ rateLimit: { isGitHubRateLimited: () => false, noteIfGitHubRateLimit: () => false, isGitHubRateLimitError } }),
+    accountOf: () => ({ octokit: { rest: {
+      search: { issuesAndPullRequests: async () => ({ data: { total_count: 1, items: [
+        { number: 3, repository_url: `${host}/repos/acme/app` },
+      ] } }) },
+      issues: { get: async ({ issue_number }) => ({ data: issue(issue_number) }) },
+    } } }),
+    resolveRepo: async () => ({ repo: { owner: remotePath.split('/')[0], repo: remotePath.split('/')[1], host: instance } }),
+    resolveNetwork: async () => null,
+  }).listIssues({ session: { ...session, instance }, directory: '/repo', page: 1, query: 'bug', remote: 'origin' });
+
+  expect((await resourcesOn('acme.ghe.com', 'https://api.acme.ghe.com')).items).toMatchObject([{ number: 3 }]);
+  expect((await resourcesOn('github.example.com', 'https://github.example.com/api/v3')).items).toMatchObject([{ number: 3 }]);
+  expect((await resourcesOn('github.com', 'https://api.github.com')).items).toMatchObject([{ number: 3 }]);
+  expect((await resourcesOn('acme.ghe.com', 'https://api.acme.ghe.com', 'ACME/App')).items).toMatchObject([{ number: 3 }]);
+  // A result from another instance's API is not this instance's issue.
+  await expect(resourcesOn('acme.ghe.com', 'https://api.other.ghe.com')).rejects.toThrow('invalid repository URL');
+});
+
 describe('listChangeRequests filters', () => {
   const makeListResources = () => {
     const list = vi.fn(async () => ({ data: [], headers: {} }));

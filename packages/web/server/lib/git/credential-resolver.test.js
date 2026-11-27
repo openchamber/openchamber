@@ -217,6 +217,30 @@ describe('Git credential resolver', () => {
     })).rejects.toThrow('Invalid managed provider instance');
   });
 
+  it('serves a GitHub Enterprise Cloud account on its own instance only, and no Enterprise Server account', async () => {
+    const readTransportCredential = vi.fn(async ({ instance }) => ({
+      credentialId: `${instance}#cli:7`, credentialRevision: 1, providerUserId: `${instance}#7`,
+      status: 'valid', secret: 'ghe-token', user: { login: 'ann' },
+    }));
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
+    const referenceFor = (instance) => createHttpsCredentialReference({
+      provider: 'github', instance, credentialId: `${instance}#cli:7`, credentialRevision: 1, providerUserId: `${instance}#7`,
+    });
+    const endpoint = (host) => ({ protocol: 'https', host, path: 'acme/app.git' });
+
+    await expect(resolver.resolve({ mode: 'managed', credentialId: referenceFor('acme.ghe.com'), endpoint: endpoint('acme.ghe.com') }))
+      .resolves.toMatchObject({ transport: 'https', username: 'x-access-token', password: 'ghe-token',
+        actor: { instance: 'acme.ghe.com', accountId: 'acme.ghe.com#7' } });
+    for (const host of ['other.ghe.com', 'api.acme.ghe.com', 'github.com']) {
+      await expect(resolver.resolve({ mode: 'managed', credentialId: referenceFor('acme.ghe.com'), endpoint: endpoint(host) }))
+        .rejects.toThrow('outside the managed credential policy');
+    }
+    readTransportCredential.mockClear();
+    await expect(resolver.resolve({ mode: 'managed', credentialId: referenceFor('github.example.com'), endpoint: endpoint('github.example.com') }))
+      .rejects.toThrow('Invalid managed provider instance');
+    expect(readTransportCredential).not.toHaveBeenCalled();
+  });
+
   it('reaches a loopback HTTP instance of a provider that allows one, and no plain HTTP host besides', async () => {
     const credentialFor = (instance) => createHttpsCredentialReference({
       provider: 'gitea', instance, credentialId: 'credential-one', credentialRevision: 1, providerUserId: `${instance}#7`,

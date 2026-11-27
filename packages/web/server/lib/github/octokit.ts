@@ -11,6 +11,7 @@ import { forgetGhCliToken, getGhCliToken } from './gh-cli-credential.js';
 import { findGhCliLogin, getGhCliLoginToken } from './gh-cli-logins.js';
 import { isTrustedGitHubHostOrStored } from './host-trust.js';
 import { hasProperty } from './contracts.js';
+import { gitHubApiBaseUrl } from './api-host.js';
 import { isString } from '../shared/guards.js';
 import type { AuthJson } from '../source-control/auth-storage.js';
 
@@ -105,7 +106,7 @@ export function createOctokit(token: AuthJson, accountId = '', host = ''): Ident
   const options: ConstructorParameters<typeof Octokit>[0] = { auth: token, request: { fetch: createConditionalFetch(cacheIdentity, host) } };
   const normalizedHost = String(host ?? '').trim().toLowerCase();
   if (normalizedHost && normalizedHost !== 'github.com') {
-    options.baseUrl = `https://${normalizedHost}/api/v3`;
+    options.baseUrl = gitHubApiBaseUrl(normalizedHost);
   }
   const octokit = new Octokit(options);
   octokit.hook.error('request', (error: Error) => {

@@ -79,6 +79,38 @@ describe('resolveGitHubPrStatus host scoping', () => {
     expect(reposGet.mock.calls).toHaveLength(1);
   });
 
+  test('the search fallback takes only a pull request of this repository, whatever fork its head is on', async () => {
+    // The open pull list fails and the head lookup finds nothing, so the
+    // resolver falls back to search, which spans every repository the account
+    // sees on the host.
+    const failingList = mock(async ({ head }) => {
+      if (head) return { data: [] };
+      throw Object.assign(new Error('unavailable'), { status: 502 });
+    });
+    const pulls = {
+      7: { number: 7, state: 'open', head: { ref: 'feature', repo: { owner: { login: 'stranger' }, name: 'app' } } },
+      8: { number: 8, state: 'open', head: { ref: 'feature', repo: { owner: { login: 'contributor' }, name: 'app' } } },
+    };
+    const pullsGet = mock(async ({ pull_number }) => ({ data: pulls[pull_number] }));
+    const search = async () => ({ data: { items: [
+      { number: 7, repository_url: 'https://api.github.com/repos/stranger/app' },
+      { number: 8, repository_url: 'https://api.github.com/repos/acme/app' },
+    ] } });
+    const result = await resolveWith({
+      requestHost: 'github.com',
+      octokit: {
+        openChamberCacheIdentity: 'search-fallback-account',
+        rest: { repos: { get: reposGet }, pulls: { list: failingList, get: pullsGet }, search: { issuesAndPullRequests: search } },
+      },
+    });
+
+    // #7 lives in another owner's same-named repository and is never read.
+    // #8 is ours; its head on a fork the checkout has no remote for is what
+    // `gh pr checkout` leaves behind.
+    expect(pullsGet.mock.calls.map(([input]) => `${input.owner}/${input.repo}#${input.pull_number}`)).toEqual(['acme/app#8']);
+    expect(result.pr?.number).toBe(8);
+  });
+
   test('uses the route-passed request host when the explicit remote does not resolve', async () => {
     // The explicit remote fails to resolve (the route got repo: null for it —
     // a host it never authenticated with), leaving only a lower-ranked remote

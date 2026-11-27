@@ -63,6 +63,16 @@ describe('parseGitHubRemoteUrl', () => {
     });
   });
 
+  test('parses an Enterprise Cloud remote, whose SSH user is the tenant subdomain', () => {
+    const expected = { owner: 'octocat', repo: 'hello', host: 'acme.ghe.com', url: 'https://acme.ghe.com/octocat/hello' };
+    expect(parseGitHubRemoteUrl('acme@acme.ghe.com:octocat/hello.git')).toEqual(expected);
+    expect(parseGitHubRemoteUrl('ssh://acme@acme.ghe.com/octocat/hello.git')).toEqual(expected);
+    // Only the tenant's own name: GitHub hands out no other SSH user.
+    expect(parseGitHubRemoteUrl('other@acme.ghe.com:octocat/hello.git')).toBeNull();
+    expect(parseGitHubRemoteUrl('acme@github.com:octocat/hello.git')).toBeNull();
+    expect(parseGitHubRemoteUrl('ssh://acme@github.example.com/octocat/hello.git')).toBeNull();
+  });
+
   test('keeps github.com behavior unchanged (https, no .git suffix)', () => {
     expect(parseGitHubRemoteUrl('https://github.com/octocat/hello')).toEqual({
       owner: 'octocat',
@@ -200,6 +210,15 @@ describe('resolveGitHubRepoFromDirectory', () => {
     const userless = createCheckout('gh-work:acme/app.git');
     const resolved = await resolveGitHubRepoFromDirectory(userless, 'origin', async (host, user) => (host === 'gh-work' && user === '' ? 'github.com' : null));
     expect(resolved.repo).toEqual({ owner: 'acme', repo: 'app', host: 'github.com', url: 'https://github.com/acme/app' });
+  });
+
+  test('reads an SSH alias with the Enterprise Cloud tenant user only on the tenant the alias reaches', async () => {
+    process.env.GH_HOST = 'acme.ghe.com';
+    const dir = createCheckout('acme@gh-work:acme/app.git');
+    const result = await resolveGitHubRepoFromDirectory(dir, 'origin', async (host, user) => (host === 'gh-work' && user === 'acme' ? 'acme.ghe.com' : null));
+    expect(result.repo).toEqual({ owner: 'acme', repo: 'app', host: 'acme.ghe.com', url: 'https://acme.ghe.com/acme/app' });
+    await expect(resolveGitHubRepoFromDirectory(dir, 'origin', async () => 'github.com')).resolves.toMatchObject({ repo: null });
+    await expect(resolveGitHubRepoFromDirectory(createCheckout('acme@github.com:acme/app.git'))).resolves.toMatchObject({ repo: null });
   });
 
   test('reports an unresolvable remote as null rather than throwing', async () => {

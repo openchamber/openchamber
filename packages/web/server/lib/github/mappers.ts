@@ -4,6 +4,7 @@ import type { NetworkRepository } from './repo/fork-detection.js';
 import type { ChecksSummary } from './checks-summary.js';
 import { hasProperty } from './contracts.js';
 import type { GitHubEnvelope } from './contracts.js';
+import { isGitHubSshUser } from './api-host.js';
 
 type Rest = RestEndpointMethodTypes;
 type Pull = Rest['pulls']['get']['response']['data'];
@@ -164,15 +165,17 @@ export function matchesGitHubRepositoryUrl(value: GitHubEnvelope['data'], owner:
   if (!isProviderString(value) || !value.trim()) return false;
   const expectedPath = `${owner}/${repo}`.toLowerCase();
   const raw = value.trim();
-  const scpMatch = raw.match(/^git@([^/\s:]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
-  if (scpMatch) return `${scpMatch[2]}/${scpMatch[3]}`.toLowerCase() === expectedPath;
+  const scpMatch = raw.match(/^([^@/\s:]+)@([^/\s:]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpMatch) {
+    return isGitHubSshUser(scpMatch[1], scpMatch[2]) && `${scpMatch[3]}/${scpMatch[4]}`.toLowerCase() === expectedPath;
+  }
 
   try {
     const url = new URL(raw);
     if (!['https:', 'ssh:'].includes(url.protocol)
       || url.password || url.search || url.hash
       || (url.protocol === 'https:' && url.username)
-      || (url.protocol === 'ssh:' && url.username !== 'git')) {
+      || (url.protocol === 'ssh:' && !isGitHubSshUser(url.username, url.hostname))) {
       return false;
     }
     if (host && url.protocol === 'https:' && url.hostname.toLowerCase() !== host) return false;

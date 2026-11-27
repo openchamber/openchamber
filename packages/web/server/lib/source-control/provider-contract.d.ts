@@ -60,7 +60,7 @@ export interface ProviderDescriptor {
   authMethods: { device: boolean; pat: boolean; cli: false | { tool: string; kind?: never; hint?: never } | { kind: 'service'; hint: string; tool?: never } };
   transport: {
     httpsUsername: { kind: 'fixed'; value: string } | { kind: 'login' };
-    managedHttpsInstances: 'default-only' | 'any';
+    managedHttpsInstances: 'any' | ((instance: string) => boolean);
     appendDotGitToHttpsClone: boolean;
   };
   urls: { thread: { hosts: readonly string[] | 'any'; pattern: RegExp } };

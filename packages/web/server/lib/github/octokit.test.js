@@ -382,6 +382,30 @@ describe('enterprise-host octokit request URLs', () => {
     }
   });
 
+  test('an Enterprise Cloud tenant answers on its own api.<tenant>.ghe.com host', async () => {
+    const requests = [];
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), method: options.method });
+      return Response.json(options.method === 'POST' && String(url).endsWith('/graphql')
+        ? { data: { viewer: { id: 42, login: 'ghe-user' } } }
+        : { id: 42, login: 'ghe-user' });
+    };
+    try {
+      const octokit = createOctokit('ghe-token', '', 'acme.ghe.com');
+      await octokit.graphql('{ viewer { id login } }');
+      await octokit.rest.users.getAuthenticated();
+      await octokit.rest.issues.createComment({ owner: 'acme', repo: 'app', issue_number: 7, body: 'hi' });
+      expect(requests.map(({ url, method }) => `${method} ${new URL(url).origin}${new URL(url).pathname}`)).toEqual([
+        'POST https://api.acme.ghe.com/graphql',
+        'GET https://api.acme.ghe.com/user',
+        'POST https://api.acme.ghe.com/repos/acme/app/issues/7/comments',
+      ]);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test('refuses redirects so the credential header never leaves the instance', async () => {
     const requested = [];
     const previousFetch = globalThis.fetch;

@@ -1,4 +1,5 @@
 import type { GitHubEnvelope } from './contracts.js';
+import { gitHubInstanceOfApiHost } from './api-host.js';
 
 interface RateLimitFields {
   request?: unknown;
@@ -22,13 +23,7 @@ const DEFAULT_COOLDOWN_MS = 60 * 1000;
 
 const rateLimitedUntilByHost = new Map<string, number>();
 
-const hostKeyFor = (value: string | null | undefined) => {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  if (!normalized || normalized === 'github.com' || normalized === 'api.github.com') {
-    return 'github.com';
-  }
-  return normalized;
-};
+const hostKeyFor = (value: string | null | undefined) => gitHubInstanceOfApiHost(value) || 'github.com';
 
 export const hostFromError = (error: GitHubEnvelope['data']) => {
   const url = field(field(error, 'request'), 'url') ?? field(field(error, 'response'), 'url');
