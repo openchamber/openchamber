@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
+import { useContextWindowStore } from '@/lib/contextWindow/store';
 import { I18nProvider } from '@/lib/i18n';
 import { ExternalOpenCodePluginBanner } from './ExternalOpenCodePluginBanner';
 
@@ -173,5 +174,50 @@ describe('ExternalOpenCodePluginBanner', () => {
     await flush();
 
     expect(container.textContent).toContain(`registered in ${GLOBAL_PATH}, but OpenCode has not loaded it`);
+  });
+
+  const renderUnregisteredInProject = async (loaded: boolean) => {
+    useContextWindowStore.setState({ followedDirectory: '/work/app' });
+    const asked: Array<string | null> = [];
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(input instanceof URL ? input.href : input instanceof Request ? input.url : input, 'http://localhost');
+      if (url.pathname.endsWith('/api/config/external-opencode-plugin')) {
+        const directory = url.searchParams.get('directory');
+        asked.push(directory);
+        return Response.json({
+          delivery: 'none',
+          pluginPath: PLUGIN_PATH,
+          globalConfigPath: GLOBAL_PATH,
+          inGlobalConfig: false,
+          bridgeActive: true,
+          loadedInDirectory: directory ? loaded : null,
+        });
+      }
+      return new Response(null, { status: 404 });
+    });
+    restoreFetch = () => {
+      fetchSpy.mockRestore();
+      useContextWindowStore.setState({ followedDirectory: null });
+    };
+
+    await act(async () => {
+      root.render(
+        <I18nProvider>
+          <ExternalOpenCodePluginBanner />
+        </I18nProvider>,
+      );
+    });
+    await flush();
+    return asked;
+  };
+
+  test('offers nothing when OpenCode already loaded the plugin in the open project without a global config entry', async () => {
+    expect(await renderUnregisteredInProject(true)).toEqual([null, '/work/app']);
+    expect(container.textContent).toBe('');
+  });
+
+  test('offers adding the plugin when OpenCode has not loaded it in the open project', async () => {
+    expect(await renderUnregisteredInProject(false)).toEqual([null, '/work/app']);
+    expect(container.textContent).toContain('Add to OpenCode config');
   });
 });

@@ -16,6 +16,7 @@ import { readSectionEntry, readMcpEntry } from './config-v2.js';
 import { resolveWorktreeDirectory } from './worktree-directory.js';
 import { writeFileAtomic } from './atomic-write.js';
 import type { ParseError, JSONPath, FormattingOptions } from 'jsonc-parser';
+import { isRecord, isString } from '../shared/guards.js';
 import type { JsonValue } from '../shared/json-values.js';
 import type { SectionKind } from './config-v2.js';
 
@@ -185,6 +186,8 @@ function getPrimaryUserConfigPath(userPaths: string[]) {
 }
 
 const INVALID_JSONC = 'INVALID_JSONC';
+const CONFIG_READ_ONLY = 'CONFIG_READ_ONLY';
+const READ_ONLY_CODES = new Set(['EACCES', 'EPERM', 'EROFS']);
 
 function isInvalidJsoncError(error: unknown): error is InvalidJsoncError {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === INVALID_JSONC);
@@ -588,7 +591,9 @@ function writeConfig(config: OpenCodeConfigLayer, filePath = CONFIG_FILE) {
         existingParse = parseConfigResult(existingRaw.trim(), filePath);
       }
 
+      refuseReadOnlyConfig(filePath);
       const backupFile = `${filePath}.openchamber.backup`;
+      fs.rmSync(backupFile, { force: true });
       fs.copyFileSync(filePath, backupFile);
       console.log(`Created config backup: ${backupFile}`);
     }
@@ -602,7 +607,19 @@ function writeConfig(config: OpenCodeConfigLayer, filePath = CONFIG_FILE) {
       throw error;
     }
     console.error(`Failed to write config file: ${filePath}`, error);
+    if (isRecord(error) && error.code === CONFIG_READ_ONLY) {
+      throw error;
+    }
     throw new Error('Failed to write OpenCode configuration');
+  }
+}
+
+function refuseReadOnlyConfig(filePath: string) {
+  try {
+    fs.accessSync(filePath, fs.constants.W_OK);
+  } catch (error) {
+    if (!isRecord(error) || !isString(error.code) || !READ_ONLY_CODES.has(error.code)) throw error;
+    throw Object.assign(new Error(`OpenCode configuration at ${filePath} is read-only`), { code: CONFIG_READ_ONLY, path: filePath });
   }
 }
 
@@ -728,6 +745,7 @@ export {
   COMMAND_DIR,
   SKILL_DIR,
   CONFIG_FILE,
+  CONFIG_READ_ONLY,
   AGENT_SCOPE,
   COMMAND_SCOPE,
   SKILL_SCOPE,

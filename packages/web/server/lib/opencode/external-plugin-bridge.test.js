@@ -12,6 +12,7 @@ import {
   isBridgePluginLoaded,
   registerExternalPluginBridgeRoutes,
 } from './external-plugin-bridge.js';
+import { CONFIG_READ_ONLY } from './config-files.js';
 import { canonicalPluginPath } from './plugin-paths.js';
 
 const tempDirs = [];
@@ -392,6 +393,42 @@ describe('external-plugin-bridge', () => {
       path: '/tmp/opencode.json',
       removed: true,
     });
+  });
+
+  it('asks the plugin in the project when the global config does not list it, and names a read-only global config', async () => {
+    const dataDir = await createTempDir('oc-ext-plugins-dir-');
+    const runtime = createExternalPluginBridgeRuntime({
+      fsPromises: fs,
+      path,
+      dataDir,
+      readSettings: () => ({ agentControlToolEnabled: true }),
+      ensureCredentials: () => ({ url: 'http://127.0.0.1:41234/api/openchamber/agent-tool', token: 'tok' }),
+      isExternalLocal: () => true,
+    });
+    await runtime.syncBridge();
+    const app = express();
+    registerExternalPluginBridgeRoutes(app, {
+      getBridge: () => runtime,
+      getDelivery: () => 'none',
+      isLoadedIn: async () => true,
+      waitForRemoval: async () => {},
+      readGlobalEntries: () => ({ path: '/home/me/.config/opencode/opencode.json', targets: [] }),
+      addGlobalEntry: () => {
+        throw Object.assign(new Error('read-only'), { code: CONFIG_READ_ONLY, path: '/home/me/.config/opencode/opencode.json' });
+      },
+      removeGlobalEntry: () => {
+        throw Object.assign(new Error('read-only'), { code: CONFIG_READ_ONLY, path: '/home/me/.config/opencode/opencode.json' });
+      },
+    });
+
+    // Loaded from OpenCode's plugins/ folder: no global entry, and the plugin still answers for the project.
+    const inProject = await request(app).get('/api/config/external-opencode-plugin').query({ directory: '/work/app' }).expect(200);
+    expect(inProject.body).toMatchObject({ inGlobalConfig: false, bridgeActive: true, loadedInDirectory: true });
+
+    const refused = { error: 'config-read-only', path: '/home/me/.config/opencode/opencode.json' };
+    expect((await request(app).post('/api/config/external-opencode-plugin/global-config').expect(409)).body).toEqual(refused);
+    expect((await request(app).delete('/api/config/external-opencode-plugin/global-config').expect(409)).body).toEqual(refused);
+    await runtime.cleanupBridge();
   });
 
   it('prevents an in-flight sync from recreating the bridge file after cleanup', async () => {
