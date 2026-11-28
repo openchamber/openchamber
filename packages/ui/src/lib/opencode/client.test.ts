@@ -1413,6 +1413,35 @@ describe("messages and config", () => {
     })
   }, 8_000)
 
+  test("recovers from a failed native plugin retry while inventory hangs", async () => {
+    const location = { directory: "/repo/app" }
+    const provider = { id: "anthropic", name: "Anthropic" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants: [] }
+    let pluginReads = 0
+    pluginList = () => {
+      pluginReads += 1
+      if (pluginReads === 1) return json({ location, data: [] })
+      if (pluginReads === 2) return json({}, 500)
+      return activatedPlugins()
+    }
+    const answer = (request: CapturedRequest) => {
+      switch (request.url.pathname) {
+        case "/api/debug/location": return HANG
+        case "/api/model": return json({ location, data: [model] })
+        case "/api/model/default": return json({ location, data: model })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  }, 8_000)
+
   test("loads a pluginless catalog when inventory becomes empty during a stalled plugin retry", async () => {
     const location = { directory: "/repo/app" }
     const provider = { id: "anthropic", name: "Anthropic" }

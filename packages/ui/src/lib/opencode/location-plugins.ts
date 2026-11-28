@@ -33,16 +33,16 @@ const waitForLocation = (
         : await pluginRead
       if (plugins === true) return !signal.aborted && isCurrent()
       if (plugins === null) {
-        if (!signal.aborted && statelessProbe && await statelessProbe) return !signal.aborted && isCurrent()
-        return false
-      }
-      if (plugins.length > 0) return isCurrent()
-      if (checkStateless && !signal.aborted && isCurrent()) {
-        statelessProbe = checkStateless(requestController.signal).then((ready) => {
-          if (!ready) statelessProbe = undefined
-          return ready
-        })
-        checkStateless = undefined
+        if (checkStateless || !isStateless) return false
+      } else {
+        if (plugins.length > 0) return isCurrent()
+        if (checkStateless && !signal.aborted && isCurrent()) {
+          statelessProbe = checkStateless(requestController.signal).then((ready) => {
+            if (!ready) statelessProbe = undefined
+            return ready
+          })
+          checkStateless = undefined
+        }
       }
       if (statelessProbe) {
         if (await Promise.race([statelessProbe, delay(POLL_MS).then(() => false)]))
