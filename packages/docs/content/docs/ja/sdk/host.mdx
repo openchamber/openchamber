@@ -282,6 +282,14 @@ await host.setMark({ sessionId }, null);
 
 マークはサービスのプロセスが動いている間だけ残ります。そのため `service.keepRunning` を宣言し、サービスの起動時にマークを設定し直してください。サービスは最大 200 個のマークを保持でき、1 分間に 60 回まで変更できます。マークには 2.7.0 より新しい OpenChamber が必要です。それより古いバージョンはこのキーを無視し、呼び出しを拒否します。
 
+## プロバイダーのアカウント
+
+`contributes.service` と並べて `contributes.providerAccounts: true` を宣言します。ユーザーはこれを別の権限として承認します。エンタープライズモードでは、管理者の拡張機能ポリシーも適用されます。
+
+`host.providerAccounts.list()` は、接続済みで保存済みアカウントを持つモデルプロバイダーごとに `{ id, name, accounts }` を返します。各アカウントには `{ id, label, plan, active }` が含まれます。OpenCode にプラン名が保存されていない場合、`plan` は `null` です。サービスにキーやトークンは渡らず、`opencode` ロールも不要です。
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` は OpenCode インスタンス全体で有効なアカウントを切り替え、`{ status, provider }` を返します。`activated` は指定したアカウントが有効であることを示します。任意の `expectedActiveAccountId` が現在の値と一致しない場合、`stale` はアカウントを切り替えず、プロバイダーの現在の状態を返します。再試行をユーザーに求める前に、アカウントの選択肢を更新してください。`PROVIDER_ACCOUNTS_UNAVAILABLE` が返った場合は、OpenCode がすでに切り替えている可能性があるため、再試行前にアカウントを一覧し直してください。
+
 ## @ メニューの行
 
 `contributes.mentions: { label }` は、チャット欄の `@` メニューにセクションを追加します。サービスは `POST /mentions/search` に 2 秒以内に `{ items: [{ id, title, subtitle?, url? }] }` を返し、`POST /mentions/resolve` にはユーザーが選んだ行に対して `{ text }` を返します。テキストはメッセージと一緒にエージェントに届き、ユーザーにはチップが表示されます。遅いサービスは行を追加せず、ファイルの表示を止めることもありません。読み取れない行はチップを残さず、その旨を表示します。

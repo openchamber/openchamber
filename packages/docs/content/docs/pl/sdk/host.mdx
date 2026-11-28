@@ -282,6 +282,14 @@ Ponowne ustawienie celu zastępuje jego znacznik, a `null` go usuwa. Wiersz rysu
 
 Znacznik żyje tak długo, jak proces Twojej usługi, więc zadeklaruj `service.keepRunning` i ustaw znaczniki ponownie, gdy usługa startuje. Usługa trzyma do 200 znaczników i zmienia je do 60 razy na minutę. Znaczniki wymagają wersji OpenChamber nowszej niż 2.7.0: starsza ignoruje klucz i odrzuca wywołanie.
 
+## Konta dostawców
+
+Zadeklaruj `contributes.providerAccounts: true` obok `contributes.service`. Użytkownik zatwierdza je jako osobne uprawnienie. W trybie firmowym obowiązuje również polityka rozszerzeń administratora.
+
+`host.providerAccounts.list()` zwraca `{ id, name, accounts }` dla każdego połączonego dostawcy modeli z zapisanymi kontami. Każde konto zawiera `{ id, label, plan, active }`. `plan` ma wartość `null`, gdy OpenCode nie ma zapisanej nazwy planu. Usługa nie otrzymuje kluczy ani tokenów i nie potrzebuje roli `opencode`.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` zmienia aktywne konto dla całej instancji OpenCode i zwraca `{ status, provider }`. `activated` potwierdza, że wybrane konto jest aktywne. Jeśli opcjonalna wartość `expectedActiveAccountId` już się nie zgadza, `stale` zwraca aktualny stan dostawcy bez przełączania konta. Odśwież dostępne konta, zanim poprosisz użytkownika o ponowienie próby. Po błędzie `PROVIDER_ACCOUNTS_UNAVAILABLE` pobierz listę kont przed ponowieniem: OpenCode mogło już zastosować zmianę.
+
 ## Wiersze w menu @
 
 `contributes.mentions: { label }` dodaje sekcję do menu `@` pola czatu. Twoja usługa odpowiada na `POST /mentions/search` w ciągu 2 sekund, zwracając `{ items: [{ id, title, subtitle?, url? }] }`, a na `POST /mentions/resolve`, zwracając `{ text }` dla wiersza wybranego przez użytkownika. Tekst trafia do agenta razem z wiadomością, a użytkownik widzi chip. Wolna usługa nie dodaje wierszy i nigdy nie wstrzymuje plików; wiersz, którego nie da się odczytać, nie zostawia chipa i informuje o tym.

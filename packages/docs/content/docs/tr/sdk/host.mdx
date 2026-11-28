@@ -291,6 +291,14 @@ Bir hedefi yeniden ayarlamak işaretini değiştirir, `null` ise kaldırır. Bir
 
 Bir işaret, servis süreciniz yaşadığı sürece yaşar; bu yüzden `service.keepRunning` tanımlayın ve servis başladığında işaretleri yeniden ayarlayın. Bir servis en fazla 200 işaret tutar ve bunları dakikada en fazla 60 kez değiştirir. İşaretler 2.7.0'dan yeni bir OpenChamber sürümü gerektirir: daha eski bir sürüm anahtarı yok sayar ve çağrıyı reddeder.
 
+## Sağlayıcı hesapları
+
+`contributes.service` yanında `contributes.providerAccounts: true` tanımlayın. Kullanıcı bunu ayrı bir izin olarak onaylar. Kurumsal modda yöneticinin eklenti ilkesi de geçerlidir.
+
+`host.providerAccounts.list()`, kayıtlı hesabı olan her bağlı model sağlayıcısı için `{ id, name, accounts }` döndürür. Her hesap `{ id, label, plan, active }` alanlarını içerir. OpenCode kayıtlı bir plan adı tutmuyorsa `plan` değeri `null` olur. Hizmet anahtar veya belirteç almaz ve `opencode` rolüne ihtiyaç duymaz.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })`, tüm OpenCode örneği için etkin hesabı değiştirir ve `{ status, provider }` döndürür. `activated`, istenen hesabın etkin olduğunu doğrular. İsteğe bağlı `expectedActiveAccountId` artık eşleşmiyorsa `stale`, hesabı değiştirmeden sağlayıcının güncel durumunu döndürür. Kullanıcıdan yeniden denemesini istemeden önce hesap seçeneklerini yenileyin. Çağrı `PROVIDER_ACCOUNTS_UNAVAILABLE` hatasıyla sonuçlanırsa yeniden denemeden önce hesapları tekrar listeleyin: OpenCode geçişi uygulamış olabilir.
+
 ## @ menüsündeki satırlar
 
 `contributes.mentions: { label }`, sohbet kutusunun `@` menüsüne bir bölüm ekler. Servisiniz `POST /mentions/search` isteğini 2 saniye içinde `{ items: [{ id, title, subtitle?, url? }] }` ile, `POST /mentions/resolve` isteğini ise kullanıcının seçtiği satır için `{ text }` ile yanıtlar. Metin mesajla birlikte ajana gider ve kullanıcı bir etiket görür. Yavaş bir servis satır eklemez ve dosyaları hiçbir zaman bekletmez; okunamayan bir satır etiket bırakmaz ve bunu bildirir.

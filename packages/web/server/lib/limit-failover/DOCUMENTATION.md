@@ -35,15 +35,22 @@ same token.
    one to `POST /api/openchamber/limit-failover`.
 3. `decide` answers `activate-credential`, `switch-model`, `retry` or `none`.
    A switch carries a ticket.
-4. The plugin calls `credential.activate` or `session.switchModel` and sets the
-   decision to retry now. OpenCode repeats the same step, and every attempt
+4. The managed plugin asks the host to switch the account. The host decides
+   and compares the reported active account in the same queue as extension
+   switches. When another account has become active, it retries on that
+   account without writing. If the reporting plugin disconnects before
+   dispatch, the host does not write. External bridges keep the account
+   activation in their own process. The plugin calls `session.switchModel`
+   for a model switch. Both successes retry now.
+   OpenCode repeats the same step, and every attempt
    resolves the active credential and the session's model again
    (`core/src/model-resolver.ts`, `session/runner/llm.ts` in OpenCode), so the
    next attempt runs on the new account or model and no tool call repeats.
    On `none`, or any failure on the way, OpenCode's own decision stands.
-5. The plugin reports the ticket's outcome to `POST .../limit-failover/settle`.
-   An applied switch is broadcast as `openchamber:limit-failover`; a failed one
-   is forgotten, so its account does not count as just switched to.
+5. The host records and announces a managed failover switch only after it
+   confirms the selection. The plugin reports external and model switches to
+   `POST .../limit-failover/settle`. An applied failover switch is broadcast
+   as `openchamber:limit-failover`.
 
 Verified end to end on OpenCode 2.0.32 with a fake provider: an exhausted
 account switched to the next one and the turn finished there; with only a
@@ -64,7 +71,7 @@ accounts first, then moved to the fallback.
   proposed, else for
   `DEFAULT_EXHAUSTION_MS`. The marks live in memory, so a server restart
   forgets them and the next failure marks the account again.
-- Clients hear about a switch only after the plugin made it.
+- Clients hear about a failover switch only after the host or plugin made it.
 - With no stored account active (an environment key serves the provider),
   every stored account is a candidate.
 - The fallback model is never chosen for a session already on it, so a limit
@@ -78,9 +85,8 @@ accounts first, then moved to the fallback.
 - Concurrent failures on the same account share a pending activation decision
   and produce no second announcement. An unsettled ticket expires silently;
   a plugin that stops mid-switch cannot claim that a switch happened.
-- Works only with an OpenCode OpenChamber starts: an external OpenCode
-  (`OPENCODE_HOST`, skip-start) and VS Code never load the plugin, the
-  Settings hints say so, and VS Code hides both controls.
+- OpenChamber starts the managed plugin. A local external OpenCode needs the
+  configured external plugin bridge. VS Code does not load either and hides both controls.
 
 ## Decisions
 
@@ -107,8 +113,11 @@ not installed. The callback address and token supply the server boundary.
 
 The settings could be written into the generated plugin the way the agent
 tools are. The account choice also needs state only the server keeps (which
-accounts ran out and when they reset), so the decision lives there and the
-plugin stays a reporter that executes the answer.
+accounts ran out and when they reset), so the decision lives there. The host
+also executes managed account switches to keep them ordered with extension writes.
+The external bridge may be loaded by another OpenCode process. It keeps its
+writes there because the host cannot identify its credential store from a report.
+Model switches still run in the plugin's session context.
 
 ### Why the plugin loads only while an option is on
 
@@ -132,5 +141,6 @@ The plugin reads the active account when the hook runs, not the account the
 failed request used. Sessions on one account fail together: after the first
 report switches A to B, a second session's request that went out with A reports
 B as active. Marking B as exhausted then would be wrong, so within
-`SWITCH_GRACE_MS` of a switch each session gets one retry on the new account
-without a mark. A second failure from that session on that account is real.
+`SWITCH_GRACE_MS` of a confirmed switch, whether made by failover or an
+extension, each session gets one retry on the new account without a mark.
+A second failure from that session on that account is real.

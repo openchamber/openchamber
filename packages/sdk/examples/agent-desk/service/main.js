@@ -154,7 +154,11 @@ var createServiceHost = ({ env }) => {
     emit: (topic, data) => call("panels.emit", { topic, data }),
     readSettings: () => call("settings.read", {}).then(({ settings }) => settings),
     needsConfiguration: (message) => call("status.set", { needsConfiguration: message }),
-    setMark: (target, mark) => call("marks.set", { target, mark })
+    setMark: (target, mark) => call("marks.set", { target, mark }),
+    providerAccounts: {
+      list: () => call("providerAccounts.list", {}).then(({ providers }) => providers),
+      activate: (input) => call("providerAccounts.activate", input)
+    }
   };
 };
 // packages/sdk/src/file-editor.ts

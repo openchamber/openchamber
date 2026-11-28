@@ -282,6 +282,14 @@ Définir à nouveau une cible remplace sa marque, et `null` la retire. Une ligne
 
 Une marque vit aussi longtemps que le processus de votre service. Déclarez donc `service.keepRunning` et posez à nouveau les marques au démarrage du service. Un service détient jusqu'à 200 marques et les modifie jusqu'à 60 fois par minute. Les marques nécessitent une version d'OpenChamber plus récente que la 2.7.0 : une version plus ancienne ignore la clé et refuse l'appel.
 
+## Comptes de fournisseurs
+
+Déclarez `contributes.providerAccounts: true` à côté de `contributes.service`. L’utilisateur l’approuve séparément. En mode entreprise, la politique d’extensions de l’administrateur s’applique aussi.
+
+`host.providerAccounts.list()` renvoie `{ id, name, accounts }` pour chaque fournisseur de modèles connecté qui possède des comptes enregistrés. Chaque compte contient `{ id, label, plan, active }`. `plan` vaut `null` si OpenCode ne conserve pas de nom de forfait. Le service ne reçoit ni clé ni jeton et n’a pas besoin du rôle `opencode`.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` change le compte actif pour toute l’instance OpenCode et renvoie `{ status, provider }`. `activated` confirme que le compte demandé est actif. Si la valeur facultative `expectedActiveAccountId` ne correspond plus, `stale` renvoie l’état actuel du fournisseur sans changer de compte. Actualisez les choix avant d’inviter l’utilisateur à réessayer. Si l’appel échoue avec `PROVIDER_ACCOUNTS_UNAVAILABLE`, listez de nouveau les comptes avant de réessayer : OpenCode a peut-être déjà appliqué le changement.
+
 ## Lignes dans le menu @
 
 `contributes.mentions: { label }` ajoute une section au menu `@` de la zone de chat. Votre service répond à `POST /mentions/search` avec `{ items: [{ id, title, subtitle?, url? }] }` en 2 secondes au plus, et à `POST /mentions/resolve` avec `{ text }` pour la ligne choisie par l'utilisateur. Le texte part vers l'agent avec le message, et l'utilisateur voit une puce. Un service lent n'ajoute aucune ligne et ne retient jamais les fichiers ; une ligne illisible ne laisse aucune puce et le signale.

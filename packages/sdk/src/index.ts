@@ -251,8 +251,8 @@ export type {
   ServiceSessionSent,
   ServiceSessionStart,
   ServiceSessionStarted,
-  ServiceSessionStatus,
-  ServiceSessionStopped,
+  ServiceSessionStatus, ServiceSessionStopped,
+  ServiceProviderAccount, ServiceProviderAccounts, ServiceProviderAccountActivation, ServiceProviderAccountActivationResult,
 } from './service-host.ts';
 export {
   GUEST_WAITS_MAX,

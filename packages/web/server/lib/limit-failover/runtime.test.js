@@ -19,7 +19,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createRuntime = ({ settings = { accountSwitchProviders: ['anthropic'] }, now = () => NOW } = {}) => {
+const createRuntime = ({ settings = { accountSwitchProviders: ['anthropic'] }, now = () => NOW, activateCredential = vi.fn(async () => 'activated') } = {}) => {
   const broadcastUiEvent = vi.fn();
   const runtime = createLimitFailoverRuntime({
     fsPromises: fs,
@@ -27,6 +27,7 @@ const createRuntime = ({ settings = { accountSwitchProviders: ['anthropic'] }, n
     instanceDir: os.tmpdir(),
     readSettings: async () => settings,
     authorizeRequest: (req) => req.headers.authorization === 'Bearer token',
+    withManagedAccounts: (signal, run) => run((id, expected) => activateCredential(id, expected, signal)),
     broadcastUiEvent,
     now,
   });
@@ -229,6 +230,24 @@ describe('limit failover decisions', () => {
     await expect(runtime.decide(stale)).resolves.toEqual({ action: 'none' });
   });
 
+  it('retries a late quota error once on the account an extension just activated', async () => {
+    const { runtime, broadcastUiEvent } = createRuntime();
+    runtime.noteAccountSwitch(ACCOUNT_B.id);
+    const report = quotaReport({ activeCredentialID: ACCOUNT_B.id });
+    await expect(runtime.decide(report)).resolves.toEqual({ action: 'retry' });
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
+    await expect(runtime.decide(report)).resolves.toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_A.id });
+  });
+
+  it('announces a later failover to an account that an extension activated earlier', async () => {
+    const { runtime, broadcastUiEvent } = createRuntime();
+    runtime.noteAccountSwitch(ACCOUNT_B.id);
+    const answer = await runtime.decide(quotaReport());
+    expect(answer).toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_B.id });
+    expect(runtime.settle(answer.ticket, true)).toBe(true);
+    expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
+  });
+
   it('switches once when two sessions report the same account together', async () => {
     const { runtime, broadcastUiEvent } = createRuntime();
     const [first, second] = await Promise.all([
@@ -243,36 +262,125 @@ describe('limit failover decisions', () => {
 });
 
 describe('limit failover route', () => {
-  const createApp = () => {
-    const { runtime } = createRuntime();
+  const createApp = (options) => {
+    const { runtime, broadcastUiEvent } = createRuntime(options);
     const app = express();
     runtime.registerRoutes(app, express);
-    return app;
+    return { app, broadcastUiEvent };
   };
 
   it('refuses a caller without the managed child token', async () => {
-    await request(createApp()).post('/api/openchamber/limit-failover').send(quotaReport()).expect(401);
+    await request(createApp().app).post('/api/openchamber/limit-failover').send(quotaReport()).expect(401);
   });
 
   it('refuses a malformed report', async () => {
-    await request(createApp())
+    await request(createApp().app)
       .post('/api/openchamber/limit-failover')
       .set('authorization', 'Bearer token')
       .send({ sessionID: 'ses_1' })
       .expect(400);
   });
 
-  it('answers a valid report', async () => {
-    const response = await request(createApp())
+  it('switches the account before asking the plugin to retry', async () => {
+    let active = ACCOUNT_A.id;
+    const { app, broadcastUiEvent } = createApp({ activateCredential: async (id, expected) => {
+      if (active !== expected) return 'stale';
+      active = id;
+      return 'activated';
+    } });
+    const response = await request(app)
+      .post('/api/openchamber/limit-failover')
+      .set('authorization', 'Bearer token')
+      .send(quotaReport({ hostAccountSwitch: true }))
+      .expect(200);
+    expect(response.body).toEqual({ action: 'retry' });
+    expect(active).toBe(ACCOUNT_B.id);
+    expect(broadcastUiEvent).toHaveBeenCalledWith(expect.objectContaining({ properties: expect.objectContaining({ kind: 'account', toAccount: ACCOUNT_B.label }) }));
+  });
+
+  it('does not announce or retry a failed account switch', async () => {
+    const { app, broadcastUiEvent } = createApp({ activateCredential: async () => { throw new Error('OpenCode offline'); } });
+    const response = await request(app)
+      .post('/api/openchamber/limit-failover')
+      .set('authorization', 'Bearer token')
+      .send(quotaReport({ hostAccountSwitch: true }))
+      .expect(200);
+    expect(response.body).toEqual({ action: 'none' });
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
+  });
+
+  it('cancels a managed activation when the reporting plugin disconnects', async () => {
+    const entered = Promise.withResolvers();
+    const cancelled = Promise.withResolvers();
+    const succeeding = Promise.withResolvers();
+    let enteredDone = false;
+    const { app, broadcastUiEvent } = createApp({ activateCredential: async (_id, _expected, signal) => {
+      if (enteredDone) {
+        await succeeding.promise;
+        return 'activated';
+      }
+      enteredDone = true;
+      entered.resolve();
+      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+      cancelled.resolve();
+      return 'missing';
+    } });
+    const server = app.listen(0, '127.0.0.1');
+    const controller = new AbortController();
+    try {
+      await new Promise((resolve) => server.once('listening', resolve));
+      const response = fetch(`http://127.0.0.1:${server.address().port}/api/openchamber/limit-failover`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+        body: JSON.stringify(quotaReport({ hostAccountSwitch: true })),
+        signal: controller.signal,
+      }).catch((error) => error);
+      await entered.promise;
+      const surviving = request(server).post('/api/openchamber/limit-failover')
+        .set('authorization', 'Bearer token')
+        .send(quotaReport({ sessionID: 'surviving-session', hostAccountSwitch: true }))
+        .then((result) => result);
+      controller.abort();
+      expect((await response).name).toBe('AbortError');
+      await cancelled.promise;
+      expect(broadcastUiEvent).not.toHaveBeenCalled();
+      succeeding.resolve();
+      expect((await surviving).body).toEqual({ action: 'retry' });
+      expect(broadcastUiEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        properties: expect.objectContaining({ sessionId: 'surviving-session', toAccount: ACCOUNT_B.label }),
+      }));
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('retries without a switch announcement when a newer account is already active', async () => {
+    const { app, broadcastUiEvent } = createApp({ activateCredential: async () => 'stale' });
+    const response = await request(app)
+      .post('/api/openchamber/limit-failover')
+      .set('authorization', 'Bearer token')
+      .send(quotaReport({ hostAccountSwitch: true }))
+      .expect(200);
+    expect(response.body).toEqual({ action: 'retry' });
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
+  });
+
+  it('leaves an external bridge switch to the OpenCode process that reported it', async () => {
+    const activateCredential = vi.fn(async () => 'activated');
+    const { app, broadcastUiEvent } = createApp({ activateCredential });
+    const response = await request(app)
       .post('/api/openchamber/limit-failover')
       .set('authorization', 'Bearer token')
       .send(quotaReport())
       .expect(200);
     expect(response.body).toMatchObject({ action: 'activate-credential', credentialID: ACCOUNT_B.id });
+    expect(activateCredential).not.toHaveBeenCalled();
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
   });
 
   it('settles a ticket only for the managed child, once', async () => {
-    const app = createApp();
+    const { app } = createApp({ settings: { fallbackModel: 'openai/gpt-5.6' } });
     const decided = await request(app)
       .post('/api/openchamber/limit-failover')
       .set('authorization', 'Bearer token')
@@ -293,7 +401,7 @@ describe('limit failover plugin', () => {
   const loadPlugin = async () => {
     const instanceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-limit-failover-'));
     temporaryDirectories.push(instanceDir);
-    const runtime = createLimitFailoverRuntime({ fsPromises: fs, path, instanceDir, readSettings: async () => ({}), authorizeRequest: () => true });
+    const runtime = createLimitFailoverRuntime({ fsPromises: fs, path, instanceDir, readSettings: async () => ({}), authorizeRequest: () => true, withManagedAccounts: (_signal, run) => run(async () => 'activated') });
     const directory = await runtime.materializePlugin();
     const manifest = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'));
     expect(manifest.exports['.']).toBe('./index.js');
@@ -318,7 +426,6 @@ describe('limit failover plugin', () => {
           })),
           connection: { active: vi.fn(async () => ({ type: 'credential', ...ACCOUNT_A })) },
         },
-        credential: { activate: vi.fn(async () => undefined) },
       },
     };
   };
@@ -347,12 +454,12 @@ describe('limit failover plugin', () => {
     }
   };
 
-  it('reports the failure with the stored accounts and activates the account the server names', async () => {
+  it('reports the failure with the stored accounts and retries when the host switched accounts', async () => {
     const plugin = await loadPlugin();
     const { ctx, hooks } = createContext();
     await plugin.setup(ctx);
     await withCallbackEnv(async () => {
-      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ action: 'activate-credential', credentialID: ACCOUNT_B.id, ticket: 't1' })));
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ action: 'retry' })));
       vi.stubGlobal('fetch', fetchMock);
       const event = retryEvent();
       await hooks.retry(event);
@@ -368,27 +475,10 @@ describe('limit failover plugin', () => {
         proposed: { retry: false },
         credentials: [ACCOUNT_A, ACCOUNT_B],
         activeCredentialID: ACCOUNT_A.id,
+        hostAccountSwitch: true,
       });
-      expect(ctx.credential.activate).toHaveBeenCalledWith({ credentialID: ACCOUNT_B.id });
       expect(event.decision).toEqual({ retry: true, delay: 0 });
-      const [settleUrl, settleInit] = fetchMock.mock.calls[1];
-      expect(settleUrl).toBe('http://127.0.0.1:4100/api/openchamber/limit-failover/settle');
-      expect(JSON.parse(settleInit.body)).toEqual({ ticket: 't1', applied: true });
-    });
-  });
-
-  it('reports a switch that failed and keeps OpenCode\'s decision', async () => {
-    const plugin = await loadPlugin();
-    const { ctx, hooks } = createContext();
-    ctx.credential.activate.mockRejectedValueOnce(new Error('credential removed'));
-    await plugin.setup(ctx);
-    await withCallbackEnv(async () => {
-      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ action: 'activate-credential', credentialID: ACCOUNT_B.id, ticket: 't2' })));
-      vi.stubGlobal('fetch', fetchMock);
-      const event = retryEvent();
-      await hooks.retry(event);
-      expect(event.decision).toEqual({ retry: false });
-      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ ticket: 't2', applied: false });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -429,7 +519,6 @@ describe('limit failover plugin', () => {
       const failed = retryEvent();
       await hooks.retry(failed);
       expect(failed.decision).toEqual({ retry: false });
-      expect(ctx.credential.activate).not.toHaveBeenCalled();
     });
   });
 });

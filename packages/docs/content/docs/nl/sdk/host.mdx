@@ -306,6 +306,14 @@ Een doel opnieuw instellen vervangt de markering, en `null` verwijdert haar. Een
 
 Een markering leeft zo lang als uw serviceproces. Declareer daarom `service.keepRunning` en zet de markeringen opnieuw wanneer de service start. Een service houdt maximaal 200 markeringen vast en wijzigt ze maximaal 60 keer per minuut. Markeringen vereisen een OpenChamber-versie die nieuwer is dan 2.7.0: een oudere negeert de sleutel en weigert de aanroep.
 
+## Provideraccounts
+
+Declareer `contributes.providerAccounts: true` naast `contributes.service`. De gebruiker keurt dit als afzonderlijke toestemming goed. In de bedrijfsmodus geldt ook het extensiebeleid van de beheerder.
+
+`host.providerAccounts.list()` geeft `{ id, name, accounts }` terug voor elke gekoppelde modelprovider met opgeslagen accounts. Elk account bevat `{ id, label, plan, active }`. `plan` is `null` als OpenCode geen abonnementsnaam heeft opgeslagen. De service krijgt geen sleutels of tokens en heeft de rol `opencode` niet nodig.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` wijzigt het actieve account voor de hele OpenCode-instantie en geeft `{ status, provider }` terug. `activated` bevestigt dat het gekozen account actief is. Als de optionele `expectedActiveAccountId` niet meer overeenkomt, geeft `stale` de huidige status van de provider terug zonder van account te wisselen. Vernieuw de accountkeuzes voordat u de gebruiker vraagt het opnieuw te proberen. Mislukt de oproep met `PROVIDER_ACCOUNTS_UNAVAILABLE`, vraag de accounts dan opnieuw op voordat u het nog eens probeert: OpenCode kan de wissel al hebben toegepast.
+
 ## Rijen in het @-menu
 
 `contributes.mentions: { label }` voegt een sectie toe aan het `@`-menu van het chatveld. Uw service beantwoordt `POST /mentions/search` binnen 2 seconden met `{ items: [{ id, title, subtitle?, url? }] }` en `POST /mentions/resolve` met `{ text }` voor de rij die de gebruiker kiest. De tekst gaat met het bericht naar de agent, en de gebruiker ziet een chip. Een trage service voegt geen rijen toe en houdt de bestanden nooit op; een rij die niet gelezen kan worden, laat geen chip achter en meldt dat.

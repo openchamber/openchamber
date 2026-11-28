@@ -20,10 +20,14 @@ export type LimitFailoverAnnouncement = {
   toModelId: string;
 };
 
-export type LimitFailoverDecision =
+type AccountAnnouncement = Extract<LimitFailoverAnnouncement, { kind: 'account' }>;
+type ActivateCredential = (credentialID: string, expectedActiveCredentialID: string | undefined) => Promise<'activated' | 'stale' | 'missing'>;
+
+type LimitFailoverDecision =
   | { action: 'none' }
   | { action: 'retry' }
   | { action: 'activate-credential'; credentialID: string; ticket?: string }
+  | { action: 'activate-managed-credential'; credentialID: string; announcement: AccountAnnouncement }
   | { action: 'switch-model'; model: FailoverModel; ticket: string };
 
 export interface LimitFailoverDependencies {
@@ -32,6 +36,7 @@ export interface LimitFailoverDependencies {
   instanceDir: string;
   readSettings: () => Promise<StoredFailoverSettings | null>;
   authorizeRequest: (req: Request) => boolean;
+  withManagedAccounts: <Result>(signal: AbortSignal, run: (activate: ActivateCredential) => Promise<Result>) => Promise<Result>;
   broadcastUiEvent?: (event: { type: 'openchamber:limit-failover'; properties: LimitFailoverAnnouncement }) => void;
   now?: () => number;
 }
@@ -44,9 +49,14 @@ export interface StoredFailoverSettings {
 
 const isStoredModelSelection = (value: unknown): value is string => typeof value === 'string';
 
+interface SwitchWindow {
+  startedAt: number;
+  retriedSessions: Set<string>;
+  fromFailover: boolean;
+}
+
 interface SwitchTicket {
-  sessionID: string;
-  credentialID: string | null;
+  accountSwitch?: { credentialID: string; window: SwitchWindow; previous: SwitchWindow | undefined };
   announcement: LimitFailoverAnnouncement;
 }
 
@@ -83,7 +93,7 @@ const failoverAccounts = async (ctx, providerID) => {
 }
 `;
 
-export const createLimitFailoverSetupCode = ({ callbackExpr }: { callbackExpr: string }) => `    await ctx.session.hook("retry", async (event) => {
+export const createLimitFailoverSetupCode = ({ callbackExpr, hostAccountSwitch = false }: { callbackExpr: string; hostAccountSwitch?: boolean }) => `    await ctx.session.hook("retry", async (event) => {
       if (!LIMIT_ERROR_TYPES.has(event.error?.type)) return
       const target = (${callbackExpr})
       if (!target) return
@@ -102,7 +112,7 @@ export const createLimitFailoverSetupCode = ({ callbackExpr }: { callbackExpr: s
               retryAfterMs: event.error.retryAfterMs,
             },
             proposed: event.decision,
-            ...(await failoverAccounts(ctx, event.model.providerID)),
+            ...(await failoverAccounts(ctx, event.model.providerID)),${hostAccountSwitch ? '\n            hostAccountSwitch: true,' : ''}
           }),
           signal: AbortSignal.timeout(10_000),
         })
@@ -150,7 +160,7 @@ const callback = () => {
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
-${createLimitFailoverSetupCode({ callbackExpr: 'callback()' })}
+${createLimitFailoverSetupCode({ callbackExpr: 'callback()', hostAccountSwitch: true })}
   },
 }
 `;
@@ -161,14 +171,14 @@ export const createLimitFailoverRuntime = ({
   instanceDir,
   readSettings,
   authorizeRequest,
+  withManagedAccounts,
   broadcastUiEvent = () => {},
   now = Date.now,
 }: LimitFailoverDependencies) => {
   const pluginDirectory = path.join(instanceDir, 'limit-failover', PLUGIN_ID);
 
   const exhaustedUntil = new Map<string, number>();
-  const switchedAt = new Map<string, number>();
-  const settledAt = new Map<string, number>();
+  const accountSwitches = new Map<string, SwitchWindow>();
   const tickets = new Map<string, SwitchTicket & { openedAt: number }>();
 
   const openTicket = (at: number, ticket: SwitchTicket) => {
@@ -178,15 +188,18 @@ export const createLimitFailoverRuntime = ({
   };
 
   const forgetOldSettlements = (at: number) => {
-    for (const [credentialID, when] of switchedAt) {
-      if (when <= at - SWITCH_GRACE_MS) switchedAt.delete(credentialID);
-    }
-    for (const [key, when] of settledAt) {
-      if (when <= at - SWITCH_GRACE_MS) settledAt.delete(key);
+    for (const [credentialID, window] of accountSwitches) {
+      if (window.startedAt <= at - SWITCH_GRACE_MS) accountSwitches.delete(credentialID);
     }
     for (const [id, ticket] of tickets) {
       if (ticket.openedAt <= at - SWITCH_GRACE_MS) tickets.delete(id);
     }
+  };
+
+  const noteAccountSwitch = (credentialID: string, retriedSession?: string) => {
+    const at = now();
+    forgetOldSettlements(at);
+    accountSwitches.set(credentialID, { startedAt: at, retriedSessions: new Set(retriedSession ? [retriedSession] : []), fromFailover: false });
   };
 
   const materializePlugin = async () => {
@@ -221,10 +234,9 @@ export const createLimitFailoverRuntime = ({
     forgetOldSettlements(at);
     const active = report.activeCredentialID;
     if (active) {
-      const key = `${report.sessionID}:${active}`;
-      const switched = switchedAt.get(active);
-      if (switched !== undefined && !((settledAt.get(key) ?? -Infinity) >= switched)) {
-        settledAt.set(key, at);
+      const window = accountSwitches.get(active);
+      if (window && !window.retriedSessions.has(report.sessionID)) {
+        window.retriedSessions.add(report.sessionID);
         return { action: 'retry' };
       }
       exhaustedUntil.set(active, failure.resetAt);
@@ -235,19 +247,26 @@ export const createLimitFailoverRuntime = ({
     if (switchProviders.includes(report.providerID)) {
       const next = nextCredential(report, at);
       if (next) {
-        settledAt.set(`${report.sessionID}:${next.id}`, at);
-        if (switchedAt.has(next.id)) return { action: 'activate-credential', credentialID: next.id };
-        switchedAt.set(next.id, at);
+        const announcement: AccountAnnouncement = {
+          kind: 'account',
+          sessionId: report.sessionID,
+          providerId: report.providerID,
+          fromAccount: report.credentials.find((credential) => credential.id === active)?.label ?? null,
+          toAccount: next.label,
+        };
+        if (report.hostAccountSwitch) {
+          return { action: 'activate-managed-credential', credentialID: next.id, announcement };
+        }
+        const existing = accountSwitches.get(next.id);
+        if (existing?.fromFailover) {
+          existing.retriedSessions.add(report.sessionID);
+          return { action: 'activate-credential', credentialID: next.id };
+        }
+        const window = { startedAt: at, retriedSessions: new Set([report.sessionID]), fromFailover: true };
+        accountSwitches.set(next.id, window);
         const ticket = openTicket(at, {
-          sessionID: report.sessionID,
-          credentialID: next.id,
-          announcement: {
-            kind: 'account',
-            sessionId: report.sessionID,
-            providerId: report.providerID,
-            fromAccount: report.credentials.find((credential) => credential.id === active)?.label ?? null,
-            toAccount: next.label,
-          },
+          accountSwitch: { credentialID: next.id, window, previous: existing },
+          announcement,
         });
         return { action: 'activate-credential', credentialID: next.id, ticket };
       }
@@ -259,8 +278,6 @@ export const createLimitFailoverRuntime = ({
     );
     if (fallback && !(fallback.providerID === report.providerID && fallback.id === report.modelID)) {
       const ticket = openTicket(at, {
-        sessionID: report.sessionID,
-        credentialID: null,
         announcement: {
           kind: 'model',
           sessionId: report.sessionID,
@@ -281,9 +298,10 @@ export const createLimitFailoverRuntime = ({
     tickets.delete(ticketID);
     if (applied) {
       broadcastUiEvent({ type: 'openchamber:limit-failover', properties: ticket.announcement });
-    } else if (ticket.credentialID) {
-      switchedAt.delete(ticket.credentialID);
-      settledAt.delete(`${ticket.sessionID}:${ticket.credentialID}`);
+    } else if (ticket.accountSwitch && accountSwitches.get(ticket.accountSwitch.credentialID) === ticket.accountSwitch.window) {
+      const { credentialID, previous } = ticket.accountSwitch;
+      if (previous) accountSwitches.set(credentialID, previous);
+      else accountSwitches.delete(credentialID);
     }
     return true;
   };
@@ -300,7 +318,26 @@ export const createLimitFailoverRuntime = ({
       if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
       const report = reportSchema.safeParse(req.body);
       if (!report.success) return res.status(400).json({ error: 'Invalid limit report' });
-      return res.json(await decide(report.data));
+      if (report.data.hostAccountSwitch !== true) return res.json(await decide(report.data));
+      if (res.destroyed) return;
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      res.once('close', abort);
+      try {
+        const answer = await withManagedAccounts(controller.signal, async (activate) => {
+          const decision = await decide(report.data);
+          if (decision.action !== 'activate-managed-credential') return decision;
+          const outcome = await activate(decision.credentialID, report.data.activeCredentialID);
+          if (outcome === 'activated' && !controller.signal.aborted) {
+            noteAccountSwitch(decision.credentialID, report.data.sessionID);
+            broadcastUiEvent({ type: 'openchamber:limit-failover', properties: decision.announcement });
+          }
+          return { action: outcome === 'missing' ? 'none' : 'retry' };
+        }).catch(() => ({ action: 'none' }));
+        if (!res.destroyed) return res.json(answer);
+      } finally {
+        res.off('close', abort);
+      }
     });
     app.post(`${ROUTE}/settle`, express.json({ limit: '16kb' }), (req, res) => {
       if (!authorizeRequest(req)) return res.status(401).json({ error: 'Unauthorized' });
@@ -310,5 +347,5 @@ export const createLimitFailoverRuntime = ({
     });
   };
 
-  return { pluginDirectory, materializePlugin, decide, settle, registerRoutes };
+  return { pluginDirectory, materializePlugin, decide, settle, noteAccountSwitch, registerRoutes };
 };
