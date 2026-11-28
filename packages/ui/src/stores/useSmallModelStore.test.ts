@@ -66,4 +66,18 @@ describe('useSmallModelStore', () => {
     expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('available');
     expect(calls).toHaveLength(2);
   });
+
+  test('a settings sync forgets the cached answer', async () => {
+    responses = [{ status: 200, body: { available: false } }];
+    await useSmallModelStore.getState().ensureFresh('/p');
+    expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('unavailable');
+
+    responses = [{ status: 200, body: { available: true } }];
+    window.dispatchEvent(new CustomEvent('openchamber:settings-synced'));
+    expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('unknown');
+
+    await useSmallModelStore.getState().ensureFresh('/p');
+    expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('available');
+    expect(calls).toHaveLength(2);
+  });
 });

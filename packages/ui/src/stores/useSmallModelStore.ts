@@ -70,3 +70,6 @@ export const selectSmallModelAvailability = (
 
 subscribeToConfigChanges(() => useSmallModelStore.getState().invalidate());
 subscribeRuntimeEndpointChanged(() => useSmallModelStore.getState().invalidate());
+if (typeof window !== 'undefined') {
+  window.addEventListener('openchamber:settings-synced', () => useSmallModelStore.getState().invalidate());
+}
