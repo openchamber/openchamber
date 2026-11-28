@@ -70,6 +70,7 @@ import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { startZoneDragGesture, type ZoneDragGesture } from './zoneDrag';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useSubagentsSurfaceShown } from '@/components/chat/subagents/panel';
 import { useWorkflowsSurfaceShown } from '@/lib/workflows/panel';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
@@ -147,7 +148,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
               iconSrc={surface.iconSrc}
               className="h-[17px] w-[17px]"
             />
-            {showOrderNumber && orderNumber != null ? (
+            {showOrderNumber && orderNumber != null && orderNumber <= 10 ? (
               <span
                 aria-hidden="true"
                 className="absolute inset-e-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-muted px-1 text-[0.625rem] font-medium leading-none text-muted-foreground"
@@ -327,6 +328,7 @@ export const ContextPanelRail: React.FC = () => {
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const workflowsShown = useWorkflowsSurfaceShown(tabs, effectiveDirectory || null);
   const receivedPagesShown = hasReceivedPages(useReceivedPages());
+  const subagentsShown = useSubagentsSurfaceShown();
   const shownModes = React.useMemo(
     () => shownContextModes(panelState, contextSurfaceZones),
     [contextSurfaceZones, panelState],
@@ -343,9 +345,10 @@ export const ContextPanelRail: React.FC = () => {
       sourceControlConnected,
       workflowsShown,
       receivedPagesShown,
+      subagentsShown,
       extras: guestSurfaces,
     }).map((surface) => (surface.id === 'pr' ? { ...surface, ...trackerRailIcon(repositoryProvider === 'none' ? null : trackerDescriptor) } : surface));
-  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, receivedPagesShown, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, receivedPagesShown, repositoryProvider, screenWidth, sourceControlConnected, subagentsShown, tabs, trackerDescriptor, workflowsShown]);
 
   const hasTrackerItems = tabs.some((tab) => tab.mode === 'pr' && tab.targetPath);
   React.useEffect(() => {

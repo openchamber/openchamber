@@ -205,6 +205,7 @@ type VisibleRailSurfacesOptions = {
   sourceControlConnected: boolean;
   workflowsShown: boolean;
   receivedPagesShown?: boolean;
+  subagentsShown?: boolean;
   extras?: readonly ContextSurfaceDescriptor[];
 };
 
@@ -231,6 +232,10 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     }
     if (surface.id === 'pages' && options.receivedPagesShown) {
       return true;
+    }
+    if (surface.id === 'subagents') {
+      if (options.isVSCode) return false;
+      if (options.subagentsShown) return true;
     }
     if (surface.availability === 'has-content') {
       return options.tabs.some((tab) => tab.mode === surface.mode);

@@ -39,7 +39,9 @@ import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { isSubagentsSurfaceShown } from '@/components/chat/subagents/panel';
 import { isWorkflowsSurfaceShown } from '@/lib/workflows/panel';
+import { useSyncRuntime } from '@/sync/sync-context';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
@@ -80,6 +82,7 @@ function hasOverlayOpen(): boolean {
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const { childStores } = useSyncRuntime();
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const effectiveDirectory = useEffectiveDirectory();
   const activeProject = useProjectsStore((s) => s.getActiveProject());
@@ -509,6 +512,7 @@ export const useKeyboardShortcuts = () => {
             sourceControlConnected: Object.values(useSourceControlAuthStore.getState().entries).some((entry) => entry.status?.status === 'connected'),
             workflowsShown: isWorkflowsSurfaceShown(panel?.tabs ?? [], effectiveDirectory),
             receivedPagesShown: hasReceivedPages(useReceivedPagesStore.getState()),
+            subagentsShown: isSubagentsSurfaceShown(childStores),
             extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];
@@ -622,5 +626,5 @@ export const useKeyboardShortcuts = () => {
       window.removeEventListener('keydown', handleAbortEscapeKeyDown);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [currentSessionId, dispatcher, effectiveDirectory, handleAbortEscapeKeyDown, inputRedirect, resetAbortPriming, selectionToolbarDispatcher, sessionPhase]);
+  }, [childStores, currentSessionId, dispatcher, effectiveDirectory, handleAbortEscapeKeyDown, inputRedirect, resetAbortPriming, selectionToolbarDispatcher, sessionPhase]);
 };

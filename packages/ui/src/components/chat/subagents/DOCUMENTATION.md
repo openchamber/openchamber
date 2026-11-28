@@ -26,10 +26,12 @@ tab the child's own folder.
 
 ## Invariants
 
-- The surface is `has-content`: its rail icon shows while a Subagents tab is
-  open, and the tab opens from the work-status section's heading. The rail and
-  the digit shortcuts then count it the same way without a second, imperative
-  count of subagents for the shortcut.
+- The surface is `has-content` with a live presence check (`useSubagentsSurfaceShown`
+  and `isSubagentsSurfaceShown` in `panel.ts`): its rail icon shows whenever the
+  current session has non-workflow subagents or a Subagents tab is already open,
+  unless the user hid it in Rail panels, and never on VS Code. Both the rail and
+  the digit shortcuts read the same presence check from the global child index
+  and live directory stores.
 - A subagent with a permission request or a question starts open, with the
   request cards above its tile, so the answer takes one click. The user's
   toggle flips that default per subagent.
