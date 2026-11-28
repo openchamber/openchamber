@@ -539,7 +539,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
       changedFiles={changedFiles}
       selectedFile={resolvedWideFilePath}
       onSelectFile={setSelectedFilePath}
-      reviewedPaths={reviewedPaths}
+      reviewedPaths={reviewedPaths} onToggleReviewed={toggleReviewed}
     />
   );
 

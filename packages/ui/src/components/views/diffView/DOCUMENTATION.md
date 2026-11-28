@@ -73,6 +73,16 @@ remain in their existing neighbouring modules.
   Walkthrough, start collapsed when a scope initializes, collapse when marked
   reviewed, and auto-unreview and expand when status/revision/patch metadata or
   targeted working-tree git refresh hints indicate the file changed.
+- A file row's reviewed toggle runs the same reviewed action as the file header
+  and never selects the file or a folder: it is a sibling of the row button,
+  lies over the reviewed mark's slot so a row never shows two checks, is
+  revealed on a mouse hover or `:focus-visible`, stays visible and clickable
+  where nothing can hover, and lets clicks reach the row while hidden. The
+  reviewed state stays in the row button's accessible name through the slot's
+  hidden "Reviewed" text. A mark made from the list records the file's status
+  and line counts only; the file header's mark also records the patch hash when
+  it has the patch, so an edit that keeps both auto-unreviews the header's mark
+  but not the list's.
 - State and refs belong to the retained view instance. Passing them between
   hooks preserves their identities, cache scope and hidden-view lifecycle.
 - An entry keeps its own loading, context expansion and hunk-mutation state.
@@ -81,6 +91,25 @@ remain in their existing neighbouring modules.
   sticky headers, header-slot placement and review provider keep their hierarchy.
 
 ## Decisions
+
+### Why the row's reviewed toggle lies over the reviewed mark
+
+A button cannot hold another button, so the toggle is a sibling of the row
+button and shares the row's last slot with the reviewed mark: the tree ends its
+sticky end lane with that slot (24px wide, 36px on a coarse pointer) and
+overlays it with a sticky lane, and the flat list makes it the row button's last
+flex child at the same sizes with 4px of end padding, overlaying it with an
+absolutely positioned lane. One slot means a row never shows two checks and
+nothing moves between states, and the avatars and the status letter stay inside
+the button so they still open the file. Both lanes are transparent to clicks
+while hidden, so a row tapped without a hover opens the file; the reveal follows
+a mouse-only pointer marker rather than `:hover`, because a tap on a device
+whose primary pointer can hover sets `:hover` before its click and the click
+then landed on the revealed toggle. The marker clears only when the mouse
+leaves the row, so a tap on a visible toggle marks the file, while a tap on a
+hidden one opens the row. `pointer-coarse` and `hover: none` widen the slot and
+the toggle's box in the flow for the touch target, while the button replaces
+the mark.
 
 ### Why content and file rendering stay in the view
 

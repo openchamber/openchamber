@@ -379,7 +379,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 {isTreeMode && (
                     <>
                         <section className="flex max-w-[50%] flex-shrink-0 flex-col" style={{ width: `${fileTreeWidth}px` }}>
-                            <FileTree changedFiles={changedFiles} selectedFile={treeSelectedFile?.path ?? null} onSelectFile={handleSelectFileAndScroll} reviewedPaths={reviewedPaths} />
+                            <FileTree changedFiles={changedFiles} selectedFile={treeSelectedFile?.path ?? null} onSelectFile={handleSelectFileAndScroll} reviewedPaths={reviewedPaths} onToggleReviewed={toggleReviewed} />
                         </section>
                         <div
                             role="separator"
@@ -410,7 +410,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                     : changedFiles.length}
                             </span>
                         </div>
-                        <FileList changedFiles={changedFiles} selectedFile={null} onSelectFile={handleSelectFileAndScroll} reviewedPaths={reviewedPaths} />
+                        <FileList changedFiles={changedFiles} selectedFile={null} onSelectFile={handleSelectFileAndScroll} reviewedPaths={reviewedPaths} onToggleReviewed={toggleReviewed} />
                     </section>
                 )}
                 <div className="relative flex-1 min-w-0 min-h-0 h-full">
