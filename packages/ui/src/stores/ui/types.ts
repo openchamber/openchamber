@@ -40,6 +40,8 @@ export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-doubl
 
 export type DocumentAttachBehavior = 'ask' | 'save' | 'convert';
 
+export type ImageExportTarget = 'file' | 'clipboard' | 'both';
+
 export type ChatWidth = 'default' | 'wider' | 'full';
 
 export type SessionGoalChecker = 'classifier' | 'small-model';
@@ -334,6 +336,7 @@ export interface UIStore {
   codeBlockLineWrap: boolean;
   tableCellWrap: boolean;
   copyMessagesAsPlainText: boolean;
+  imageExportTarget: ImageExportTarget;
   selectionApprovalText: string;
   showToolFileIcons: boolean;
   showLiveActivityPreview: boolean;
@@ -615,6 +618,7 @@ export interface UIStore {
   setCodeBlockLineWrap: (value: boolean) => void;
   setTableCellWrap: (value: boolean) => void;
   setCopyMessagesAsPlainText: (value: boolean) => void;
+  setImageExportTarget: (value: ImageExportTarget) => void;
   setSelectionApprovalText: (value: string) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowLiveActivityPreview: (value: boolean) => void;

@@ -32,6 +32,7 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.code-block-line-wrap', 'messages'],
   ['chat.table-cell-wrap', 'messages'],
   ['chat.copy-plain-text', 'messages'],
+  ['chat.image-export', 'messages'],
   ['chat.message-search', 'messages'],
   ['chat.message-search-enabled', 'messages'],
   ['chat.message-search-reasoning', 'messages'],

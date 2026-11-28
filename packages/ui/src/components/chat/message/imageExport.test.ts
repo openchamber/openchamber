@@ -2,7 +2,8 @@ import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { getDefaultTheme } from '@/lib/theme/themes';
 
-import { buildTurnImageExportSource, cloneMessageImageExportSource, collapseMessageImageExportTables, fitMessageImageExportLayout, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth, widenMessageImageExportOverflow } from './imageExport';
+import { buildTurnImageExportSource, cloneMessageImageExportSource, collapseMessageImageExportTables, fitMessageImageExportLayout, imageDeliveryPlan, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth, widenMessageImageExportOverflow } from './imageExport';
+import { imageDeliveryToast, resolveImageExportTarget } from './imageExportTarget';
 
 const browser = new Window({ url: 'http://localhost/' });
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
@@ -339,5 +340,35 @@ describe('turn image export', () => {
         expect(plain).not.toContain('```');
         expect(plain).not.toContain('/api/');
         expect(Boolean(root.querySelector('img, video, source, [data-export-ignore]'))).toBe(false);
+    });
+});
+
+describe('image delivery destination', () => {
+    test('the choice names both destinations', () => {
+        expect(imageDeliveryPlan('file')).toEqual({ save: true, copy: false });
+        expect(imageDeliveryPlan('clipboard')).toEqual({ save: false, copy: true });
+        expect(imageDeliveryPlan('both')).toEqual({ save: true, copy: true });
+    });
+
+    test('a canceled save says nothing and a toast never claims a copy that failed', () => {
+        expect(imageDeliveryToast({ saved: false, copied: false, canceled: true, copyFailed: false })).toBeNull();
+        expect(imageDeliveryToast({ saved: true, copied: false, canceled: false, copyFailed: false }))
+            .toEqual({ key: 'chat.messageBody.toast.imageSaved', tone: 'success' });
+        expect(imageDeliveryToast({ saved: false, copied: true, canceled: false, copyFailed: false }))
+            .toEqual({ key: 'chat.messageBody.toast.imageCopied', tone: 'success' });
+        expect(imageDeliveryToast({ saved: true, copied: true, canceled: false, copyFailed: false }))
+            .toEqual({ key: 'chat.messageBody.toast.imageSavedAndCopied', tone: 'success' });
+        expect(imageDeliveryToast({ saved: true, copied: false, canceled: false, copyFailed: true }))
+            .toEqual({ key: 'chat.messageBody.toast.imageSavedCopyFailed', tone: 'warning' });
+        expect(imageDeliveryToast({ saved: false, copied: false, canceled: false, copyFailed: true }))
+            .toEqual({ key: 'chat.messageBody.toast.imageCopyFailed', tone: 'error' });
+    });
+
+    test('a runtime without an image clipboard keeps saving the file', () => {
+        expect(resolveImageExportTarget('clipboard', false)).toBe('file');
+        expect(resolveImageExportTarget('both', false)).toBe('file');
+        expect(resolveImageExportTarget('file', false)).toBe('file');
+        expect(resolveImageExportTarget('clipboard', true)).toBe('clipboard');
+        expect(resolveImageExportTarget('both', true)).toBe('both');
     });
 });

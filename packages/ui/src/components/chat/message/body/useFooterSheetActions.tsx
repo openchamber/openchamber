@@ -3,6 +3,7 @@ import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { imageExportActionKey, useImageExportTarget } from '../imageExportTarget';
 
 export type FooterSheetAction = { id: string; label: string; icon: React.ReactNode; disabled?: boolean; onPointerRow?: true; onSelect: () => void };
 
@@ -56,6 +57,7 @@ export const useFooterSheetActions = ({
     stopFooterTTS,
 }: FooterSheetActionsParams) => {
     const { t } = useI18n();
+    const imageExportTarget = useImageExportTarget();
     return React.useMemo(() => {
         const actions: FooterSheetAction[] = [];
         if (onCopyFooter) {
@@ -93,8 +95,8 @@ export const useFooterSheetActions = ({
         if (!isMiniChatSurface) {
             actions.push({
                 id: 'share-image',
-                label: t('chat.messageBody.actions.saveAsImage'),
-                icon: <Icon name="image-download" className="h-3.5 w-3.5" />,
+                label: t(imageExportActionKey(imageExportTarget)),
+                icon: <Icon name={imageExportTarget === 'clipboard' ? 'file-copy' : 'image-download'} className="h-3.5 w-3.5" />,
                 disabled: !hasCopyableText,
                 onSelect: () => { void shareTurnAsImage(); },
             });
@@ -163,5 +165,5 @@ export const useFooterSheetActions = ({
             }
         }
         return actions;
-    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onSelectMessages, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
+    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, imageExportTarget, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onSelectMessages, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 };

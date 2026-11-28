@@ -220,6 +220,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'codeBlockLineWrap'
   | 'tableCellWrap'
   | 'copyMessagesAsPlainText'
+  | 'imageExportTarget'
   | 'selectionApprovalText'
   | 'showToolFileIcons'
   | 'showLiveActivityPreview'
@@ -460,6 +461,7 @@ export const createInitialUIState = (): Pick<UIStore,
   codeBlockLineWrap: true,
   tableCellWrap: true,
   copyMessagesAsPlainText: true,
+  imageExportTarget: 'file',
   selectionApprovalText: '',
   showToolFileIcons: true,
   showLiveActivityPreview: true,

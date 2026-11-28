@@ -74,6 +74,7 @@ export const createPreferenceActions: UIStoreSlice<
   | 'setTableCellWrap'
   | 'setSelectionApprovalText'
   | 'setCopyMessagesAsPlainText'
+  | 'setImageExportTarget'
   | 'setShowToolFileIcons'
   | 'setShowLiveActivityPreview'
   | 'setShowTurnChangedFiles'
@@ -386,6 +387,10 @@ export const createPreferenceActions: UIStoreSlice<
 
   setCopyMessagesAsPlainText: (value) => {
     set({ copyMessagesAsPlainText: value });
+  },
+
+  setImageExportTarget: (value) => {
+    set({ imageExportTarget: value });
   },
 
   setShowToolFileIcons: (value) => {

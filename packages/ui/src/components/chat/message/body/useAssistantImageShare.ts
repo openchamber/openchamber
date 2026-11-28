@@ -7,6 +7,7 @@ import { assistantTextSegments } from '@/lib/messages/messageText';
 import type { Part } from '@/lib/opencode/model';
 import type { TurnGroupingContext } from '../../lib/turns/types';
 import { buildTurnImageExportSource, resolveMessageImageExportWidth, saveMessageImageExport } from '../imageExport';
+import { imageDeliveryToast, useImageExportTarget } from '../imageExportTarget';
 import { MessageSliceContext } from '../messageSliceContext';
 
 export const useAssistantImageShare = ({
@@ -25,25 +26,28 @@ export const useAssistantImageShare = ({
     const { t } = useI18n();
     const theme = useOptionalThemeSystem()?.currentTheme;
     const vscodeApi = useRuntimeAPIs().vscode;
+    const imageExportTarget = useImageExportTarget();
     const slice = React.useContext(MessageSliceContext);
     const shareMessageAsImage = React.useCallback(
         async (requestedSourceElement?: HTMLElement | null) => {
             const sourceElement = requestedSourceElement ?? messageTextContentRef.current ?? messageContentRef.current;
             if (!sourceElement) return;
             try {
-                const result = await saveMessageImageExport({
+                const delivery = await saveMessageImageExport({
                     source: sourceElement,
                     width: resolveMessageImageExportWidth(messageContentRef.current ?? sourceElement),
                     fileName: `message-${messageId}.png`,
                     vscode: vscodeApi,
+                    target: imageExportTarget,
                 });
-                if (result === 'saved') toast.success(t('chat.messageBody.toast.imageSaved'));
+                const outcome = imageDeliveryToast(delivery);
+                if (outcome) toast[outcome.tone](t(outcome.key));
             } catch (error) {
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
             }
         },
-        [messageContentRef, messageId, messageTextContentRef, t, vscodeApi]
+        [imageExportTarget, messageContentRef, messageId, messageTextContentRef, t, vscodeApi]
     );
 
     const shareTextAsImage = React.useCallback(

@@ -22,7 +22,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 - `ToolPart.tsx`
   - The entry of expandable tool rows (shell/edit/write/question/subagent + fallback). It only composes: it picks the row for the call (`BackgroundShellToolPartContent`, `SubagentToolPartContent`, `ShellToolPartContent` or `ToolPartContent`) and wraps it in `ToolPartErrorBoundary`.
-  - The pieces live in `toolRow/`: `ToolPartContent.tsx` is the row (header title/description/diff stats/timer, with `useToolRowTiming` and `useToolRowOpenActions`), `ToolExpandedContent.tsx` is the expanded body, `toolDescriptions.ts` builds the row's text, and the output views (`ToolScrollableTextOutput`, `JsonToolOutput`, `CommandOutput`, `DiffPreview`, ...) are one file each.
+  - The pieces live in `toolRow/`: `ToolPartContent.tsx` is the row (header title/description/diff stats/timer, with `useToolRowTiming` and `useToolRowOpenActions`), `ToolExpandedContent.tsx` is the expanded body, `toolDescriptions.ts` builds the row's text, `shellCommand.ts` splits a shell command into the directory it changes into, the program, the arguments and the trailing path its row shows apart, and the output views (`ToolScrollableTextOutput`, `JsonToolOutput`, `CommandOutput`, `DiffPreview`, ...) are one file each.
   - If you want to change expandable tool layout, edit in `toolRow/`.
   - A question call's expanded body reads the answers the tool recorded in its result metadata (`answers`, one entry per asked question) before the reply text, and the text parse stays the fallback for a call that carries none. The tool writes each answer between quotes without escaping a quote the reader typed, so the reply alone cannot say where an answer ends. Older calls without that metadata keep the previous best-effort text parse unchanged: an answer holding a quote, or a quote followed by a comma, can still split or merge there. An answer the reader left blank shows as `chat.htmlRender.unanswered`, which the component must pass into `questionAnswersForCall`, so the pure module keeps no i18n hook and no English default; the fallback parse never relabels what the tool stored.
   - A subagent call is an ordinary tool row, rendered through `SubagentToolPartContent`: shine and a live duration while it runs, the final duration (red on failure) once settled, and an open action that shows the child session. Expanded, it shows the prompt and the result. The row never reads the child session's messages; the child's own chat is where its work is shown.
@@ -79,12 +79,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
     shows or hides the folded content at once; `components/liveActivityContext.ts` scopes the final message's non-text
     disclosure without changing message context or tool rendering.
   - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
-  - `lib/turns/liveActivitySummary.ts` derives the changed files and line counts
-    from tool results. The fold's header says what the turn did the way a group
-    line in Grouped does (`ActivityDescriptionText` in
-    `components/ActivityGroupLine.tsx`), counted over every call of the turn,
-    the answer's own included, except notices and the pages hoisted to the
-    answer, also while it runs.
+  - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
 
 - `ShownToolCard.tsx`
   - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), the images a completed `image.generate` call saved (`generatedImagePaths`, drawn by `GeneratedImages.tsx` through the chat's Markdown media, so they load lazily and open in the gallery; each has a download above it that saves the file itself at full size through the same grant, with `saveFile.ts`, which a shown page's download uses too), the card of an `openchamber_secret` call (`requestedSecret`), else the page of an `openchamber_render` call. The user is meant to see all of them, so they are hoisted to the answer with the turn's pages when Activity is collapsed. A form or secret card that asked the user is hoisted only while it waits: once answered, answered in the chat instead, or stopped, it is a step like the question tool's card and folds with Activity (`getShownPages`). It was hoisted for good before, which left every answered form at full height above the reply. A settled form right after text a collapsed Activity keeps in view stays out of the fold as one line saying how it was answered (`SettledAskLine`): with the form folded away, that text and the reply read as one passage with the question gone from between them.
@@ -284,6 +279,25 @@ whole image there. A dismissed save dialog or share sheet resolves as
 `canceled`: the caller shows nothing and keeps its state, where it used to
 report a failed image. The VS Code bridge waits on its file dialogs without a
 timeout, since the user can take longer than a request normally may.
+
+### Why the destination is one setting and not two menu items
+
+`imageExportTarget` (`file` / `clipboard` / `both`, profile scope) decides
+where the PNG goes, and the action's labels follow it: "Save as image", "Copy
+as image", "Save and copy image". A second menu item beside the first would
+put the same choice in front of the user on every message, and where a saved
+image goes is a habit rather than a per-message decision. The copy runs first,
+while the click is still the user's gesture, and the file second: a browser can
+drop a `clipboard.write` that arrives after a long await, and drawing the export
+already takes hundreds of milliseconds. A `both` run that loses the copy still
+saves the file and says so (`imageSavedCopyFailed`).
+
+Where a runtime cannot put an image on the clipboard, the destination stays
+`file` whatever the setting says, the action keeps its old label, and the
+setting itself is not offered (`canCopyImageToClipboard`): the Capacitor app has
+no image clipboard plugin, and a page outside a secure context has no
+`clipboard.write`. The stored value is left untouched, so a device that can copy
+picks it up again.
 
 ### Why image exports keep prose at the visible column width
 
@@ -748,6 +762,37 @@ read a second. A collapsed row shows no output, so it reads nothing; foreground
 and background rows follow the same rule through `useShellOutput`. Reading the
 whole output on every progress update is not an option: OpenCode sends one
 update, with the `shellID`, when the command starts.
+
+### Why a shell row shows its command as the row's content
+
+A shell row printed its name, its duration, then the whole command, so the
+command began at a different x on every row, and a `cd … &&` prefix spent width
+the command needed before the part that tells two calls apart appeared at all.
+The directory it changes into is now a chip of its last two steps, marked `…/`
+whenever steps were dropped or the path is absolute on another top-level, so a
+chip never looks like a path relative to the session when it is not; the program
+and the trailing file name keep full contrast with the arguments slightly dimmed
+between them. The arguments give up their width first; the tail shows as
+`…/name` because the file name is what distinguishes two calls, and the full
+path stays in the row's tooltip. The tail
+keeps its own width up to 80% of the command area and does not shrink below it,
+because a tail one glyph short of its width ellipsized the file name's last
+letters on a wide row; below that cap it truncates inside the name. The row
+degrades in steps as its command area narrows: below 470px the chip is left out,
+below 420px the tail is, so the arguments keep one ellipsis at the end instead of
+a program cut to `bun te…` beside a half file name. A directory the shell would
+resolve itself (`$HOME`, `cd -`) stays in the command text. The duration stays
+next to the tool name where every other row keeps it, in a fixed slot so the
+command starts at the same x.
+
+### What colors a shell row
+
+The program takes the theme's `--syntax-function`, the token the same command
+carries in a fenced code block, quoted values `--syntax-string`
+and shell operators `--syntax-operator`; anything else in the arguments stays at
+the row's own text tone. `tokenizeShellArgs` splits on whitespace with quoting and
+escapes honored, keeps each run of spaces on the token before it, and never drops
+a character, so a highlighted row still reads as the command the shell saw.
 
 ### Why a write row prefers a reported diff to its input preview
 
