@@ -282,6 +282,14 @@ Definir um destino de novo substitui a marca dele, e `null` a remove. Uma linha 
 
 Uma marca vive enquanto o processo do seu serviço viver, então declare `service.keepRunning` e defina as marcas de novo quando o serviço iniciar. Um serviço mantém até 200 marcas e as altera até 60 vezes por minuto. As marcas precisam de uma versão do OpenChamber mais nova que a 2.7.0: uma mais antiga ignora a chave e recusa a chamada.
 
+## Contas de provedores
+
+Declare `contributes.providerAccounts: true` ao lado de `contributes.service`. O usuário aprova essa permissão separadamente. No modo empresarial, a política de extensões do administrador também se aplica.
+
+`host.providerAccounts.list()` retorna `{ id, name, accounts }` para cada provedor de modelos conectado que tem contas salvas. Cada conta contém `{ id, label, plan, active }`. `plan` é `null` se o OpenCode não tiver um nome de plano salvo. O serviço não recebe chaves nem tokens e não precisa do papel `opencode`.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` troca a conta ativa em toda a instância do OpenCode e retorna `{ status, provider }`. `activated` confirma que a conta solicitada está ativa. Se o valor opcional `expectedActiveAccountId` não corresponder mais, `stale` retorna o estado atual do provedor sem trocar de conta. Atualize as opções antes de pedir que o usuário tente de novo. Se a chamada falhar com `PROVIDER_ACCOUNTS_UNAVAILABLE`, liste as contas de novo antes de tentar: o OpenCode pode já ter aplicado a troca.
+
 ## Linhas no menu @
 
 `contributes.mentions: { label }` adiciona uma seção ao menu `@` da caixa de chat. Seu serviço responde a `POST /mentions/search` com `{ items: [{ id, title, subtitle?, url? }] }` em até 2 segundos, e a `POST /mentions/resolve` com `{ text }` para a linha que o usuário escolhe. O texto vai para o agente com a mensagem, e o usuário vê um chip. Um serviço lento não adiciona linhas e nunca segura os arquivos; uma linha que não pode ser lida não deixa chip e avisa isso.

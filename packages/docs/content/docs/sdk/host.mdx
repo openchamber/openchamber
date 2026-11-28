@@ -339,6 +339,14 @@ Setting a target again replaces its mark, and `null` removes it. A row draws two
 
 A mark lives as long as your service process, so declare `service.keepRunning` and set the marks again when the service starts. A service holds up to 200 marks and changes them up to 60 times a minute. Marks need an OpenChamber release newer than 2.7.0: an older one ignores the key and refuses the call.
 
+## Provider accounts
+
+Declare `contributes.providerAccounts: true` alongside `contributes.service`. The user approves it as a separate permission. In enterprise mode, the administrator's extension policy applies too.
+
+`host.providerAccounts.list()` returns `{ id, name, accounts }` for each connected model provider with saved accounts. Each account has `{ id, label, plan, active }`. `plan` is `null` when OpenCode has no saved plan label. The service receives no keys or tokens and does not need the `opencode` role.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` switches the active account for the whole OpenCode instance and returns `{ status, provider }`. `activated` confirms that the requested account is active. If the optional `expectedActiveAccountId` no longer matches, `stale` returns the current provider state without switching. Refresh the account choices before asking the user to try again. If the call fails with `PROVIDER_ACCOUNTS_UNAVAILABLE`, list the accounts again before retrying: OpenCode may have applied the switch.
+
 ## Rows in the @ menu
 
 `contributes.mentions: { label }` adds a section to the composer's `@` menu. Your service answers `POST /mentions/search` with `{ items: [{ id, title, subtitle?, url? }] }`, within 2 seconds, and `POST /mentions/resolve` with `{ text }` for the row the user picks. The text goes to the agent with the message, and the user sees a chip. A slow service adds no rows and never holds the files back; a row that cannot be read leaves no chip and says so.

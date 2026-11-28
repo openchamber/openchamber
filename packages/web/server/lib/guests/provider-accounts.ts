@@ -3,7 +3,7 @@ import type { CredentialEntry, ProviderInfo } from '@opencode/client';
 import type { ServiceProviderAccountActivation, ServiceProviderAccountActivationResult, ServiceProviderAccounts } from '@openchamber/sdk';
 import { z } from 'zod';
 
-import { LOCATION_PLUGINS_NOT_READY, waitForLocationPlugins } from '../opencode/location-plugins.js';
+import { LOCATION_PLUGINS_NOT_READY, waitForPluginList } from '../opencode/location-plugins.js';
 
 type ProviderAccountsConnection = {
   buildOpenCodeUrl: (path: string, prefix?: string) => string;
@@ -13,6 +13,8 @@ type ProviderAccountsConnection = {
 };
 
 type ActivateFailoverAccount = (accountId: string, expectedActiveAccountId: string | undefined) => Promise<'activated' | 'stale' | 'missing'>;
+
+export class ProviderAccountsError extends Error {}
 
 const integrationId = (provider: ProviderInfo) => provider.integrationID ?? provider.id;
 const planLabel = z.string().trim().min(1);
@@ -40,14 +42,23 @@ export const createProviderAccounts = ({ buildOpenCodeUrl, getOpenCodeAuthHeader
     const client = OpenCode.make({ baseUrl: base, headers });
     const check = () => {
       signal.throwIfAborted();
-      if (baseUrl() !== base) throw new Error('The selected OpenCode changed');
+      if (baseUrl() !== base) throw new ProviderAccountsError('The selected OpenCode changed');
     };
     const providers = async () => {
       const directory = await getDefaultDirectory();
       check();
-      if (!directory) throw new Error('No OpenCode directory is available');
+      if (!directory) throw new ProviderAccountsError('No OpenCode directory is available');
       const scoped = OpenCode.make({ baseUrl: base, headers: { ...headers, 'x-opencode-directory': encodeURIComponent(directory) } });
-      if (!(await waitForLocationPlugins(scoped, signal))) throw new Error(LOCATION_PLUGINS_NOT_READY);
+      let probeError: unknown;
+      const ready = await waitForPluginList(async (bounded) => {
+        try {
+          return (await scoped.plugin.list(undefined, { signal: bounded })).data;
+        } catch (error) {
+          probeError = bounded.aborted ? new ProviderAccountsError('Location plugin readiness timed out') : error;
+          throw error;
+        }
+      }, signal);
+      if (!ready) throw probeError ?? new ProviderAccountsError(LOCATION_PLUGINS_NOT_READY);
       check();
       return (await scoped.provider.list(undefined, { signal })).data;
     };
@@ -92,7 +103,7 @@ export const createProviderAccounts = ({ buildOpenCodeUrl, getOpenCodeAuthHeader
       const after = await read();
       check();
       if (!after?.accounts.some(({ id, active: selected }) => id === accountId && selected)) {
-        throw new Error('OpenCode did not confirm the account switch');
+        throw new ProviderAccountsError('OpenCode did not confirm the account switch');
       }
       getManagedLimitFailover()?.noteAccountSwitch(accountId);
       return { status: 'activated', provider: after };

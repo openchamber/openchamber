@@ -1,6 +1,7 @@
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { SERVICE_EVENT_DATA_MAX, SERVICE_EVENT_RATE_MAX, SERVICE_HOST_PATH, SERVICE_MARKS_MAX, SERVICE_MARK_RATE_MAX, isGuestApproved, requestedGuestCapabilities } from '@openchamber/sdk';
 import { serviceHostCallSchema } from '@openchamber/sdk/schemas';
+import { ClientError, isInvalidRequestError, isLocationNotFoundError, isServiceUnavailableError, isUnauthorizedError } from '@opencode/client';
 
 import { setHostCallbackRoute } from './host-callback.js';
 import { getGuestAuth, guestAuthPersistPath } from './auth-store.js';
@@ -8,14 +9,14 @@ import { listInstalledGuests, setGuestConfigurationNote } from './catalog.js';
 import { extensionsPersistPath } from './persist.js';
 import { guestIdOfServiceToken } from './service.js';
 import type { GuestCapability } from '@openchamber/sdk';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { GuestRecord } from './contracts.js';
 import type { HostCallbackRoute } from './host-callback.js';
 import type { createOpenChamberControlService } from '../openchamber-control/service.js';
 import type { SessionControlExecute, SessionReadAction } from '../openchamber-control/contracts.js';
 import type { createGuestInstructions } from './instructions.js';
 import type { createGuestMarks } from './marks.js';
-import type { createProviderAccounts } from './provider-accounts.js';
+import { ProviderAccountsError, type createProviderAccounts } from './provider-accounts.js';
 import { hasErrorMessage } from './input-guards.js';
 
 export type ServiceHostControl = Pick<ReturnType<typeof createOpenChamberControlService>,
@@ -51,6 +52,8 @@ const controlFailure = (cause: unknown) => {
   if (status >= 500) console.warn('[service-host] a session call failed:', message ?? cause);
   return fail(status, 'SESSION_FAILED', status >= 500 ? 'OpenChamber could not reach the session.' : String(message ?? 'The call was refused.'));
 };
+
+const upstreamHttpFailure = z.object({ status: z.number().int().min(100).max(599) });
 
 const readSession = async <Action extends SessionReadAction>(control: ServiceHostControl, action: Action, input: SessionQuery) => {
   const directory = await control.resolveSessionDirectory(input.sessionId);
@@ -231,7 +234,20 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
           if (result === 'refused') return disabled();
           if (result === 'missing') return fail(404, 'ACCOUNT_NOT_FOUND', 'That provider does not have the requested stored account.');
           return ok(result);
-        } catch {
+        } catch (error) {
+          const cause: unknown = error instanceof ClientError ? error.cause : error;
+          let reason = 'Unexpected provider accounts failure';
+          if (error instanceof ProviderAccountsError) {
+            reason = error.message;
+          } else if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+            reason = 'TimeoutError';
+          } else if (error instanceof ClientError) {
+            const status = error.reason === 'UnexpectedStatus' ? upstreamHttpFailure.safeParse(cause).data?.status : undefined;
+            reason = status === undefined ? error.reason : `HTTP ${status}`;
+          } else if (isInvalidRequestError(error) || isUnauthorizedError(error) || isLocationNotFoundError(error) || isServiceUnavailableError(error)) {
+            reason = error._tag;
+          }
+          console.warn(`[service-host] ${method} failed:`, reason);
           return fail(502, 'PROVIDER_ACCOUNTS_UNAVAILABLE', 'OpenChamber could not read or confirm the provider accounts.');
         }
       }

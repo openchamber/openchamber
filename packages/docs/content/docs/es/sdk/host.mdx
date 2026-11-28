@@ -282,6 +282,14 @@ Volver a fijar un destino reemplaza su marca, y `null` la quita. Una fila dibuja
 
 Una marca vive mientras viva el proceso de tu servicio, así que declara `service.keepRunning` y vuelve a poner las marcas cuando el servicio arranque. Un servicio mantiene hasta 200 marcas y las cambia hasta 60 veces por minuto. Las marcas necesitan una versión de OpenChamber posterior a la 2.7.0: una anterior ignora la clave y rechaza la llamada.
 
+## Cuentas de proveedores
+
+Declara `contributes.providerAccounts: true` junto a `contributes.service`. El usuario lo aprueba como un permiso independiente. En el modo empresarial también se aplica la política de extensiones del administrador.
+
+`host.providerAccounts.list()` devuelve `{ id, name, accounts }` por cada proveedor de modelos conectado con cuentas guardadas. Cada cuenta contiene `{ id, label, plan, active }`. `plan` es `null` si OpenCode no tiene guardado el nombre del plan. El servicio no recibe claves ni tokens y no necesita el rol `opencode`.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` cambia la cuenta activa de toda la instancia de OpenCode y devuelve `{ status, provider }`. `activated` confirma que la cuenta solicitada está activa. Si el valor opcional `expectedActiveAccountId` ya no coincide, `stale` devuelve el estado actual del proveedor sin cambiar la cuenta. Actualiza las opciones antes de pedir al usuario que lo intente de nuevo. Si la llamada falla con `PROVIDER_ACCOUNTS_UNAVAILABLE`, vuelve a listar las cuentas antes de reintentar: OpenCode podría haber aplicado el cambio.
+
 ## Filas en el menú @
 
 `contributes.mentions: { label }` añade una sección al menú `@` del cuadro de chat. Tu servicio responde a `POST /mentions/search` con `{ items: [{ id, title, subtitle?, url? }] }` en un máximo de 2 segundos, y a `POST /mentions/resolve` con `{ text }` para la fila que elige el usuario. El texto va al agente con el mensaje, y el usuario ve un chip. Un servicio lento no añade filas y nunca retiene los archivos; una fila que no se puede leer no deja chip y lo indica.

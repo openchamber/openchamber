@@ -282,6 +282,14 @@ await host.setMark({ sessionId }, null);
 
 마크는 서비스 프로세스가 살아 있는 동안만 유지됩니다. 그러니 `service.keepRunning`을 선언하고 서비스가 시작될 때 마크를 다시 설정하세요. 서비스는 마크를 최대 200개까지 보유하고 1분에 60번까지 변경할 수 있습니다. 마크에는 2.7.0보다 새로운 OpenChamber가 필요합니다. 그보다 오래된 버전은 이 키를 무시하고 호출을 거부합니다.
 
+## 제공자 계정
+
+`contributes.service`와 함께 `contributes.providerAccounts: true`를 선언하세요. 사용자는 이 권한을 별도로 승인합니다. 엔터프라이즈 모드에서는 관리자의 확장 정책도 적용됩니다.
+
+`host.providerAccounts.list()`는 저장된 계정이 있는 연결된 모델 제공자마다 `{ id, name, accounts }`를 반환합니다. 각 계정에는 `{ id, label, plan, active }`가 들어 있습니다. OpenCode에 저장된 요금제 이름이 없으면 `plan`은 `null`입니다. 서비스는 키나 토큰을 받지 않으며 `opencode` 역할도 필요하지 않습니다.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })`는 OpenCode 인스턴스 전체의 활성 계정을 전환하고 `{ status, provider }`를 반환합니다. `activated`는 요청한 계정이 활성 상태임을 확인합니다. 선택 사항인 `expectedActiveAccountId`가 현재 값과 일치하지 않으면 `stale`은 계정을 바꾸지 않고 제공자의 현재 상태를 반환합니다. 사용자에게 다시 시도해 달라고 요청하기 전에 계정 선택지를 새로 불러오세요. `PROVIDER_ACCOUNTS_UNAVAILABLE` 오류가 발생하면 OpenCode가 이미 전환했을 수 있으므로 다시 시도하기 전에 계정 목록을 조회하세요.
+
 ## @ 메뉴의 행
 
 `contributes.mentions: { label }`은 채팅창의 `@` 메뉴에 섹션을 추가합니다. 서비스는 `POST /mentions/search`에 2초 안에 `{ items: [{ id, title, subtitle?, url? }] }`로 답하고, 사용자가 고른 행에 대해 `POST /mentions/resolve`에 `{ text }`로 답합니다. 텍스트는 메시지와 함께 에이전트에게 전달되고, 사용자에게는 칩이 보입니다. 느린 서비스는 행을 추가하지 않으며 파일 표시를 막지 않습니다. 읽을 수 없는 행은 칩을 남기지 않고 그 사실을 알립니다.

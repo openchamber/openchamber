@@ -282,6 +282,14 @@ Setzt du ein Ziel erneut, ersetzt das seine Markierung, und `null` entfernt sie.
 
 Eine Markierung lebt so lange wie dein Dienstprozess. Deklariere deshalb `service.keepRunning` und setze die Markierungen beim Start des Dienstes erneut. Ein Dienst hält bis zu 200 Markierungen und ändert sie bis zu 60 Mal pro Minute. Markierungen brauchen eine OpenChamber-Version, die neuer als 2.7.0 ist: Eine ältere ignoriert den Schlüssel und lehnt den Aufruf ab.
 
+## Anbieterkonten
+
+Deklariere `contributes.providerAccounts: true` neben `contributes.service`. Der Nutzer genehmigt dies als eigene Berechtigung. Im Enterprise-Modus gilt zusätzlich die Erweiterungsrichtlinie des Administrators.
+
+`host.providerAccounts.list()` liefert für jeden verbundenen Modellanbieter mit gespeicherten Konten `{ id, name, accounts }`. Jedes Konto enthält `{ id, label, plan, active }`. `plan` ist `null`, wenn OpenCode keine Tarifbezeichnung gespeichert hat. Der Dienst erhält keine Schlüssel oder Tokens und braucht die Rolle `opencode` nicht.
+
+`host.providerAccounts.activate({ providerId, accountId, expectedActiveAccountId })` wechselt das aktive Konto für die gesamte OpenCode-Instanz und liefert `{ status, provider }`. `activated` bestätigt, dass das gewählte Konto aktiv ist. Stimmt die optionale Angabe `expectedActiveAccountId` nicht mehr überein, liefert `stale` den aktuellen Anbieterzustand, ohne das Konto zu wechseln. Lade die Kontenauswahl neu, bevor du den Nutzer erneut um Bestätigung bittest. Bei `PROVIDER_ACCOUNTS_UNAVAILABLE` liste die Konten vor einem erneuten Versuch neu auf: OpenCode könnte den Wechsel bereits vorgenommen haben.
+
 ## Zeilen im @-Menü
 
 `contributes.mentions: { label }` fügt dem `@`-Menü des Chatfelds einen Abschnitt hinzu. Dein Dienst beantwortet `POST /mentions/search` innerhalb von 2 Sekunden mit `{ items: [{ id, title, subtitle?, url? }] }` und `POST /mentions/resolve` mit `{ text }` für die Zeile, die der Nutzer auswählt. Der Text geht mit der Nachricht an den Agenten, und der Nutzer sieht einen Chip. Ein langsamer Dienst fügt keine Zeilen hinzu und hält die Dateien nie auf; eine Zeile, die sich nicht lesen lässt, hinterlässt keinen Chip und meldet das.
