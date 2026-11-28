@@ -115,6 +115,33 @@ describe('extension trackers follow the catalog', () => {
     expect(h.emitChanged).toHaveBeenCalledTimes(2);
   });
 
+  it('builds link patterns for every connected server and drops one when its last account leaves', async () => {
+    const multi = { ...contribution, capabilities: { ...contribution.capabilities, multipleAccounts: true } };
+    const h = await harness([guestRow({ tracker: multi })]);
+    await h.trackers.reconcile();
+    const tracker = await h.registry.implementation('ext-youtrack');
+    // A client saved before any account already pins its server, as it did before accounts kept one each.
+    await h.accounts.setClient('ext-youtrack', {
+      instance: 'https://c.example.com', clientId: 'client-c',
+      target: { authorizeUrl: 'https://c.example.com/auth', tokenUrl: 'https://c.example.com/token' },
+    });
+    await h.trackers.reconcile();
+    expect(h.registry.descriptor('ext-youtrack').urlPatterns.map((pattern) => pattern.host)).toEqual(['c.example.com']);
+    await tracker.auth.connectToken({ instance: 'https://a.example.com', token: 't' });
+    await h.accounts.connect('ext-youtrack', {
+      instance: 'https://b.example.com', account: { id: 'u-2', login: 'bob' }, credential: { kind: 'token', token: 't2', login: null },
+    });
+    await h.trackers.reconcile();
+    expect(h.registry.descriptor('ext-youtrack').urlPatterns.map((pattern) => pattern.host)).toEqual(['a.example.com', 'b.example.com', 'c.example.com']);
+    const second = await h.registry.implementation('ext-youtrack');
+    expect(second.matchUrl('https://b.example.com/issue/PROJ-2')).toBe('PROJ-2');
+
+    await h.accounts.removeAccount('ext-youtrack', 'u-2');
+    await h.trackers.reconcile();
+    expect(h.registry.descriptor('ext-youtrack').urlPatterns.map((pattern) => pattern.host)).toEqual(['a.example.com', 'c.example.com']);
+    expect((await h.registry.implementation('ext-youtrack')).matchUrl('https://b.example.com/issue/PROJ-2')).toBeNull();
+  });
+
   it('detaches a guest that stopped being eligible, stops its comments and handles, and forgets accounts only on removal', async () => {
     const h = await harness();
     await h.trackers.reconcile();

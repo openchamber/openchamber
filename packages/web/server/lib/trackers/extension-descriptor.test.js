@@ -54,6 +54,19 @@ describe('buildExtensionTrackerDescriptor', () => {
     expect(JSON.parse(JSON.stringify(descriptor))).toEqual(descriptor);
   });
 
+  it('compiles the links for every connected server, without repeating a host', () => {
+    const descriptor = buildExtensionTrackerDescriptor({
+      guestId: 'youtrack', contribution,
+      instances: ['https://a.example.com', 'https://b.example.com', 'https://www.a.example.com', null],
+    });
+    expect(descriptor.urlPatterns.map((pattern) => pattern.host)).toEqual([
+      'a.example.com', 'a.example.com', 'a.example.com',
+      'b.example.com', 'b.example.com', 'b.example.com',
+    ]);
+    expect(createDescriptorUrlMatcher(descriptor)('https://b.example.com/issue/PROJ-9')).toBe('PROJ-9');
+    expect(buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution, instances: [] }).urlPatterns).toEqual([]);
+  });
+
   it('carries no link pattern while a user-typed server is not connected, and uses a fixed origin as is', () => {
     expect(buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution, instance: null }).urlPatterns).toEqual([]);
     const fixed = buildExtensionTrackerDescriptor({

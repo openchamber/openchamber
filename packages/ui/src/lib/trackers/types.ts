@@ -57,6 +57,7 @@ export type TrackerListOptions = {
 export type TrackerAccount = {
   id: string;
   name: string | null;
+  instance?: string | null;
   user?: TrackerPerson | null;
   current: boolean;
   authorizedAt?: number | null;
@@ -69,6 +70,7 @@ export type TrackerConnectInfo = {
   instance: string | null;
   instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
   hasClient: boolean;
+  clients?: string[];
   redirectUri: string | null;
 };
 

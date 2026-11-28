@@ -59,20 +59,24 @@ export function createExtensionTrackers({
     }
     let changed = false;
     for (const [id, guest] of eligible) {
-      let instance: string | null = null;
+      let instances: string[] = [];
       try {
-        instance = (await accounts.read(id))?.instance ?? null;
+        const stored = await accounts.read(id);
+        instances = [...new Set([
+          ...(stored?.accounts ?? []).map((account) => account.instance),
+          ...Object.keys(stored?.clients ?? {}),
+        ])].sort();
       } catch (error) {
         warn(`[trackers] ${id}: the account store could not be read:`, hasErrorMessage(error) ? error.message ?? error : error);
       }
-      const descriptorKey = JSON.stringify([guest.name, guest.version ?? '', guest.tracker, instance]);
+      const descriptorKey = JSON.stringify([guest.name, guest.version ?? '', guest.tracker, instances]);
       const key = JSON.stringify([descriptorKey, guest.packageRoot, guest.service, guest.capabilityGrants]);
       const previous = registered.get(id);
       if (previous?.key === key) continue;
       let descriptor = previous?.descriptorKey === descriptorKey ? previous.descriptor : null;
       if (!descriptor) {
         try {
-          descriptor = buildExtensionTrackerDescriptor({ guestId: guest.id, contribution: guest.tracker, instance });
+          descriptor = buildExtensionTrackerDescriptor({ guestId: guest.id, contribution: guest.tracker, instances });
         } catch (error) {
           warn(`[trackers] ${guest.id} cannot serve a tracker:`, hasErrorMessage(error) ? error.message ?? error : error);
           if (previous) {

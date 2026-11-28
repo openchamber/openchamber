@@ -31,6 +31,7 @@ const credentialSchema = z.discriminatedUnion('kind', [
 const accountSchema = z.object({
   id: text(256),
   login: text(256).nullable(),
+  instance: text(2_048),
   name: text(256).optional(),
   avatarUrl: z.string().max(2_048).optional(),
   revision: z.string().uuid(),
@@ -54,22 +55,40 @@ const sessionRecordSchema = z.object({
   failure: z.boolean(),
 }).strict();
 
+const mappingSchema = z.object({
+  defaultProjectPath: text(4_096).nullable(),
+  containerProjectPaths: z.record(text(256), text(4_096)),
+}).strict();
+
+const preferencesSchema = z.object({ sessionComments: z.boolean() }).strict();
+
+const sessionsSchema = z.record(text(256), sessionRecordSchema);
+
 const trackerSchema = z.object({
-  instance: text(2_048).nullable(),
-  client: clientSchema.optional(),
+  clients: z.record(text(2_048), clientSchema).optional(),
   accounts: z.array(accountSchema).max(TRACKER_ACCOUNTS_MAX),
   activeAccountId: text(256).nullable(),
-  mapping: z.object({
-    defaultProjectPath: text(4_096).nullable(),
-    containerProjectPaths: z.record(text(256), text(4_096)),
-  }).strict().optional(),
-  preferences: z.object({ sessionComments: z.boolean() }).strict().optional(),
-  sessions: z.record(text(256), sessionRecordSchema).optional(),
+  mapping: mappingSchema.optional(),
+  preferences: preferencesSchema.optional(),
+  sessions: sessionsSchema.optional(),
 }).strict();
 
 const storeSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   trackers: z.record(z.string().min(1).max(64), trackerSchema),
+}).strict();
+
+const legacyStoreSchema = z.object({
+  version: z.literal(1),
+  trackers: z.record(z.string().min(1).max(64), z.object({
+    instance: text(2_048).nullable(),
+    client: clientSchema.optional(),
+    accounts: z.array(accountSchema.omit({ instance: true })).max(TRACKER_ACCOUNTS_MAX),
+    activeAccountId: text(256).nullable(),
+    mapping: mappingSchema.optional(),
+    preferences: preferencesSchema.optional(),
+    sessions: sessionsSchema.optional(),
+  }).strict()),
 }).strict();
 
 export type TrackerCredential = z.infer<typeof credentialSchema>;
@@ -86,8 +105,8 @@ type PublicAccount = Omit<StoredTrackerAccount, 'credential' | 'revision' | 'nam
 };
 type ConnectAccount = Pick<StoredTrackerAccount, 'id' | 'login' | 'name' | 'avatarUrl'>;
 
-const emptyStore = (): AccountStore => ({ version: 1, trackers: {} });
-const emptyTracker = (): StoredTracker => ({ instance: null, accounts: [], activeAccountId: null });
+const emptyStore = (): AccountStore => ({ version: 2, trackers: {} });
+const emptyTracker = (): StoredTracker => ({ accounts: [], activeAccountId: null });
 
 const corrupt = (persistPath: string, cause: unknown) => Object.assign(new Error(`Tracker accounts could not be read: ${persistPath}`), {
   code: 'INVALID_TRACKER_ACCOUNTS_STORE', cause,
@@ -99,6 +118,7 @@ const publicAccountOf = (account: StoredTrackerAccount) => {
   const view: PublicAccount = {
     id: account.id,
     login: account.login,
+    instance: account.instance,
     connectedAt: account.connectedAt,
     status: account.status,
     method: account.credential.kind,
@@ -109,13 +129,26 @@ const publicAccountOf = (account: StoredTrackerAccount) => {
   return view;
 };
 
+const clientsOf = (tracker: StoredTracker | null) => Object.keys(tracker?.clients ?? {}).sort();
+
+const activeOf = (tracker: StoredTracker | null) => tracker?.accounts.find((account) => account.id === tracker.activeAccountId) ?? tracker?.accounts[0] ?? null;
+
+const instanceOf = (tracker: StoredTracker | null) => {
+  const active = activeOf(tracker);
+  if (active) return active.instance;
+  const clients = clientsOf(tracker);
+  return clients.length === 1 ? clients[0] ?? null : null;
+};
+
 const publicViewOf = (tracker: StoredTracker | null) => {
-  if (!tracker) return { instance: null, accounts: [], activeAccountId: null, hasClient: false };
+  const clients = clientsOf(tracker);
+  if (!tracker) return { instance: null, accounts: [], activeAccountId: null, hasClient: false, clients };
   return {
-    instance: tracker.instance,
+    instance: instanceOf(tracker),
     accounts: tracker.accounts.map(publicAccountOf),
     activeAccountId: tracker.activeAccountId,
-    hasClient: Boolean(tracker.client),
+    hasClient: clients.length > 0,
+    clients,
   };
 };
 
@@ -123,9 +156,8 @@ const sameTarget = (a: TrackerOAuthTarget, b: TrackerOAuthTarget) => Boolean(a &
 
 const clearIfEmpty = (tracker: StoredTracker) => {
   if (tracker.accounts.length > 0) return;
-  tracker.instance = null;
   tracker.activeAccountId = null;
-  delete tracker.client;
+  delete tracker.clients;
   delete tracker.mapping;
 };
 
@@ -146,14 +178,32 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       throw corrupt(persistPath, error);
     }
     if (raw.trim().length === 0) return emptyStore();
-    let parsed;
+    let value;
     try {
-      parsed = storeSchema.safeParse(JSON.parse(raw));
+      value = JSON.parse(raw);
     } catch (error) {
       throw corrupt(persistPath, error);
     }
-    if (!parsed.success) throw corrupt(persistPath, parsed.error);
-    return parsed.data;
+    const parsed = storeSchema.safeParse(value);
+    if (parsed.success) return parsed.data;
+    const legacy = legacyStoreSchema.safeParse(value);
+    if (!legacy.success) throw corrupt(persistPath, parsed.error);
+    const trackers: Record<string, StoredTracker> = {};
+    for (const [providerId, tracker] of Object.entries(legacy.data.trackers)) {
+      if (tracker.accounts.length > 0 && !tracker.instance) throw corrupt(persistPath, parsed.error);
+      const instance = tracker.instance ?? '';
+      const upgraded: StoredTracker = {
+        accounts: tracker.accounts.map((account) => ({ ...account, instance })),
+        activeAccountId: tracker.activeAccountId,
+      };
+      if (tracker.client && instance) upgraded.clients = { [instance]: tracker.client };
+      if (tracker.mapping) upgraded.mapping = tracker.mapping;
+      if (tracker.preferences) upgraded.preferences = tracker.preferences;
+      if (tracker.sessions) upgraded.sessions = tracker.sessions;
+      trackers[providerId] = upgraded;
+    }
+    const upgraded: AccountStore = { version: 2, trackers };
+    return upgraded;
   };
 
   const writeStore = async (store: AccountStore) => {
@@ -207,15 +257,13 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       if (expectedConnection !== undefined && pendingConnections.get(providerId) !== expectedConnection) return { wrote: false, result: null };
       pendingConnections.delete(providerId);
       const tracker = trackerIn(store, providerId);
-      if (tracker.instance && tracker.instance !== instance && tracker.accounts.length > 0) {
-        throw conflict('INSTANCE_MISMATCH', `The connected accounts live on ${tracker.instance}; disconnect them before connecting to ${instance}.`);
-      }
       if (tracker.accounts.length >= TRACKER_ACCOUNTS_MAX && !tracker.accounts.some((candidate) => candidate.id === account.id)) {
         throw conflict('ACCOUNTS_FULL', `At most ${TRACKER_ACCOUNTS_MAX} accounts per tracker.`);
       }
       const stored: StoredTrackerAccount = {
         id: account.id,
         login: account.login ?? null,
+        instance,
         revision: randomUUID(),
         connectedAt: now(),
         status: 'valid',
@@ -223,7 +271,6 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       };
       if (account.name) stored.name = account.name;
       if (account.avatarUrl) stored.avatarUrl = account.avatarUrl;
-      tracker.instance = instance;
       tracker.accounts = [...tracker.accounts.filter((candidate) => candidate.id !== account.id), stored];
       tracker.activeAccountId = account.id;
       return { result: publicViewOf(tracker) };
@@ -231,20 +278,16 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
 
     setClient: (providerId: string, { instance, clientId, clientSecret, target }: { instance: string; clientId: string; clientSecret?: string; target: TrackerOAuthTarget }) => mutate((store) => {
       const tracker = trackerIn(store, providerId);
-      if (tracker.instance && tracker.instance !== instance && tracker.accounts.length > 0) {
-        throw conflict('INSTANCE_MISMATCH', `The connected accounts live on ${tracker.instance}; disconnect them before connecting to ${instance}.`);
-      }
-      const previous = tracker.client;
+      const previous = tracker.clients?.[instance];
       const client: StoredClient = { id: clientId, target: { ...target } };
       if (clientSecret) client.secret = clientSecret;
       else if (previous?.secret && previous.id === clientId && sameTarget(previous.target, target)) client.secret = previous.secret;
-      tracker.instance = instance;
-      tracker.client = client;
+      tracker.clients = { ...(tracker.clients ?? {}), [instance]: client };
       return { result: publicViewOf(tracker) };
     }),
 
-    readClient: async (providerId: string, target: TrackerOAuthTarget) => {
-      const client = (await readStore()).trackers[providerId]?.client;
+    readClient: async (providerId: string, instance: string, target: TrackerOAuthTarget) => {
+      const client = (await readStore()).trackers[providerId]?.clients?.[instance];
       return client && sameTarget(client.target, target) ? { id: client.id, secret: client.secret ?? '' } : null;
     },
 

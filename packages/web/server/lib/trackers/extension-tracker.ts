@@ -230,7 +230,7 @@ export function createExtensionTracker({
   const freshAccount = async (stored: StoredTracker | null, account: StoredTrackerAccount) => {
     const credential = account.credential;
     if (credential.kind !== 'oauth' || !credential.refreshToken || credential.expiresAt === null || credential.expiresAt - now() > OAUTH_REFRESH_LEEWAY_MS) return account;
-    const client = await accounts.readClient(id, credential.target);
+    const client = await accounts.readClient(id, account.instance, credential.target);
     if (!client) return account;
     let tokens;
     try {
@@ -253,7 +253,7 @@ export function createExtensionTracker({
     if (!account || !stored) return null;
     try {
       return await forward(method, {
-        instance: stored.instance,
+        instance: account.instance,
         credential: credentialOf(account.credential),
         account: { id: account.id, login: account.login },
         input,
@@ -277,16 +277,22 @@ export function createExtensionTracker({
   const instanceFor = (stored: StoredTracker | null, typed: string | undefined) => {
     if (fixedOrigin) return fixedOrigin;
     const typedText = isText(typed) ? typed.trim() : '';
-    if (stored?.instance && stored.accounts.length > 0) {
-      const typedOrigin = typedText ? normalizeTrackerInstance(typedText) : null;
-      if (typedOrigin && typedOrigin !== stored.instance) {
-        throw routeError(409, 'INSTANCE_MISMATCH', `The connected accounts live on ${stored.instance}; disconnect them before connecting to ${typedOrigin}.`);
+    const typedOrigin = typedText ? normalizeTrackerInstance(typedText) : null;
+    const accountInstances = [...new Set((stored?.accounts ?? []).map((account) => account.instance))];
+    if (accountInstances.length > 0 && contribution.capabilities.multipleAccounts !== true) {
+      const [single] = accountInstances;
+      if (single !== undefined && typedOrigin && typedOrigin !== single) {
+        throw routeError(409, 'INSTANCE_MISMATCH', `The connected accounts live on ${single}; disconnect them before connecting to ${typedOrigin}.`);
       }
-      return stored.instance;
+      if (single !== undefined) return single;
     }
-    const origin = typedText ? normalizeTrackerInstance(typedText) : stored?.instance ?? null;
-    if (!origin) throw routeError(400, 'INSTANCE_REQUIRED', `Enter the server address as an https origin, like ${('placeholder' in contribution.instances && contribution.instances.placeholder) || 'https://example.org'}.`);
-    return origin;
+    if (typedOrigin) return typedOrigin;
+    const known = accountInstances.length > 0 ? accountInstances : Object.keys(stored?.clients ?? {});
+    const [only] = known;
+    if (known.length === 1 && only !== undefined) return only;
+    const active = currentAccount(stored);
+    if (active) return active.instance;
+    throw routeError(400, 'INSTANCE_REQUIRED', `Enter the server address as an https origin, like ${('placeholder' in contribution.instances && contribution.instances.placeholder) || 'https://example.org'}.`);
   };
 
   const requireRoom = (stored: StoredTracker | null) => {
@@ -307,6 +313,7 @@ export function createExtensionTracker({
     const view: TrackerAccount = {
       id: account.id,
       name,
+      instance: account.instance,
       user: { name, avatarUrl: account.avatarUrl ?? null },
       current,
       authorizedAt: account.connectedAt,
@@ -324,10 +331,13 @@ export function createExtensionTracker({
     if (instances.kind === 'user' && contribution.instances.kind === 'user' && contribution.instances.placeholder) {
       instances.placeholder = contribution.instances.placeholder;
     }
+    const clients = Object.keys(stored?.clients ?? {});
+    const active = stored?.accounts.find((account) => account.id === stored.activeAccountId) ?? stored?.accounts[0] ?? null;
     const info: TrackerConnectInfo = {
-      instance: fixedOrigin ?? (stored && stored.accounts.length > 0 ? stored.instance : null),
+      instance: fixedOrigin ?? active?.instance ?? null,
       instances,
-      hasClient: Boolean(stored?.client),
+      hasClient: clients.length > 0,
+      clients,
       redirectUri: oauthAuth && origin ? trackerRedirectUri(origin, id) : null,
     };
     return info;
@@ -370,7 +380,7 @@ export function createExtensionTracker({
     requireRoom(stored);
     const origin = instanceFor(stored, instance);
     const target = oauthTargetOf(oauthAuth, origin);
-    const client = await accounts.readClient(id, target);
+    const client = await accounts.readClient(id, origin, target);
     if (!client) throw routeError(400, 'CLIENT_MISSING', 'Save the client id first.');
     const connection = accounts.beginConnect(id);
     return oauth.start({

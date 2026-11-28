@@ -114,13 +114,13 @@ describe('isTrackerGuest and the typed instance', () => {
     await expect(h.tracker.list()).rejects.toThrow("Cannot read properties of null (reading 'header')");
   });
 
-  it('forwards a nullable stored instance without inventing an origin', async () => {
+  it('forwards a nullable account instance without inventing an origin', async () => {
     const h = await harness({
       wrapAccounts: (accounts) => ({
         ...accounts,
         read: async (id) => {
           const stored = await accounts.read(id);
-          return stored ? { ...stored, instance: null } : null;
+          return stored ? { ...stored, accounts: stored.accounts.map((account) => ({ ...account, instance: null })) } : null;
         },
       }),
     });
@@ -162,7 +162,7 @@ describe('connecting an extension tracker with a token', () => {
     const status = await h.tracker.auth.status({ origin: 'https://app.example.com' });
     expect(status).toMatchObject({
       connected: true,
-      account: { id: 'u-1', name: 'Mona', current: true, status: 'valid', method: 'token' },
+      account: { id: 'u-1', name: 'Mona', instance: INSTANCE, current: true, status: 'valid', method: 'token' },
       connect: { instance: INSTANCE, instances: { kind: 'user', label: 'Server address' }, hasClient: false, redirectUri: 'https://app.example.com/api/tracker/ext-youtrack/oauth/callback' },
     });
     expect(JSON.stringify(status)).not.toContain('secret-1');
@@ -245,20 +245,49 @@ describe('connecting an extension tracker with a token', () => {
     expect((await h.tracker.auth.status()).accounts).toHaveLength(32);
   });
 
-  it('a second account joins the same server; another server is refused while accounts live here', async () => {
+  it('a second account can live on another server; every read carries its account\'s site and activate switches back', async () => {
+    const other = 'https://other.example.com';
     const h = await harness();
     await connect(h);
-    h.answers['auth.verify'] = () => ({ ok: true, data: { account: { id: 'u-2', login: 'bob' } } });
-    const view = await connect(h, { token: 'secret-2' });
-    expect(view.accounts.map((account) => account.id)).toEqual(['u-1', 'u-2']);
+    h.answers['auth.verify'] = () => ({ ok: true, data: { account: { id: 'u-2', login: 'bob', name: 'Bob' } } });
+    const view = await connect(h, { instance: other, token: 'secret-2' });
+    expect(view.accounts.map((account) => `${account.id}@${account.instance}`)).toEqual([`u-1@${INSTANCE}`, `u-2@${other}`]);
     expect(view.activeAccountId).toBe('u-2');
-    // Another server is refused while accounts live on this one; the stored one stands when nothing is typed.
-    await expect(h.tracker.auth.connectToken({ instance: 'https://other.example.com', token: 'x' })).rejects.toMatchObject({ status: 409, code: 'INSTANCE_MISMATCH' });
-    await expect(h.tracker.auth.connectToken({ token: 'x' })).resolves.toMatchObject({ instance: INSTANCE });
-    expect((await h.tracker.auth.activate('u-1')).account.id).toBe('u-1');
+    expect(view.instance).toBe(other);
+
+    // The active account decides the server: the credential and its site travel together.
+    await h.tracker.list();
+    expect(h.calls.at(-1).request.session).toMatchObject({ instance: other, account: { id: 'u-2', login: 'bob' } });
+    expect(h.calls.at(-1).request.session.handle).toBeTruthy();
+
+    const switched = await h.tracker.auth.activate('u-1');
+    expect(switched).toMatchObject({ connected: true, account: { id: 'u-1', instance: INSTANCE }, connect: { instance: INSTANCE } });
+    await h.tracker.list();
+    expect(h.calls.at(-1).request.session).toMatchObject({ instance: INSTANCE, account: { id: 'u-1' } });
     expect(await h.tracker.auth.activate('nope')).toBeNull();
+
+    // Disconnecting the active account leaves the other account on its own server.
     expect(await h.tracker.auth.disconnect()).toEqual({ removed: true });
-    expect((await h.tracker.auth.status()).account.id).toBe('u-2');
+    const remaining = await h.tracker.auth.status();
+    expect(remaining.account).toMatchObject({ id: 'u-2', instance: other });
+    expect(remaining.connect.instance).toBe(other);
+    await h.tracker.list();
+    expect(h.calls.at(-1).request.session).toMatchObject({ instance: other, account: { id: 'u-2' } });
+
+    // Nothing typed: a connect uses the active account's server.
+    h.answers['auth.verify'] = () => ({ ok: true, data: { account: { id: 'u-3', login: 'cara' } } });
+    const joined = await h.tracker.auth.connectToken({ token: 'x' });
+    expect(joined).toMatchObject({ instance: other, activeAccountId: 'u-3' });
+  });
+
+  it('with one account per tracker, another server is refused while accounts live here', async () => {
+    const single = { ...contribution, capabilities: { ...contribution.capabilities, multipleAccounts: false } };
+    const h = await harness({ guest: trackerGuest({ tracker: single }) });
+    await connect(h);
+    await expect(h.tracker.auth.connectToken({ instance: 'https://other.example.com', token: 'x' })).rejects.toMatchObject({ status: 409, code: 'INSTANCE_MISMATCH' });
+    await expect(h.tracker.auth.setOAuthClient({ instance: 'https://other.example.com', clientId: 'c' })).rejects.toMatchObject({ code: 'INSTANCE_MISMATCH' });
+    // Without a typed address the account's server stands.
+    expect(await h.tracker.auth.connectToken({ token: 'x' })).toMatchObject({ instance: INSTANCE });
   });
 });
 
@@ -351,7 +380,7 @@ describe('reading and writing through an extension tracker', () => {
     await expect(h.tracker.list()).rejects.toMatchObject({ status: 401, kind: 'invalid-token' });
     const status = await h.tracker.auth.status();
     // Written off, not gone: the card shows the account with the reason, on its server, and can remove it.
-    expect(status).toMatchObject({ connected: false, accounts: [{ id: 'u-1', status: 'invalid', invalidReason: 'unauthorized', current: false }], connect: { instance: INSTANCE } });
+    expect(status).toMatchObject({ connected: false, accounts: [{ id: 'u-1', instance: INSTANCE, status: 'invalid', invalidReason: 'unauthorized', current: false }], connect: { instance: INSTANCE } });
     expect(h.warnings.join('\n')).toContain('refused');
     // With every account written off, reads answer disconnected and send nothing.
     const sent = h.calls.length;
@@ -564,17 +593,20 @@ describe('the browser sign-in of an extension tracker', () => {
     expect(await tokenConnect).toMatchObject({ activeAccountId: 'u-2' });
   });
 
-  it('a client saved before any account pins no server: the typed address wins until an account lives there', async () => {
+  it('a client saved before any account pins no server, and each server keeps its own client', async () => {
     const h = await harness();
     await h.tracker.auth.setOAuthClient({ instance: 'https://typo.example.com', clientId: 'client-1', clientSecret: 's3' });
     // The card keeps asking for the address: a mistyped one is corrected by typing again.
-    expect((await h.tracker.auth.status()).connect).toMatchObject({ instance: null, hasClient: true });
+    expect((await h.tracker.auth.status()).connect).toMatchObject({ instance: null, hasClient: true, clients: ['https://typo.example.com'] });
     const view = await connect(h);
     expect(view.instance).toBe(INSTANCE);
     expect((await h.tracker.auth.status()).connect).toMatchObject({ instance: INSTANCE });
-    // With an account on the server, the stored address stands whatever is typed.
-    await expect(h.tracker.auth.setOAuthClient({ instance: 'https://other.example.com', clientId: 'client-2' })).rejects.toMatchObject({ code: 'INSTANCE_MISMATCH' });
-    expect((await h.tracker.auth.status()).connect).toMatchObject({ instance: INSTANCE });
+    // A second server keeps its own client; the account's server still stands for the card.
+    await h.tracker.auth.setOAuthClient({ instance: 'https://other.example.com', clientId: 'client-2' });
+    expect(await h.accounts.readClient('ext-youtrack', INSTANCE, { authorizeUrl: `${INSTANCE}/hub/api/rest/oauth2/auth`, tokenUrl: `${INSTANCE}/hub/api/rest/oauth2/token` })).toBeNull();
+    const info = (await h.tracker.auth.status()).connect;
+    expect(info).toMatchObject({ instance: INSTANCE });
+    expect(info.clients.sort()).toEqual(['https://other.example.com', 'https://typo.example.com']);
   });
 
   it('a disconnect between start and callback wins; the saved client stays until the last account leaves', async () => {

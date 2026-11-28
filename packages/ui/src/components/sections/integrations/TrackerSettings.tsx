@@ -114,8 +114,11 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
   const connect = status?.connect;
   const takesToken = Boolean(extension) && descriptor.authMethods.includes('token');
   const takesOauth = descriptor.authMethods.includes('oauth');
-  const needsInstance = Boolean(extension) && connect?.instances.kind === 'user' && !connect.instance;
-  const instanceOrigin = connect?.instance ?? (needsInstance ? typedOrigin(instance) : null);
+  const needsInstance = Boolean(extension) && connect?.instances.kind === 'user'
+    && (!connect.instance || (capabilities.multipleAccounts && adding));
+  const instanceOrigin = needsInstance ? typedOrigin(instance) : connect?.instance ?? null;
+  const clientSites = connect?.clients ?? [];
+  const hasClientForTarget = instanceOrigin && clientSites.length > 0 ? clientSites.includes(instanceOrigin) : Boolean(connect?.hasClient);
   const tokenFormat = extension?.tracker.token;
   const needsUsername = takesToken && tokenFormat?.username === true;
   const createTokenUrl = tokenFormat?.createPath && instanceOrigin ? `${instanceOrigin}${tokenFormat.createPath}` : null;
@@ -150,7 +153,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
           return;
         }
         const nextClientId = clientId.trim();
-        if (nextClientId || !connect?.hasClient) {
+        if (nextClientId || !hasClientForTarget) {
           if (!nextClientId) {
             toast.error(t('settings.integrations.tracker.toast.clientRequired'));
             return;
@@ -195,7 +198,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
     } finally {
       setIsBusy(false);
     }
-  }, [clientId, clientSecret, connect?.hasClient, copy, extension, failureText, instance, instanceInput, needsInstance, provider, providerId, refreshTrackerStatus, stopWaiting, t, trackers]);
+  }, [clientId, clientSecret, hasClientForTarget, copy, extension, failureText, instance, instanceInput, needsInstance, provider, providerId, refreshTrackerStatus, stopWaiting, t, trackers]);
 
   const connectToken = React.useCallback(async () => {
     if (!trackers) return;
@@ -329,7 +332,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
           />
         </SettingsStackedField>
       ) : null}
-      {formMethod === 'oauth' && !connect?.hasClient ? (
+      {formMethod === 'oauth' && !hasClientForTarget ? (
         <>
           <SettingsStackedField label={t('settings.integrations.tracker.field.clientId')} controlClassName="w-full max-w-none">
             <Input value={clientId} onChange={(event) => setClientId(event.target.value)} autoComplete="off" spellCheck={false} className={fieldClass} disabled={isBusy || isWaiting} />
@@ -386,10 +389,12 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
   ) : null;
 
   const addAccount = () => {
-    if (!extension || (formMethod === 'oauth' && !bothMethods && connect?.hasClient && !needsInstance)) {
+    const picksSite = capabilities.multipleAccounts && connect?.instances.kind === 'user';
+    if (!extension || (!picksSite && formMethod === 'oauth' && !bothMethods && hasClientForTarget && !needsInstance)) {
       void startConnect();
       return;
     }
+    setInstance(connect?.instance ?? '');
     setAdding(true);
   };
 
@@ -512,6 +517,9 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
                           <p className="truncate text-xs text-[var(--status-warning)]">{t('settings.integrations.tracker.status.invalid')}</p>
                         ) : entry.user?.name && entry.user.name !== entry.name ? (
                           <p className="truncate text-xs text-muted-foreground">{entry.user.name}</p>
+                        ) : null}
+                        {entry.instance ? (
+                          <p className="truncate text-xs text-muted-foreground">{t('settings.integrations.tracker.account.instance', { instance: entry.instance })}</p>
                         ) : null}
                       </div>
                       <Button type="button" size="sm" variant="ghost" onClick={() => void activateAccount(entry.id)} disabled={isBusy || entry.status === 'invalid'}>
