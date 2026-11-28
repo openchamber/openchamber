@@ -194,8 +194,9 @@ generic rendering.
   After an empty plugin list, a successful empty `debug.location.list` allows
   the read to proceed for backends without native locations. Native OpenCode
   registers the location before answering the plugin request, so a cold
-  native catalog still waits for activation. A failed inventory probe does
-  not bypass the wait.
+  native catalog still waits for activation. An inventory probe runs alongside
+  plugin polling, so a stalled probe cannot hold back a ready native catalog.
+  A failed inventory probe does not bypass the wait.
 - Integration snapshots belong to the runtime and the directory they were read
   for (the Providers page reads for the project selected in Settings), and are
   provisional when Settings opens. A read first waits for that location's

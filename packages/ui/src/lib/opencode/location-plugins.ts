@@ -20,22 +20,36 @@ const waitForLocation = (
   isStateless?: (signal: AbortSignal) => Promise<boolean>,
 ): Promise<boolean> => withAbortDeadline(LIMIT_MS, async (signal) => {
   let checkStateless = isStateless
-  while (!signal.aborted && isCurrent()) {
-    let plugins
-    try {
-      plugins = (await client.plugin.list(undefined, { signal })).data
-    } catch {
-      return false
+  let statelessProbe: Promise<boolean> | undefined
+  const probeController = new AbortController()
+  const abortProbe = () => probeController.abort()
+  signal.addEventListener("abort", abortProbe, { once: true })
+  try {
+    while (!signal.aborted && isCurrent()) {
+      let plugins
+      try {
+        plugins = (await client.plugin.list(undefined, { signal })).data
+      } catch {
+        return false
+      }
+      if (plugins.length > 0) return isCurrent()
+      if (checkStateless && !signal.aborted && isCurrent()) {
+        statelessProbe = checkStateless(probeController.signal).then((ready) => {
+          if (!ready) statelessProbe = undefined
+          return ready
+        })
+        checkStateless = undefined
+      }
+      if (statelessProbe) {
+        if (await Promise.race([statelessProbe, delay(POLL_MS).then(() => false)]))
+          return !signal.aborted && isCurrent()
+      } else await delay(POLL_MS)
     }
-    if (plugins.length > 0) return isCurrent()
-    if (checkStateless && !signal.aborted && isCurrent()) {
-      const stateless = await checkStateless(signal)
-      if (stateless) return !signal.aborted && isCurrent()
-      checkStateless = undefined
-    }
-    await delay(POLL_MS)
+    return false
+  } finally {
+    probeController.abort()
+    signal.removeEventListener("abort", abortProbe)
   }
-  return false
 })
 
 export const waitForLocationPlugins = (client: Pick<OpenCodeClient, "plugin">, isCurrent?: () => boolean) =>

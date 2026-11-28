@@ -1386,6 +1386,29 @@ describe("messages and config", () => {
     })
   })
 
+  test("keeps polling native plugins while the location inventory request hangs", async () => {
+    const location = { directory: "/repo/app" }
+    const provider = { id: "anthropic", name: "Anthropic" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants: [] }
+    let pluginReads = 0
+    pluginList = () => ++pluginReads > 1 ? activatedPlugins() : json({ location, data: [] })
+    const answer = (request: CapturedRequest) => {
+      switch (request.url.pathname) {
+        case "/api/model": return json({ location, data: [model] })
+        case "/api/model/default": return json({ location, data: model })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(HANG, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  }, 8_000)
+
   test("a fresh provider read waits out the one in flight and reads again", async () => {
     const answer = (request: CapturedRequest) =>
       request.url.pathname === "/api/provider"
