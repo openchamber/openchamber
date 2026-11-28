@@ -128,7 +128,7 @@ The form encoder owns omission so every exchange and refresh caller follows the 
 
 ### Why provider account switches have their own callback
 
-The user approves one grant to list and switch accounts for all model providers. Giving the read-only OpenCode role access to the credential endpoint would expose the stored keys and tokens. The callback projects the allowed fields and uses the existing host service authorization. It adds no listener and changes no stored grant scope. On failure the host logs the operation and a known error category or a host-authored message, not OpenCode's message or response body.
+The user approves one grant to list and switch accounts for all model providers. Giving the read-only OpenCode role access to the credential endpoint would expose the stored keys and tokens. The callback projects the allowed fields and uses the existing host service authorization. It adds no listener and changes no stored grant scope. The host logs failed calls and returns a generic 502. A rejected plugin read keeps its cause in that warning, so an OpenCode authentication failure does not look like a slow plugin startup.
 
 ### Why limit failover shares the account write queue
 
