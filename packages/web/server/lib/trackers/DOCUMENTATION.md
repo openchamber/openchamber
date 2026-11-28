@@ -19,11 +19,15 @@ Repository issues (GitHub, GitLab, Gitea) are not trackers. They belong to the s
 
 Older bundled UIs know only `kind: 'linear'`. They leave every other kind out of the list they show and rebuild that list when they write a link, so a Linear entry stored as `tracker` would disappear from session metadata the next time such a client links something. While the `/api/linear` alias serves those UIs, a Linear entry is written as `kind: 'linear'` with `provider: 'linear'` beside it, and only other trackers, which older UIs cannot show anyway, are written as `kind: 'tracker'`. Readers (`session-linked-issues.js`, the UI) accept both kinds. Drop this rule together with the alias.
 
+### Why health rides provider answers and not a poll
+
+Nothing calls `auth.verify` again when reads keep succeeding but come back empty, so a poll would never see the token that was revoked and still answers 200. The first read that comes back wrong already carries the reason, which is why the report rides any provider answer and the host only stamps and stores it.
+
 ## Contract
 
 - `createTrackerRegistry(entries, { foreignIds })` returns `has`, `descriptor(id)`, `descriptors()`, `list()` and `implementation(id)`, plus `attachExtension({ descriptor, load })` and `detachExtension(id)` for the extension layer. An unknown id is `null` everywhere, never a throw. `list()` and `descriptors()` answer what is registered now, built-ins first, so every consumer that reads them at call time (routes, the session linker, tracked items, the read cache through `trackerIds: () => trackers.list()`, the session-status fan-out) follows an extension that attaches or detaches.
 - A descriptor is plain JSON: id, name, auth methods, capabilities, state filter ids in menu order, URL patterns and the identifier pattern. No icon and no translated text; the UI adds presentation per id with a generic fallback. A URL pattern may name a `query` parameter that carries the identifier instead of the path's first group (`?selectedIssue={id}`), checked against the identifier pattern.
-- `auth.status({ origin })` may answer `connect` beside the accounts, what an extension tracker's card needs to connect: the instance, whether an OAuth client is saved, the redirect URI for `origin`. An account may carry `status`, `invalidReason` and `method`. A built-in answers none of these.
+- `auth.status({ origin })` may answer `connect` beside the accounts, what an extension tracker's card needs to connect: the instance, whether an OAuth client is saved, the redirect URI for `origin`. An account may carry `status`, `invalidReason`, `method`, and `health`, the last report the provider made beside its `data` (`{ state: 'needs-attention', reason, checkedAt }`; `ok` clears it, a reconnect and activation start it clean, a silent token renewal keeps it). A built-in answers none of these.
 - An implementation is loaded on first use and kept. A failed load is not cached.
 - Implementations are JSON in, JSON out, with every Linear (or other provider) shape mapped to the neutral one inside the provider's module.
 

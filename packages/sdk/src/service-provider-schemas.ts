@@ -21,6 +21,7 @@ import {
   SOURCE_CONTROL_PROVIDER_TARGET_MAX,
   type SourceControlProviderMethod,
   TRACKER_PROVIDER_CONTAINERS_MAX,
+  TRACKER_PROVIDER_HEALTH_REASON_MAX,
   TRACKER_PROVIDER_LIST_MAX,
   TRACKER_PROVIDER_LIVE_SUMMARIES_MAX,
   TRACKER_PROVIDER_METHODS,
@@ -512,6 +513,15 @@ const trackerLiveSummariesSchema = z.object({
 const trackerContainersSchema = z.object({ containers: z.array(trackerContainer).max(TRACKER_PROVIDER_CONTAINERS_MAX) }).strict();
 const trackerCommentDataSchema = z.object({ comment: z.object({ id: trackerText }).strict().nullable() }).strict();
 
+const trackerHealthSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('ok') }).strict(),
+  z.object({ state: z.literal('needs-attention'), reason: z.string().trim().min(1).max(TRACKER_PROVIDER_HEALTH_REASON_MAX) }).strict(),
+]);
+const trackerEnvelopeSchema = z.union([
+  z.object({ ok: z.literal(true), data: z.json(), health: trackerHealthSchema.optional() }).strict(),
+  z.object({ ok: z.literal(false), error: errorSchema }).strict(),
+]);
+
 type Parsed<T extends z.ZodType> = z.output<T>;
 const assertTrackerSummary: (value: Parsed<typeof trackerItemSummarySchema>) => TrackerProviderItemSummary = (value) => value;
 const assertTrackerItem: (value: Parsed<typeof trackerItemSchema>) => TrackerProviderItem = (value) => value;
@@ -537,8 +547,9 @@ const trackerDataSchemas = {
 } satisfies Record<TrackerProviderMethod, z.ZodType>;
 
 export const trackerProviderSchemasV1 = {
-  envelope: envelopeSchema,
+  envelope: trackerEnvelopeSchema,
   error: errorSchema,
+  health: trackerHealthSchema,
   account: trackerAccountSchema,
   probe: probeSchema,
   itemSummary: trackerItemSummarySchema,

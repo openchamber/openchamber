@@ -687,6 +687,7 @@ export const TRACKER_PROVIDER_IDLE_MS = 10 * 60_000;
 export const TRACKER_PROVIDER_LIST_MAX = 100;
 export const TRACKER_PROVIDER_LIVE_SUMMARIES_MAX = 50;
 export const TRACKER_PROVIDER_CONTAINERS_MAX = 500;
+export const TRACKER_PROVIDER_HEALTH_REASON_MAX = 256;
 export const TRACKER_OUTBOUND_PATH = '/tracker/outbound';
 export const TRACKER_OUTBOUND_TIMEOUT_MS = 20_000;
 
@@ -699,7 +700,6 @@ export const trackerProviderTimeoutMs = (method: TrackerProviderMethod): number 
   if (isTrackerProviderWriteMethod(method)) return TRACKER_PROVIDER_WRITE_TIMEOUT_MS;
   return TRACKER_PROVIDER_READ_TIMEOUT_MS;
 };
-
 
 export type TrackerProviderStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
 export type TrackerProviderPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
@@ -794,8 +794,9 @@ export type TrackerProviderDataByMethod = {
 };
 
 export type TrackerProviderError = SourceControlProviderError;
+export type TrackerProviderHealth = { state: 'ok' } | { state: 'needs-attention'; reason: string };
 export type TrackerProviderResult =
-  | { ok: true; data: SourceControlJson }
+  | { ok: true; data: SourceControlJson; health?: TrackerProviderHealth }
   | { ok: false; error: TrackerProviderError };
 
 export const isTrackerProviderMethod = (value: string): value is TrackerProviderMethod => (
@@ -854,7 +855,6 @@ export const createTrackerOutbound = ({ env }: { env: Record<string, string | un
       (message, code, status) => new TrackerOutboundError(message, code, status)),
   };
 };
-
 
 export const QUOTA_PROVIDER_PATH = '/quota';
 export const QUOTA_PROVIDER_WIRE_VERSION = 1;

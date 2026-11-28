@@ -280,13 +280,15 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
   const account = status?.connected ? status.account ?? null : null;
   const user = account?.user;
   const storedAccounts = status?.accounts ?? [];
-  const needsAttention = account?.status === 'invalid' || (!connected && storedAccounts.some((entry) => entry.status === 'invalid'));
+  const writtenOff = !connected ? storedAccounts.find((entry) => entry.status === 'invalid' || entry.health) ?? null : null;
+  const attentionHealth = account?.health ?? writtenOff?.health ?? null;
+  const invalidAccount = account?.status === 'invalid' || (!connected && storedAccounts.some((entry) => entry.status === 'invalid'));
+  const needsAttention = invalidAccount || Boolean(attentionHealth);
   const otherAccounts = capabilities.multipleAccounts && status?.connected
     ? (status.accounts ?? []).filter((entry) => !entry.current)
     : [];
   const displayName = user?.name?.trim() || t(copy.unknownUser);
   const workspaceName = account?.name?.trim() && account.name.trim() !== displayName ? account.name.trim() : null;
-  const writtenOff = !connected ? storedAccounts.find((entry) => entry.status === 'invalid') ?? null : null;
   const statusLabel = isWaiting
     ? t(copy.waiting)
     : isLoading && !hasChecked
@@ -486,7 +488,8 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
             {!connected && connect?.instance ? (
               <p className="truncate text-xs text-muted-foreground">{t('settings.integrations.tracker.account.instance', { instance: connect.instance })}</p>
             ) : null}
-            <p className="typography-meta text-[var(--status-warning)]">{t('settings.integrations.tracker.invalid.hint', { provider })}</p>
+            {invalidAccount ? <p className="typography-meta text-[var(--status-warning)]">{t('settings.integrations.tracker.invalid.hint', { provider })}</p> : null}
+            {attentionHealth ? <p className="typography-meta text-muted-foreground">{attentionHealth.reason}</p> : null}
           </div>
         ) : null}
 
@@ -510,6 +513,8 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
                         </div>
                         {entry.status === 'invalid' ? (
                           <p className="truncate text-xs text-[var(--status-warning)]">{t('settings.integrations.tracker.status.invalid')}</p>
+                        ) : entry.health ? (
+                          <p className="truncate text-xs text-[var(--status-warning)]">{entry.health.reason}</p>
                         ) : entry.user?.name && entry.user.name !== entry.name ? (
                           <p className="truncate text-xs text-muted-foreground">{entry.user.name}</p>
                         ) : null}

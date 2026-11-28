@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
+import { TRACKER_PROVIDER_HEALTH_REASON_MAX } from '@openchamber/sdk';
+
 import { TrackerRouteError } from './route-error.js';
 import type { TrackerOAuthTarget } from './extension-oauth.js';
 
@@ -37,6 +39,11 @@ const accountSchema = z.object({
   connectedAt: z.number().int().nonnegative(),
   status: z.enum(['valid', 'invalid']),
   invalidReason: text(256).optional(),
+  health: z.object({
+    state: z.literal('needs-attention'),
+    reason: text(TRACKER_PROVIDER_HEALTH_REASON_MAX),
+    checkedAt: z.number().int().nonnegative(),
+  }).strict().optional(),
   credential: credentialSchema,
 }).strict();
 
@@ -85,6 +92,7 @@ type PublicAccount = Omit<StoredTrackerAccount, 'credential' | 'revision' | 'nam
   invalidReason?: string;
 };
 type ConnectAccount = Pick<StoredTrackerAccount, 'id' | 'login' | 'name' | 'avatarUrl'>;
+type HealthReport = { state: 'ok' } | { state: 'needs-attention'; reason: string };
 
 const emptyStore = (): AccountStore => ({ version: 1, trackers: {} });
 const emptyTracker = (): StoredTracker => ({ instance: null, accounts: [], activeAccountId: null });
@@ -106,6 +114,7 @@ const publicAccountOf = (account: StoredTrackerAccount) => {
   if (account.name) view.name = account.name;
   if (account.avatarUrl) view.avatarUrl = account.avatarUrl;
   if (account.invalidReason) view.invalidReason = account.invalidReason;
+  if (account.health) view.health = account.health;
   return view;
 };
 
@@ -253,6 +262,7 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       const account = tracker?.accounts.find((candidate) => candidate.id === accountId && candidate.status === 'valid');
       if (!account || !tracker) return { wrote: false, result: false };
       tracker.activeAccountId = accountId;
+      delete account.health;
       return { result: true };
     }),
 
@@ -279,6 +289,18 @@ export const createTrackerAccounts = ({ persistPath, now = Date.now, fsImpl = fs
       if (tracker.activeAccountId === accountId) {
         tracker.activeAccountId = tracker.accounts.find((candidate) => candidate.status === 'valid')?.id ?? accountId;
       }
+      return { result: true };
+    }),
+
+    setHealth: (providerId: string, accountId: string, health: HealthReport, expectedRevision?: string) => mutate((store) => {
+      const account = accountAt(store.trackers[providerId], accountId, expectedRevision);
+      if (!account) return { wrote: false, result: false };
+      if (health.state === 'ok') {
+        if (!account.health) return { wrote: false, result: true };
+        delete account.health;
+        return { result: true };
+      }
+      account.health = { state: 'needs-attention', reason: health.reason, checkedAt: now() };
       return { result: true };
     }),
 
