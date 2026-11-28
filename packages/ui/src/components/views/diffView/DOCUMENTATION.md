@@ -73,6 +73,13 @@ remain in their existing neighbouring modules.
   Walkthrough, start collapsed when a scope initializes, collapse when marked
   reviewed, and auto-unreview and expand when status/revision/patch metadata or
   targeted working-tree git refresh hints indicate the file changed.
+- A file row's reviewed toggle runs the same reviewed action as the file header
+  and never selects the file or a folder: it is a sibling of the row button,
+  lies over the reviewed mark's slot so a row never shows two checks, is
+  revealed on a mouse hover or `:focus-visible`, stays visible and clickable
+  where nothing can hover, and lets clicks reach the row while hidden. The
+  reviewed state stays in the row button's accessible name through the slot's
+  hidden "Reviewed" text.
 - State and refs belong to the retained view instance. Passing them between
   hooks preserves their identities, cache scope and hidden-view lifecycle.
 - An entry keeps its own loading, context expansion and hunk-mutation state.
@@ -81,6 +88,21 @@ remain in their existing neighbouring modules.
   sticky headers, header-slot placement and review provider keep their hierarchy.
 
 ## Decisions
+
+### Why the row's reviewed toggle lies over the reviewed mark
+
+A button cannot hold another button, so the toggle is a sibling of the row
+button and shares the row's last slot with the reviewed mark: the tree ends its
+sticky end lane with that slot and overlays it with a sticky lane, the flat list
+reserves it as the row button's end padding and overlays it with an absolutely
+positioned lane. One slot means a row never shows two checks and nothing moves
+between states, and the avatars and the status letter stay inside the button so
+they still open the file. The hidden toggle is transparent to clicks, so a row
+tapped without a hover opens the file; the reveal follows a mouse-only pointer
+marker rather than `:hover`, because a tap on a device whose primary pointer can
+hover sets `:hover` before its click and the click then landed on the revealed
+toggle. `pointer-coarse` and `hover: none` widen the slot and the toggle's box
+in the flow for the touch target, while the button replaces the mark.
 
 ### Why content and file rendering stay in the view
 
