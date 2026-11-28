@@ -507,9 +507,9 @@ export const DefaultsSettings: React.FC = () => {
         </SettingsSection>
       )}
 
-      <SettingsSection title={t('settings.layout.sessions.helperModels.title')} contentClassName="space-y-2">
+      <SettingsSection title={t('settings.layout.sessions.helperModels.title')} settingsItem="sessions.small-model" contentClassName="space-y-2">
         <SettingsCheckboxRow
-          settingsItem="sessions.small-model"
+          settingsItem="sessions.small-model-use-default"
           checked={smallModelUseDefault}
           onChange={(checked) => {
             void handleSmallModelUseDefaultChange(checked);
