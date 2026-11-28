@@ -123,6 +123,7 @@ A hook here owns the lifetime of what it subscribes to. Mechanics that another m
 
 - The tray and dock badge admit only sessions with a sidebar row. Sessions from unconfigured directories cannot be opened or cleared from there, and pending approvals follow the same rule.
 - Tray status comes from the status map, not the session list: a session can have a live status before it appears in a list, and several stores can list it. A session is active when either the synced child stores or the cross-project map says so.
+- The push visibility beacon renews "visible" every 20 s, inside the server's 30 s TTL, and its timer runs only while the page or app is visible: a hidden client sends nothing, so a backgrounded phone is not woken for it. In a browser each renewal checks visibility again, because focus can leave without an event the hook listens to.
 - Push visibility on the native app follows `App.appStateChange`. Web visibility signals are unreliable in a WKWebView, where `hasFocus()` can report false while the app is active, which leaked push notifications.
 - iOS grants `navigator.wakeLock` only inside a tap, so the native app uses its own idle-timer plugin. Android drops the wake lock when the app leaves the screen, so it is requested again on visibility.
 - In-flight archive retries stay quiet and never open a trust prompt from a background pass.

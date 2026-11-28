@@ -22,7 +22,9 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 ### Protocol helpers
 - `MESSAGE_STREAM_GLOBAL_WS_PATH`: `/api/global/event/ws`
 - `MESSAGE_STREAM_DIRECTORY_WS_PATH`: `/api/event/ws`
-- `MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS`: heartbeat interval for browser-facing WS connections.
+- `MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS`: 15 s, the default heartbeat interval for browser-facing WS connections.
+- `MESSAGE_STREAM_WS_MAX_HEARTBEAT_INTERVAL_MS`: 30 s, the longest interval a client may ask for.
+- `resolveMessageStreamWsHeartbeat(requested, defaultIntervalMs)`: reads the `heartbeat` query parameter (milliseconds) into `{ intervalMs, upstreamAware }`. The request is held between the default and 30 s; a client that sends the parameter at all is `upstreamAware`.
 - `MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES`: 16 MiB of pending outbound bytes per client. A healthy client stays near 0, and the limit trips only when a client is far behind, which is what the value measures. Bursts in long agent sessions need the headroom.
 - `MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES`: 12 MiB, where the server sends one `backpressure` frame so the client can shed low-priority updates before the hard disconnect. The flag keeps the warning one-shot because repeated warnings would grow the buffer they warn about, and it resets once the buffer drains below the threshold.
 - `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, payload }`.
@@ -77,9 +79,11 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - A shell command the user ran from the composer stays `session.shell.started`; it is not a user message.
 - Directory WS clients still attach one upstream `/event?directory=...` SSE reader per connection because directory streams are scoped.
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.
-- When the shared global upstream reconnects after it was previously ready, the global WS bridge sends a fresh `ready` frame to already-ready browser clients. The browser treats this as a reconnect edge and can run scoped state repair without requiring the browser WS to close.
+- When the shared global upstream reconnects, the global WS bridge sends a fresh `ready` frame to already-ready browser clients. The browser treats this as a reconnect edge and can run scoped state repair without requiring the browser WS to close.
 - Health checks are reserved for initial upstream connect failures and explicit upstream-unavailable responses, not for ordinary stall recovery on an already-established stream.
-- Global synthetic events such as `openchamber:session-status`, `openchamber:session-activity`, `openchamber:notification`, and `openchamber:heartbeat` are preserved on the WS path, but heartbeat frames are emitted only while an upstream SSE stream is actively attached.
+- Global synthetic events such as `openchamber:session-status`, `openchamber:session-activity`, `openchamber:notification`, and `openchamber:heartbeat` are preserved on the WS path.
+- An idle socket gets one data frame per heartbeat interval and nothing else: `openchamber:heartbeat` while the upstream is attached. The interval is the one the client asked for in `heartbeat` (the UI asks for 15 s, a phone for 30 s), or 15 s. While the hub has lost its upstream, an `upstreamAware` client gets `{ type: "upstream-unavailable" }` in its place, and gets it on connect when the outage is already running; the next `ready` ends the outage. A client that sends no `heartbeat` parameter is an older build that does not know the frame, so it hears nothing during an outage, as before, and its own liveness timeout reconnects it. The directory bridges take the interval but send heartbeats only while their reader is attached; they have no UI client.
+- Every `connect` of the hub sends a fresh `ready` with the cursor to clients that are already ready, including the connect after `rebindUpstream`, which restarts the hub. Those clients saw the previous upstream, so the connect always follows a gap.
 - Global UI broadcasts are fan-out capable across both SSE and WS clients.
 - Global UI broadcasts serialize once per wire format, irrespective of client count. The SSE writer accepts an optional pre-serialized payload; isolated callers keep the two-argument contract. Failed or backpressured clients cannot block delivery to healthy clients.
 - The reusable upstream reader centralizes SSE fetch/parsing/reconnect behavior for the WS runtime and OpenCode watcher. Additional event consumers should move to it only with parity tests for their lifecycle and error semantics.
@@ -106,6 +110,14 @@ The directory WS bridge and the SSE proxy (`/api/global/event`, used by Capacito
 
 ## Decisions
 
+### Why one heartbeat frame and not a raw ping beside it
+
+The bridges used to send a protocol ping and an `openchamber:heartbeat` frame on every tick. Nothing listened for the pong, so the ping detected no dead socket; a write to a dead peer fails at the TCP layer either way, and the JSON frame is such a write. Browsers cannot see pings, so client liveness and reverse-proxy idle timers already ran on the JSON frame, while each ping cost the client a pong on its uplink. Over the relay the ping never left the machine: the tunnel host's loopback socket answers it. The cap of 30 s on a requested interval keeps a reverse proxy that closes idle connections at 60 s safe even when one heartbeat is late, and the relay host reaps data sockets only after 90 s.
+
+### Why an outage is a frame and not silence
+
+Heartbeats used to stop while the hub had no upstream, which was the only way a client learned that OpenCode was gone. The client then timed out, reconnected, timed out waiting for `ready`, and repeated with backoff (or fell back to SSE) for the whole outage. `upstream-unavailable` tells the client the same thing within one interval while its socket stays open, and the `ready` the hub already sends on reconnect ends it. Closing sockets when the hub loses upstream was rejected for the same loop. Only clients that announce their interval get the frame, because an older client parses it as an unknown frame and would count it as liveness, staying "connected" through the outage.
+
 ### Why the wire contract retains arbitrary JSON
 
 The SSE parser accepts every valid JSON value, including primitives and arrays. The transport forwards opaque payload fields unchanged, and the translator validates only the fields it reads. `contracts.ts` describes these JSON values separately from parsed envelope metadata, replay entries, socket operations and upstream lifecycle results. The delta schema checks the original event without replacing it with Zod's stripped output, so unrecognized fields and object identity survive forwarding and merging.
@@ -119,7 +131,7 @@ JavaScript subscribers can return incidental values, such as the length returned
 The runtime imports the `ws` constructor at runtime and its socket types from `shared/websocket-contracts.js`. The shared declaration includes disabled client tracking, so shutdown checks the client collection inside the existing catch boundary. An absent collection still skips server close and clears the broadcast clients. Request URLs retain a string guard at the HTTP boundary; internal routing options use their declared string-or-null contract. Broadcaster payloads remain generic because serialization also accepts caller-owned objects with `toJSON`.
 
 ### Why a managed restart rebinds readers and does not wait for them to notice
-A managed OpenCode restart can land on a new port while the old process, or an orphaned survivor of it, still holds the previous one. An SSE reader stays pinned to the URL it connected to and a healthy stream never notices, so the UI would stop receiving events until the app restarts (#2638). `rebindUpstream` restarts the shared hub, which re-dials `buildOpenCodeUrl` and reads the current port on its next attempt, and closes the directory-scoped client sockets. Those clients reconnect with `Last-Event-ID` and establish the stream against the new port. The runtime tracks directory sockets because a per-connection reader otherwise keeps streaming from the orphaned process.
+A managed OpenCode restart can land on a new port while the old process, or an orphaned survivor of it, still holds the previous one. An SSE reader stays pinned to the URL it connected to and a healthy stream never notices, so the UI would stop receiving events until the app restarts (#2638). `rebindUpstream` restarts the shared hub, which re-dials `buildOpenCodeUrl` and reads the current port on its next attempt, and closes the directory-scoped client sockets. Those clients reconnect with `Last-Event-ID` and establish the stream against the new port. The runtime tracks directory sockets because a per-connection reader otherwise keeps streaming from the orphaned process. Each reader the hub starts carries a generation, and callbacks of a stopped one change nothing: the old reader's loop can end after the replacement connected, and its late disconnect would otherwise mark the live upstream lost, so clients would hear `upstream-unavailable` while events still flowed.
 
 ### Why a quiet compaction is marked before it starts and not recognized by its messages
 

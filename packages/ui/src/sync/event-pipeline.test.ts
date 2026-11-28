@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client"
 import type { SyncEvent } from "@/lib/opencode/events"
 import type { JsonValue } from "@/lib/opencode/model"
@@ -602,6 +602,57 @@ describe("createEventPipeline over the WebSocket transport", () => {
     // The ready frame and the heartbeat frame both prove the socket is alive. Neither is an event.
     expect(activity).toBe(2)
     expect(delivered).toEqual([])
+  })
+
+  test("keeps a socket the server parked while OpenCode is away, and connects on its ready", async () => {
+    const paths: string[] = []
+    const sockets: RelayTunnelWebSocket[] = []
+    let socketOpened!: () => void
+    const firstSocket = new Promise<void>((resolve) => { socketOpened = resolve })
+    const tunnel: RelayTunnelClient = {
+      async fetch() { throw new Error("the WebSocket transport must not fetch") },
+      openWebSocket(pathWithQuery) {
+        paths.push(pathWithQuery)
+        const socket = createFakeSocket()
+        sockets.push(socket)
+        socketOpened()
+        return socket
+      },
+      getStatus: () => ({ state: "connected" }),
+      subscribeStatus: () => () => undefined,
+      retry: () => undefined,
+      close: () => undefined,
+    }
+    adoptRelayTunnel({ relayUrl: "wss://relay.test", serverId: "fixture", hostEncPubJwk: {} }, tunnel)
+    Object.assign(window, { __OPENCHAMBER_SURFACE__: "mobile" })
+    jest.useFakeTimers()
+    const states: string[] = []
+    const pipeline = createEventPipeline({
+      sdk: createSdk([], () => undefined),
+      onEvents: () => undefined,
+      onDisconnect: (reason) => { states.push(`down:${reason}`) },
+      onReconnect: () => { states.push("up") },
+      transport: "ws",
+      wsReadyTimeoutMs: 20,
+      reconnectDelayMs: 1,
+    })
+    try {
+      await firstSocket
+      // A phone asks for its interval, which also tells the server it understands the parked state.
+      expect(paths[0]).toContain("heartbeat=30000")
+      sockets[0].onmessage?.({ data: JSON.stringify({ type: "upstream-unavailable" }) })
+      // Well past the ready timeout: the parked socket stays open and nothing reconnects.
+      jest.advanceTimersByTime(1_000)
+      await Promise.resolve()
+      expect(sockets).toHaveLength(1)
+      expect(sockets[0].readyState).toBe(1)
+      expect(states).toEqual(["down:ws_upstream_unavailable"])
+      sockets[0].onmessage?.({ data: JSON.stringify({ type: "ready" }) })
+      expect(states).toEqual(["down:ws_upstream_unavailable", "up"])
+    } finally {
+      pipeline.cleanup()
+      jest.useRealTimers()
+    }
   })
 
   test("retries a WebSocket route that worked before, and falls back to SSE on one that never did", async () => {

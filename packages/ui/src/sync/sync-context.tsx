@@ -62,7 +62,7 @@ import { openCodeStartupSignal } from "./opencode-startup-gate"
 import { notifyStreamGap } from "./stream-gap"
 import { type OpenCodeClient, type CurrentDirectorySource, type SyncRuntime, type SyncSystem, SyncContext, SyncRuntimeContext } from "./sync-runtime-context"
 import { type EventRoutingIndex, createEventRoutingIndex, ingestDirectoryStateIntoRoutingIndex, resolveDirectoryFromRoutingIndex, setIndexedSessionDirectory } from "./event-routing-index"
-import { type DirectoryReadBackoff, recordWatchdogReadFailure, CHILD_SESSION_DISCOVERY_RETRY_MS, ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS, ACTIVE_SESSION_STATUS_POLL_MAX_BACKOFF_MS, CHILD_SESSION_DISCOVERY_WAIT_MS, ACTIVE_SESSION_STALE_EVENT_MS, ACTIVE_SESSION_STATUS_POLL_HEALTHY_INTERVAL_MS, shouldTriggerStaleResync, ACTIVE_SESSION_WATCHDOG_INTERVAL_MS, ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS } from "./sync-watchdog-policy"
+import { type DirectoryReadBackoff, recordWatchdogReadFailure, CHILD_SESSION_DISCOVERY_RETRY_MS, ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS, ACTIVE_SESSION_STATUS_POLL_MAX_BACKOFF_MS, CHILD_SESSION_DISCOVERY_WAIT_MS, messageStreamStaleAfterMs, ACTIVE_SESSION_STATUS_POLL_HEALTHY_INTERVAL_MS, shouldTriggerStaleResync, ACTIVE_SESSION_WATCHDOG_INTERVAL_MS, ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS } from "./sync-watchdog-policy"
 import { listSessionPage } from "./session-page-listing"
 import { enqueueSessionMaterialization } from "./session-materialization-recovery"
 import { statusPollingDirectories, resyncDirectorySessionStatuses, needsSnapshotAfterStatusPoll, getActiveSessionCandidateIds, getLiveSessionCandidateIds } from "./session-status-recovery"
@@ -790,7 +790,7 @@ export function SyncProvider(props: {
 
             const liveSessionIds = getLiveSessionCandidateIds(state)
             const lastStatusPollAt = lastStatusPollAtByDirectoryRef.current.get(directory) ?? 0
-            const streamHealthy = now - lastStreamActivityAtRef.current < ACTIVE_SESSION_STALE_EVENT_MS
+            const streamHealthy = now - lastStreamActivityAtRef.current < messageStreamStaleAfterMs()
             const statusPollInterval = statusPollBackoff.get(directory)
               ?? (streamHealthy ? ACTIVE_SESSION_STATUS_POLL_HEALTHY_INTERVAL_MS : ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS)
             if (liveSessionIds.length > 0 && now - lastStatusPollAt >= statusPollInterval) {

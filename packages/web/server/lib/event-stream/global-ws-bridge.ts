@@ -1,5 +1,5 @@
-import { sendMessageStreamWsEvent, sendMessageStreamWsFrame, sendSerializedMessageStreamWsFrame, serializeMessageStreamWsEvent } from './protocol.js';
-import type { BridgeOptions, GlobalReadyFrame, InitialStreamError, StreamSocket } from './contracts.js';
+import { sendMessageStreamWsFrame, sendMessageStreamWsHeartbeat, sendSerializedMessageStreamWsFrame, serializeMessageStreamWsEvent } from './protocol.js';
+import type { BridgeOptions, GlobalReadyFrame, InitialStreamError, StreamSocket, WsHeartbeat } from './contracts.js';
 import type { GlobalMessageStreamHub, ReplayEntry } from './global-hub.js';
 import type { UpstreamResponse } from './upstream-reader.js';
 
@@ -132,15 +132,13 @@ export function createGlobalMessageStreamWsBridge({
           continue;
         }
 
-        if (status.wasReady) {
-          const sent = sendMessageStreamWsFrame(socket, {
-            type: 'ready',
-            scope: 'global',
-            cursor: globalHub.cursor(),
-          });
-          if (!sent) {
-            removeClient(socket);
-          }
+        const sent = sendMessageStreamWsFrame(socket, {
+          type: 'ready',
+          scope: 'global',
+          cursor: globalHub.cursor(),
+        });
+        if (!sent) {
+          removeClient(socket);
         }
       }
       return;
@@ -170,29 +168,21 @@ export function createGlobalMessageStreamWsBridge({
     }
   });
 
-  const accept = (socket: StreamSocket, { requestedLastEventId = '' } = {}) => {
-    const pingInterval = setInterval(() => {
-      if (socket.readyState !== 1) {
-        return;
-      }
+  const sendUpstreamUnavailable = (socket: StreamSocket) => sendMessageStreamWsFrame(socket, { type: 'upstream-unavailable' });
 
-      try {
-        socket.ping();
-      } catch {
-        void 0;
-      }
-    }, heartbeatIntervalMs);
-
+  const accept = (socket: StreamSocket, {
+    requestedLastEventId = '',
+    heartbeat = { intervalMs: heartbeatIntervalMs, upstreamAware: false },
+  }: { requestedLastEventId?: string; heartbeat?: WsHeartbeat } = {}) => {
     const heartbeatInterval = setInterval(() => {
-      if (!globalHub.isConnected()) {
-        return;
+      if (globalHub.isConnected()) {
+        sendMessageStreamWsHeartbeat(socket);
+      } else if (heartbeat.upstreamAware) {
+        sendUpstreamUnavailable(socket);
       }
-
-      sendMessageStreamWsEvent(socket, { type: 'openchamber:heartbeat', timestamp: Date.now() }, { directory: 'global' });
-    }, heartbeatIntervalMs);
+    }, heartbeat.intervalMs);
 
     socket.on('close', () => {
-      clearInterval(pingInterval);
       clearInterval(heartbeatInterval);
       removeClient(socket);
       stopHubIfUnused();
@@ -207,6 +197,8 @@ export function createGlobalMessageStreamWsBridge({
     globalHub.start();
     if (globalHub.isConnected()) {
       markReady(socket, requestedLastEventId);
+    } else if (heartbeat.upstreamAware && globalHub.hasConnected()) {
+      sendUpstreamUnavailable(socket);
     }
   };
 

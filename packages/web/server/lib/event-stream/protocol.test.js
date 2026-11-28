@@ -6,6 +6,7 @@ import {
   MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES,
   MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES,
   parseSseEventEnvelope,
+  resolveMessageStreamWsHeartbeat,
   sendMessageStreamWsEvent,
   sendMessageStreamWsFrame,
 } from './protocol.js';
@@ -14,6 +15,15 @@ describe('event stream protocol helpers', () => {
   it('exports stable websocket paths', () => {
     expect(MESSAGE_STREAM_GLOBAL_WS_PATH).toBe('/api/global/event/ws');
     expect(MESSAGE_STREAM_DIRECTORY_WS_PATH).toBe('/api/event/ws');
+  });
+
+  it('holds a requested heartbeat between the default and 30 s, and marks the client aware of it', () => {
+    expect(resolveMessageStreamWsHeartbeat(null, 15_000)).toEqual({ intervalMs: 15_000, upstreamAware: false });
+    expect(resolveMessageStreamWsHeartbeat('30000', 15_000)).toEqual({ intervalMs: 30_000, upstreamAware: true });
+    // A proxy closing idle sockets at 60 s must still see a frame even when one is late.
+    expect(resolveMessageStreamWsHeartbeat('120000', 15_000)).toEqual({ intervalMs: 30_000, upstreamAware: true });
+    expect(resolveMessageStreamWsHeartbeat('1000', 15_000)).toEqual({ intervalMs: 15_000, upstreamAware: true });
+    expect(resolveMessageStreamWsHeartbeat('soon', 15_000)).toEqual({ intervalMs: 15_000, upstreamAware: true });
   });
 
   it('reads the event id and directory out of a v2 payload', () => {

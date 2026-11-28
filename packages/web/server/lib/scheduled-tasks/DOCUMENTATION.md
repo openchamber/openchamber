@@ -676,6 +676,14 @@ project write lock on every `syncProject` when the project path is known:
   - `GET /api/openchamber/scheduled-tasks/status`
   - `GET /api/openchamber/events`
 
+An idle `/api/openchamber/events` stream carries one `openchamber:heartbeat`
+per interval. The client asks for the interval in the `heartbeat` query parameter
+(milliseconds), held between 15 s and 30 s; the UI asks for 25 s and a phone for
+30 s, two idle frames a minute instead of 2.4. A client that sends no
+parameter, an older build or a space's reader in `space-events.ts`, keeps 25 s.
+The 30 s cap keeps a reverse proxy that closes idle connections at 60 s safe
+even when one heartbeat is late.
+
 The shared `/api/openchamber/events` stream also carries web notifications.
 Its connection ownership and browser capability flag stay unchanged. Delivery
 and duplicate handling are documented in `../notifications/DOCUMENTATION.md`.

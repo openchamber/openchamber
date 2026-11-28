@@ -13,6 +13,8 @@ import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
   MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS,
+  MESSAGE_STREAM_WS_HEARTBEAT_QUERY_PARAM,
+  resolveMessageStreamWsHeartbeat,
   serializeMessageStreamWsEvent,
   sendSerializedMessageStreamWsFrame,
 } from './protocol.js';
@@ -126,10 +128,15 @@ export function createMessageStreamWsRuntime({
     const isGlobalStream = pathname === MESSAGE_STREAM_GLOBAL_WS_PATH;
     const requestedLastEventId = requestUrl.searchParams.get('lastEventId')?.trim() || '';
     const requestedDirectory = requestUrl.searchParams.get('directory')?.trim() || '';
+    const heartbeat = resolveMessageStreamWsHeartbeat(
+      requestUrl.searchParams.get(MESSAGE_STREAM_WS_HEARTBEAT_QUERY_PARAM),
+      heartbeatIntervalMs,
+    );
 
     if (isGlobalStream) {
       globalBridge.accept(socket, {
         requestedLastEventId,
+        heartbeat,
       });
       return;
     }
@@ -148,7 +155,7 @@ export function createMessageStreamWsRuntime({
       processForwardedEventPayload,
       wsClients,
       triggerHealthCheck,
-      heartbeatIntervalMs,
+      heartbeatIntervalMs: heartbeat.intervalMs,
       upstreamStallTimeoutMs,
       upstreamReconnectDelayMs,
       fetchImpl,

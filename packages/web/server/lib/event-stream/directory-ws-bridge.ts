@@ -1,4 +1,4 @@
-import { sendMessageStreamWsEvent, sendMessageStreamWsFrame } from './protocol.js';
+import { sendMessageStreamWsEvent, sendMessageStreamWsFrame, sendMessageStreamWsHeartbeat } from './protocol.js';
 import { createUpstreamSseReader } from './upstream-reader.js';
 import type { BridgeOptions, InitialStreamError, JsonValue, StreamSocket, UpstreamConnection, UpstreamEvent } from './contracts.js';
 import type { UpstreamResponse } from './upstream-reader.js';
@@ -50,28 +50,15 @@ export function acceptDirectoryMessageStreamWsConnection({
     wsClients.delete(socket);
   };
 
-  const pingInterval = setInterval(() => {
-    if (socket.readyState !== 1) {
-      return;
-    }
-
-    try {
-      socket.ping();
-    } catch {
-      void 0;
-    }
-  }, heartbeatIntervalMs);
-
   const heartbeatInterval = setInterval(() => {
     if (!upstreamConnected) {
       return;
     }
 
-    sendMessageStreamWsEvent(socket, { type: 'openchamber:heartbeat', timestamp: Date.now() }, { directory: 'global' });
+    sendMessageStreamWsHeartbeat(socket);
   }, heartbeatIntervalMs);
 
   socket.on('close', () => {
-    clearInterval(pingInterval);
     clearInterval(heartbeatInterval);
     upstreamConnected = false;
     cleanup();

@@ -186,4 +186,39 @@ describe('local SSE routes', () => {
     req.emit('close');
     expect(clients.has(res)).toBe(false);
   });
+
+  it('beats the OpenChamber SSE at the interval the client asks for, held between 15 and 30 s', () => {
+    vi.useFakeTimers();
+    try {
+      const { app, getRoute } = createRouteRegistry();
+      registerScheduledTaskRoutes(app, {
+        getOpenChamberEventClients: () => new Set(),
+        writeSseEvent(res, payload) {
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        },
+      });
+      const handler = getRoute('GET', '/api/openchamber/events');
+      const beatsInFiveMinutes = (heartbeat) => {
+        const req = createMockRequest();
+        req.query = heartbeat === undefined ? {} : { heartbeat };
+        const res = createMockResponse();
+        handler(req, res);
+        vi.advanceTimersByTime(300_000);
+        req.emit('close');
+        return res.body.split('openchamber:heartbeat').length - 1;
+      };
+
+      // No parameter is a client built before it: the old 25 s.
+      expect(beatsInFiveMinutes(undefined)).toBe(12);
+      expect(beatsInFiveMinutes('25000')).toBe(12);
+      expect(beatsInFiveMinutes('30000')).toBe(10);
+      expect(beatsInFiveMinutes('15000')).toBe(20);
+      expect(beatsInFiveMinutes('120000')).toBe(10);
+      expect(beatsInFiveMinutes('1000')).toBe(20);
+      expect(beatsInFiveMinutes('junk')).toBe(12);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -159,7 +159,7 @@ describe('openchamber events', () => {
       // A native EventSource cannot reach this tunnel: its mock has no forwarding path.
       expect(MockEventSource.instances).toHaveLength(0);
       expect(requests).toHaveLength(1);
-      expect(requests[0].path).toBe('/api/openchamber/events?browser=1');
+      expect(requests[0].path).toBe('/api/openchamber/events?browser=1&heartbeat=25000');
       expect(requests[0].authorization).toBe('Bearer fixture-token');
       streamController?.enqueue(encoder.encode('data: {"type":"openchamber:event-stream-ready"}\n\n'));
       streamController?.enqueue(encoder.encode('data: {"type":"openchamber:browser-control-'));
@@ -174,6 +174,31 @@ describe('openchamber events', () => {
     expect(requests[0].signal?.aborted).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(events).toEqual(['event-stream-ready', 'browser-control-request']);
+  });
+
+  test('asks for the 25 s default, or 30 s on a phone, and gives up after two silent intervals', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const timeoutSpy = spyOn(globalThis, 'setTimeout');
+    let seenCalls = 0;
+    const timeouts = () => timeoutSpy.mock.calls.slice(seenCalls).map((call) => call[1]);
+    try {
+      const desktop = subscribeOpenchamberEvents(() => undefined);
+      MockEventSource.instances[0].onopen?.();
+      expect(new URL(MockEventSource.instances[0].url, 'http://runtime.test').searchParams.get('heartbeat')).toBe('25000');
+      expect(timeouts()).toContain(50_000);
+      desktop();
+
+      Object.assign(window, { __OPENCHAMBER_SURFACE__: 'mobile' });
+      seenCalls = timeoutSpy.mock.calls.length;
+      const phone = subscribeOpenchamberEvents(() => undefined);
+      MockEventSource.instances[1].onopen?.();
+      expect(new URL(MockEventSource.instances[1].url, 'http://runtime.test').searchParams.get('heartbeat')).toBe('30000');
+      expect(timeouts()).toContain(60_000);
+      phone();
+    } finally {
+      timeoutSpy.mockRestore();
+      Reflect.deleteProperty(window, '__OPENCHAMBER_SURFACE__');
+    }
   });
 
   test('declares browser control on the stream only from a driving host', async () => {

@@ -7,6 +7,7 @@ import { isCapacitorApp } from './platform';
 import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isDesktopShell, isVSCodeRuntime } from './desktop';
+import { buildControlStreamQuery, controlStreamSilenceLimitMs } from './controlStreamHeartbeat';
 import { canDriveBrowserPage } from './browser/hostCapability';
 import { parseBrowserControlEvent, type BrowserControlEvent } from './browser/controlEvents';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
@@ -254,7 +255,6 @@ const listeners = new Set<Listener>();
 let readyEvent: Extract<OpenChamberEvent, { type: 'event-stream-ready' }> | null = null;
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
-const HEARTBEAT_TIMEOUT_MS = 45_000;
 
 const clearHeartbeatTimer = () => {
   if (!heartbeatTimer) {
@@ -309,7 +309,7 @@ const connectFetchStream = (canControlBrowser: boolean) => {
   void (async () => {
     try {
       const response = await runtimeFetch('/api/openchamber/events', {
-        query: canControlBrowser ? { browser: '1' } : undefined,
+        query: buildControlStreamQuery(canControlBrowser),
         headers: { Accept: 'text/event-stream' },
         credentials: 'include',
         signal: controller.signal,
@@ -370,7 +370,7 @@ const resetHeartbeatTimer = () => {
   heartbeatTimer = setTimeout(() => {
     cleanupSource();
     scheduleReconnect();
-  }, HEARTBEAT_TIMEOUT_MS);
+  }, controlStreamSilenceLimitMs());
 };
 
 const parseEnvelope = (raw: string): { type: string; properties: unknown } | null => {
@@ -731,7 +731,7 @@ const connect = () => {
   if (typeof EventSource !== 'function') return;
   const source = new EventSource(getRuntimeUrlResolver().sse(
     '/api/openchamber/events',
-    canControlBrowser ? { browser: '1' } : undefined,
+    buildControlStreamQuery(canControlBrowser),
   ));
   source.onopen = () => {
     if (eventSource !== source) return;

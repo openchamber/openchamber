@@ -30,21 +30,35 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
       return;
     }
 
+    let interval: number | null = null;
+    const renewVisible = isCapacitorApp()
+      ? () => sendVisibility(true)
+      : () => { if (resolveVisibilityState() === 'visible') sendVisibility(true); };
+    const setBeating = (beating: boolean) => {
+      if (beating && interval === null) interval = window.setInterval(renewVisible, HEARTBEAT_MS);
+      if (!beating && interval !== null) {
+        window.clearInterval(interval);
+        interval = null;
+      }
+    };
+
     if (isCapacitorApp()) {
-      let active = true;
       let disposed = false;
       let removeListener: (() => void) | null = null;
-      const reportActive = () => sendVisibility(active);
+      const reportActive = (active: boolean) => {
+        setBeating(active);
+        sendVisibility(active);
+      };
 
+      setBeating(true);
       void import('@capacitor/app')
         .then(async ({ App }) => {
           if (disposed) return;
           const state = await App.getState().catch(() => null);
-          if (state) active = state.isActive === true;
-          reportActive();
+          if (disposed) return;
+          reportActive(state ? state.isActive === true : true);
           const handle = await App.addListener('appStateChange', ({ isActive }) => {
-            active = isActive === true;
-            reportActive();
+            reportActive(isActive === true);
           });
           if (disposed) {
             void handle.remove();
@@ -54,13 +68,9 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
         })
         .catch(() => undefined);
 
-      const interval = window.setInterval(() => {
-        if (active) sendVisibility(true);
-      }, HEARTBEAT_MS);
-
       return () => {
         disposed = true;
-        window.clearInterval(interval);
+        setBeating(false);
         removeListener?.();
       };
     }
@@ -70,22 +80,17 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
     }
 
     const report = () => {
-      sendVisibility(resolveVisibilityState() === 'visible');
-    };
-
-    const reportVisibleOnly = () => {
-      if (resolveVisibilityState() === 'visible') {
-        sendVisibility(true);
-      }
+      const visible = resolveVisibilityState() === 'visible';
+      setBeating(visible);
+      sendVisibility(visible);
     };
 
     const reportPageHidden = () => {
+      setBeating(false);
       sendVisibility(false);
     };
 
     report();
-
-    const interval = window.setInterval(reportVisibleOnly, HEARTBEAT_MS);
 
     document.addEventListener('visibilitychange', report);
     window.addEventListener('pagehide', reportPageHidden);
@@ -94,7 +99,7 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
     window.addEventListener('blur', report);
 
     return () => {
-      window.clearInterval(interval);
+      setBeating(false);
       document.removeEventListener('visibilitychange', report);
       window.removeEventListener('pagehide', reportPageHidden);
       window.removeEventListener('pageshow', report);

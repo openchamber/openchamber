@@ -17,13 +17,13 @@ import { spaceCreationStepSchema, spaceTaskTitleSchema, type SpaceTaskTitle } fr
 import { workflowRunSchema } from "@/lib/workflows/model"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
+import { globalEventWsQuery, messageStreamHeartbeatIntervalMs } from "./message-stream-heartbeat"
 
 const FLUSH_FRAME_MS = 100
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
 const BACKPRESSURE_MODE_MS = 10_000
 const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
-const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
 const WS_FALLBACK_WINDOW_MS = 60_000
 const WS_PROVEN_OPEN_FAILURES_BEFORE_FALLBACK = 3
 const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
@@ -64,7 +64,7 @@ export type EventPipeline = {
 }
 
 const wsFrameSchema = z.object({
-  type: z.enum(["ready", "event", "error", "backpressure"]),
+  type: z.enum(["ready", "event", "error", "backpressure", "upstream-unavailable"]),
   replayReset: z.boolean().optional(),
   replayed: z.boolean().optional(),
   cursor: z.string().optional(),
@@ -325,10 +325,7 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
     baseUrl = "/api"
   }
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
-  return getRuntimeUrlResolver().websocket(
-    `${normalizedBase}global/event/ws`,
-    lastEventId && lastEventId.length > 0 ? { lastEventId } : undefined,
-  )
+  return getRuntimeUrlResolver().websocket(`${normalizedBase}global/event/ws`, globalEventWsQuery(lastEventId, messageStreamHeartbeatIntervalMs()))
 }
 
 function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
@@ -407,7 +404,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onStreamActivity,
     routeDirectory,
     transport = "auto",
-    heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
+    heartbeatTimeoutMs = 2 * messageStreamHeartbeatIntervalMs(),
     reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
     wsReadyTimeoutMs = DEFAULT_WS_READY_TIMEOUT_MS,
   } = input
@@ -739,12 +736,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           // ignore
         }
       }, wsReadyTimeoutMs)
-
+      const cancelReadyTimer = () => {
+        clearTimeout(readyTimer)
+        readyTimer = undefined
+      }
       const cleanup = () => {
-        if (readyTimer) {
-          clearTimeout(readyTimer)
-          readyTimer = undefined
-        }
+        cancelReadyTimer()
         socket.onopen = null
         socket.onmessage = null
         socket.onerror = null
@@ -805,10 +802,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           wsEverReady = true
           wsOpenFailuresSinceReady = 0
           readyAt = Date.now()
-          if (readyTimer) {
-            clearTimeout(readyTimer)
-            readyTimer = undefined
-          }
+          cancelReadyTimer()
           streamErrorLogged = false
           markConnected(frame.replayReset === true, frame.replayed === true)
           return
@@ -829,6 +823,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
         if (frame.type === "backpressure") {
           backpressureUntil = Date.now() + BACKPRESSURE_MODE_MS
+          return
+        }
+
+        if (frame.type === "upstream-unavailable") {
+          cancelReadyTimer()
+          notifyDisconnected("ws_upstream_unavailable")
           return
         }
 

@@ -34,7 +34,6 @@ export interface StreamSocket {
   _ocBackpressureWarned?: boolean;
   send: (frame: string) => void;
   close: (code?: number, reason?: string) => void;
-  ping: () => void;
   on: (event: 'close' | 'error', handler: () => void) => void;
 }
 export interface EventRouting {
@@ -55,6 +54,11 @@ export interface GlobalReadyFrame {
   replayReset?: boolean;
   replayed?: boolean;
   cursor?: string;
+}
+
+export interface WsHeartbeat {
+  intervalMs: number;
+  upstreamAware: boolean;
 }
 
 export interface UpstreamConnection {

@@ -34,6 +34,7 @@ A rotated phone's viewport and `screen.width` both report the long side, so a wi
 
 - Desktop and relay streams use `runtimeFetch`, preserving instance headers and aborting on unsubscribe or runtime change.
 - Web and hosted mobile retain EventSource. Capacitor retains its header-aware fetch path. VS Code does not open the server-only stream.
+- The stream asks the server for a heartbeat interval in `heartbeat` (milliseconds): 25 s, or 30 s on a mobile surface (`isMobileSurfaceRuntime`), and treats it as dead after two silent intervals (50 s, 60 s on a phone).
 
 ## Decisions
 

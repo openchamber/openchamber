@@ -32,7 +32,7 @@ export interface GlobalStreamEvent extends StreamEvent {
 }
 
 export type GlobalStreamStatus =
-  | { type: 'connect'; wasReady: boolean }
+  | { type: 'connect' }
   | { type: 'disconnect'; reason: UpstreamDisconnect['reason'] }
   | { type: 'error' | 'initial-error'; error: UpstreamError; buildUrlFailed: boolean };
 
@@ -78,6 +78,7 @@ export function createGlobalMessageStreamHub({
   let reader: ReturnType<typeof createUpstreamSseReader> | null = null;
   let connected = false;
   let everConnected = false;
+  let readerGeneration = 0;
   let buildUrlFailed = false;
 
   const notifySubscriber = <T>(kind: 'event' | 'status', subscriber: Subscriber<T>, payload: T) => {
@@ -158,6 +159,8 @@ export function createGlobalMessageStreamHub({
       return;
     }
 
+    const generation = ++readerGeneration;
+    const isCurrentReader = () => generation === readerGeneration;
     controller = new AbortController();
     reader = createUpstreamSseReader({
       signal: controller.signal,
@@ -175,8 +178,8 @@ export function createGlobalMessageStreamHub({
       },
       getHeaders: getOpenCodeAuthHeaders,
       onConnect() {
+        if (!isCurrentReader()) return;
         connected = true;
-        const wasReady = everConnected;
         everConnected = true;
         if (upstreamConnectedBefore) {
           replay.length = 0;
@@ -186,20 +189,22 @@ export function createGlobalMessageStreamHub({
           replayTrimmed = false;
         }
         upstreamConnectedBefore = true;
-        notifyStatus({ type: 'connect', wasReady });
+        notifyStatus({ type: 'connect' });
       },
       onDisconnect({ reason }) {
+        if (!isCurrentReader()) return;
         connected = false;
         notifyStatus({ type: 'disconnect', reason });
       },
       onEvent(event) {
+        if (!isCurrentReader()) return;
         if (isHiddenPayload(event?.payload) || isStaleTurnBoundary(event.payload)) return;
         for (const payload of admitPayload(event.payload)) {
           coalescer.push(payload === event.payload ? event : { envelope: { directory: event.envelope.directory, spaceId: event.envelope.spaceId ?? null }, payload });
         }
       },
       onError(error) {
-        if (controller?.signal.aborted) {
+        if (!isCurrentReader() || controller?.signal.aborted) {
           return;
         }
 
@@ -215,6 +220,7 @@ export function createGlobalMessageStreamHub({
   };
 
   const stop = () => {
+    readerGeneration += 1;
     connected = false;
     coalescer.flush();
     reader?.stop();

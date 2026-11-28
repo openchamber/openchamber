@@ -33,6 +33,16 @@ interface ScheduledTaskFailure {
   busy?: ControlErrorFields['busy'];
 }
 
+export const CONTROL_STREAM_HEARTBEAT_INTERVAL_MS = 25_000;
+export const CONTROL_STREAM_MIN_HEARTBEAT_INTERVAL_MS = 15_000;
+export const CONTROL_STREAM_MAX_HEARTBEAT_INTERVAL_MS = 30_000;
+
+export const resolveControlStreamHeartbeatIntervalMs = (requested: string | null): number => {
+  const value = requested === null ? Number.NaN : Number(requested);
+  if (!Number.isFinite(value)) return CONTROL_STREAM_HEARTBEAT_INTERVAL_MS;
+  return Math.min(Math.max(value, CONTROL_STREAM_MIN_HEARTBEAT_INTERVAL_MS), CONTROL_STREAM_MAX_HEARTBEAT_INTERVAL_MS);
+};
+
 const isStatusCode = (value: unknown): value is number => Number.isInteger(value);
 const isTaskBody = (value: unknown): value is TaskRequestBody => Boolean(value) && typeof value === 'object';
 const parseProjectID = (req: Request) => asNonEmptyString(req?.params?.projectId);
@@ -242,7 +252,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
         clearInterval(heartbeat);
         clients.delete(res);
       }
-    }, 25_000);
+    }, resolveControlStreamHeartbeatIntervalMs(asNonEmptyString(req.query?.heartbeat)));
 
     req.on('close', () => {
       clearInterval(heartbeat);

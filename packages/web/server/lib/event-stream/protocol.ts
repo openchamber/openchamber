@@ -1,12 +1,26 @@
-import type { EventRouting, JsonValue, SseEnvelope, StreamSocket, WsEventFrame } from './contracts.js';
+import type { EventRouting, JsonValue, SseEnvelope, StreamSocket, WsEventFrame, WsHeartbeat } from './contracts.js';
 import { isJsonContainer, isJsonObject, isString } from './guards.js';
 
 export const MESSAGE_STREAM_GLOBAL_WS_PATH = '/api/global/event/ws';
 export const MESSAGE_STREAM_DIRECTORY_WS_PATH = '/api/event/ws';
 export const MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
+export const MESSAGE_STREAM_WS_MAX_HEARTBEAT_INTERVAL_MS = 30 * 1000;
+export const MESSAGE_STREAM_WS_HEARTBEAT_QUERY_PARAM = 'heartbeat';
 export const MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
 
 export const MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES = 12 * 1024 * 1024;
+
+export function resolveMessageStreamWsHeartbeat(requested: string | null, defaultIntervalMs: number): WsHeartbeat {
+  if (requested === null) return { intervalMs: defaultIntervalMs, upstreamAware: false };
+  const value = Number(requested);
+  const maxIntervalMs = Math.max(defaultIntervalMs, MESSAGE_STREAM_WS_MAX_HEARTBEAT_INTERVAL_MS);
+  const intervalMs = Number.isFinite(value) ? Math.min(Math.max(value, defaultIntervalMs), maxIntervalMs) : defaultIntervalMs;
+  return { intervalMs, upstreamAware: true };
+}
+
+export function sendMessageStreamWsHeartbeat(socket: StreamSocket) {
+  return sendMessageStreamWsEvent(socket, { type: 'openchamber:heartbeat', timestamp: Date.now() }, { directory: 'global' });
+}
 
 export function parseSseEventEnvelope(block: string): SseEnvelope | null {
   if (!block) {

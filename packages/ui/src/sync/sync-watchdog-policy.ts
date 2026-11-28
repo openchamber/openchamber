@@ -1,4 +1,6 @@
+import { messageStreamStaleAfterMs } from "./message-stream-heartbeat"
 
+export { messageStreamStaleAfterMs }
 
 export const ACTIVE_SESSION_WATCHDOG_INTERVAL_MS = 5_000
 
@@ -8,7 +10,6 @@ export const ACTIVE_SESSION_STATUS_POLL_HEALTHY_INTERVAL_MS = 30_000
 
 export const ACTIVE_SESSION_STATUS_POLL_MAX_BACKOFF_MS = 60_000
 
-export const ACTIVE_SESSION_STALE_EVENT_MS = 20_000
 
 export const ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS = 15_000
 
@@ -29,7 +30,7 @@ export function shouldTriggerStaleResync(
   lastStreamActivityAt: number,
   lastFullResyncAt: number,
   now: number,
-  staleThresholdMs: number = ACTIVE_SESSION_STALE_EVENT_MS,
+  staleThresholdMs: number = messageStreamStaleAfterMs(),
   resyncCooldownMs: number = ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS,
 ): boolean {
   if (lastStreamActivityAt <= 0) return false

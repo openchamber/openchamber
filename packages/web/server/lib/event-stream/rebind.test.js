@@ -146,6 +146,8 @@ describe('rebindUpstream (#2638)', () => {
     expect(fetchCalls).toBe(2);
     expect(fetchImpl.mock.calls[1][0]).toContain(':5000/api/event');
     expect(socket.sent.some((frame) => frame.type === 'event' && frame.eventId === 'evt-2')).toBe(true);
+    // Events of the old process are gone with it, so the client is told to repair.
+    expect(socket.sent.filter((frame) => frame.type === 'ready')).toHaveLength(2);
 
     socket.close();
     await runtime.close();
@@ -196,5 +198,83 @@ describe('rebindUpstream (#2638)', () => {
 
     directorySocket.close();
     await runtime.close();
+  });
+
+  it('keeps the replacement upstream connected when the old reader reports its disconnect late', async () => {
+    const server = new EventEmitter();
+    let fetchCalls = 0;
+    let releaseOld = () => {};
+    const fetchImpl = vi.fn(async (_url, options) => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        // An orphaned survivor: its read ignores the abort and ends only when the old process lets go.
+        let sent = false;
+        const ended = new Promise(resolve => { releaseOld = resolve; });
+        return {
+          ok: true,
+          body: {
+            getReader: () => ({
+              async read() {
+                if (!sent) {
+                  sent = true;
+                  return { value: new TextEncoder().encode('data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n'), done: false };
+                }
+                await ended;
+                return { value: undefined, done: true };
+              },
+            }),
+          },
+        };
+      }
+      return createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: ['data: {"id":"evt-2","type":"server.connected","properties":{}}\n\n'],
+      });
+    });
+    const globalHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: () => 'http://127.0.0.1:4096/api/event',
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl,
+      upstreamReconnectDelayMs: 0,
+    });
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      globalEventHub: globalHub,
+      buildOpenCodeUrl: () => 'http://127.0.0.1:4096/api/event',
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients: new Set(),
+      heartbeatIntervalMs: 20,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl,
+    });
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws?heartbeat=20' });
+    try {
+      await socket.waitForFrame(frame => frame.eventId === 'evt-1');
+      runtime.rebindUpstream();
+      await socket.waitForFrame(frame => frame.eventId === 'evt-2');
+
+      // The old reader's loop ends only now, after the new reader is connected and the client ready.
+      releaseOld();
+      const sentBefore = socket.sent.length;
+      const isIdleFrame = frame => frame.type === 'upstream-unavailable' || frame.payload?.type === 'openchamber:heartbeat';
+      await socket.waitForFrame(frame => isIdleFrame(frame) && socket.sent.indexOf(frame) >= sentBefore);
+
+      expect(globalHub.isConnected()).toBe(true);
+      expect(socket.sent.filter(frame => frame.type === 'upstream-unavailable')).toEqual([]);
+      expect(socket.sent.some(frame => frame.payload?.type === 'openchamber:heartbeat')).toBe(true);
+    } finally {
+      socket.close();
+      await runtime.close();
+      globalHub.stop();
+    }
   });
 });

@@ -139,7 +139,7 @@ class FakeSocket extends EventEmitter {
   }
 
   ping() {
-    void 0;
+    this.pings = (this.pings ?? 0) + 1;
   }
 
   close(code, reason) {
@@ -631,5 +631,95 @@ describe('message stream websocket runtime', () => {
 
     socket.close();
     await runtime.close();
+  });
+
+  it('sends one heartbeat frame per requested interval, and parks an aware client while OpenCode is away', async () => {
+    const server = new EventEmitter();
+    let upstreamUp = true;
+    let dropUpstream = () => {};
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients: new Set(),
+      heartbeatIntervalMs: 20,
+      upstreamReconnectDelayMs: () => 5,
+      fetchImpl: async (_url, options) => {
+        if (!upstreamUp) throw new Error('connect ECONNREFUSED');
+        let release;
+        const ended = new Promise(resolve => { release = resolve; });
+        dropUpstream = () => release();
+        options.signal.addEventListener('abort', () => release(), { once: true });
+        let sentConnected = false;
+        return {
+          ok: true,
+          body: {
+            getReader: () => ({
+              async read() {
+                if (!sentConnected) {
+                  sentConnected = true;
+                  return { value: new TextEncoder().encode('data: {"type":"server.connected","data":{}}\n\n'), done: false };
+                }
+                await ended;
+                return { value: undefined, done: true };
+              },
+            }),
+          },
+        };
+      },
+    });
+
+    // An aware client names its interval; 5 ms is below the server default and rises to it.
+    const fast = new FakeSocket();
+    const aware = new FakeSocket();
+    const legacy = new FakeSocket();
+    runtime.wsServer.emit('connection', fast, { url: '/api/global/event/ws?heartbeat=5' });
+    runtime.wsServer.emit('connection', aware, { url: '/api/global/event/ws?heartbeat=60' });
+    runtime.wsServer.emit('connection', legacy, { url: '/api/global/event/ws' });
+    const heartbeats = (socket) => socket.sent.filter(frame => frame.payload?.type === 'openchamber:heartbeat').length;
+    const unavailable = (socket) => socket.sent.filter(frame => frame.type === 'upstream-unavailable').length;
+    const readies = (socket) => socket.sent.filter(frame => frame.type === 'ready').length;
+
+    try {
+      await expect.poll(() => heartbeats(aware)).toBeGreaterThanOrEqual(2);
+      // 60 ms stayed 60 ms (under the 30 s cap); 5 ms was raised to the 20 ms default.
+      expect(heartbeats(fast)).toBeGreaterThanOrEqual(2 * heartbeats(aware));
+      expect(heartbeats(legacy)).toBeGreaterThanOrEqual(2 * heartbeats(aware));
+      // The heartbeat is the only idle frame: no raw ping goes out beside it.
+      expect([fast, aware, legacy].map(socket => socket.pings ?? 0)).toEqual([0, 0, 0]);
+
+      upstreamUp = false;
+      dropUpstream();
+      await expect.poll(() => unavailable(aware)).toBeGreaterThanOrEqual(1);
+      const awareBeats = heartbeats(aware);
+      const legacyFramesDuringOutage = legacy.sent.length;
+
+      // A client arriving during the outage hears it at once instead of waiting out its ready timeout.
+      const late = new FakeSocket();
+      runtime.wsServer.emit('connection', late, { url: '/api/global/event/ws?heartbeat=15000' });
+      expect(late.sent).toEqual([{ type: 'upstream-unavailable' }]);
+
+      await expect.poll(() => unavailable(aware)).toBeGreaterThanOrEqual(2);
+      expect(heartbeats(aware)).toBe(awareBeats);
+      expect(legacy.sent.length).toBe(legacyFramesDuringOutage);
+      expect(aware.closeCalls).toEqual([]);
+
+      upstreamUp = true;
+      await expect.poll(() => readies(late)).toBe(1);
+      expect(readies(aware)).toBe(2);
+      expect(readies(legacy)).toBe(2);
+      late.close();
+    } finally {
+      fast.close();
+      aware.close();
+      legacy.close();
+      await runtime.close();
+    }
   });
 });
