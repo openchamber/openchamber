@@ -150,7 +150,7 @@ import {
 } from './browser-panel-security.mjs';
 import { browserPanelKeyAction, browserPanelMouseAction, runBrowserPanelAction } from './browser-panel-navigation.mjs';
 import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
-import { attachWindowNavigationGuards } from './window-navigation-guards.mjs';
+import { attachWindowNavigationGuards, findSavedHostForUrl, opensHostWindow } from './window-navigation-guards.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { parsePairingDeepLink } from './pairing-deep-link.mjs';
 import { attachRendererRecovery, takeSafeStart } from './renderer-recovery.mjs';
@@ -2714,24 +2714,7 @@ const sessionRouteFromUrl = (raw) => {
   }
 };
 
-const findConfiguredHostForUrl = (raw) => {
-  let origin;
-  try {
-    origin = new URL(raw).origin;
-  } catch {
-    return null;
-  }
-  if (origin === 'null') return null;
-  const hosts = readDesktopHostsConfig()?.hosts || [];
-  return hosts.find((entry) => [entry?.url, entry?.apiUrl].some((candidate) => {
-    if (typeof candidate !== 'string' || !candidate) return false;
-    try {
-      return new URL(candidate).origin === origin;
-    } catch {
-      return false;
-    }
-  })) || null;
-};
+const findConfiguredHostForUrl = (raw) => findSavedHostForUrl(raw, readDesktopHostsConfig()?.hosts || []);
 
 const hostRoutingContext = () => ({
   hosts: readDesktopHostsConfig()?.hosts || [],
@@ -4200,7 +4183,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const parsed = parseExternalUrl(target);
 
       const host = findConfiguredHostForUrl(parsed.toString());
-      if (host) {
+      if (host && opensHostWindow(parsed.toString(), host, { sessionRouteFromUrl })) {
         await openHostWindow(host, sessionRouteFromUrl(parsed.toString()), { reuseOpenWindow: true });
         return null;
       }

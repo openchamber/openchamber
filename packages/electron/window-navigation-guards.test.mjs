@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { attachWindowNavigationGuards } from './window-navigation-guards.mjs';
+import { attachWindowNavigationGuards, findSavedHostForUrl, opensHostWindow } from './window-navigation-guards.mjs';
 
 // Desktop HMR: the window document is on the UI dev origin (5173), the local API on 3901.
 const MAIN_ALLOWED_ORIGINS = ['http://127.0.0.1:5173', 'http://127.0.0.1:3901'];
@@ -162,6 +162,36 @@ test('main window routes configured hosts to their window and local session link
   assert.deepEqual(harness.triggerWindowOpen('http://127.0.0.1:3901/docs'), { action: 'deny' });
   assert.deepEqual(harness.sessionOpened, [{ sessionId: 'ses_123' }]);
   assert.deepEqual(harness.externalOpened, []);
+});
+
+test('main window opens other pages at a configured host address in the browser', () => {
+  const harness = createHarness({ routeLinks: true });
+  assert.deepEqual(harness.triggerWindowOpen('https://remote.example.test/pages/notes.html'), { action: 'deny' });
+  assert.deepEqual(harness.triggerWindowOpen('https://remote.example.test/'), { action: 'deny' });
+  assert.deepEqual(harness.triggerWindowOpen('https://remote.example.test/mobile.html?session=ses_mobile'), { action: 'deny' });
+  assert.deepEqual(harness.externalOpened, ['https://remote.example.test/pages/notes.html']);
+  assert.deepEqual(harness.hostOpened.map(({ route }) => route), [null, { sessionId: 'ses_mobile' }]);
+
+  const onHostPage = createHarness({ routeLinks: true, currentUrl: 'https://remote.example.test/' });
+  assert.deepEqual(onHostPage.triggerWindowOpen('https://remote.example.test/pages/notes.html'), { action: 'deny' });
+  assert.deepEqual(onHostPage.externalOpened, ['https://remote.example.test/pages/notes.html']);
+});
+
+test('a link picks the saved host whose path it is under, and opens its window only for its own page or a session', () => {
+  const sessionRouteFromUrl = (raw) => (new URL(raw).searchParams.get('session') ? { sessionId: 'ses_1' } : null);
+  const a = { id: 'a', url: 'https://proxy.example.test/a/' };
+  const b = { id: 'b', url: 'https://proxy.example.test/b/' };
+  assert.equal(findSavedHostForUrl('https://proxy.example.test/b', [a, b]), b);
+  assert.equal(findSavedHostForUrl('https://proxy.example.test/b/mobile.html?session=ses_1', [a, b]), b);
+  assert.equal(findSavedHostForUrl('https://proxy.example.test/pages/notes.html?session=ses_1', [a, b]), a);
+  assert.equal(opensHostWindow('https://proxy.example.test/b', b, { sessionRouteFromUrl }), true);
+  assert.equal(opensHostWindow('https://proxy.example.test/pages/notes.html', a, { sessionRouteFromUrl }), false);
+
+  const relay = { id: 'relay', url: 'relay://server-1', apiUrl: 'http://192.168.1.20:3000/' };
+  assert.equal(findSavedHostForUrl('relay://server-1', [relay]), null);
+  assert.equal(findSavedHostForUrl('http://192.168.1.20:3000/pages/notes.html', [relay]), relay);
+  assert.equal(opensHostWindow('http://192.168.1.20:3000', relay, { sessionRouteFromUrl }), true);
+  assert.equal(opensHostWindow('http://192.168.1.20:3000/pages/notes.html', relay, { sessionRouteFromUrl }), false);
 });
 
 test('main window keeps navigation to its own document origin', () => {
