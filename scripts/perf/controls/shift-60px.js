@@ -14,7 +14,9 @@
       const target = [...document.querySelectorAll("[data-message-id]")]
         .filter((element) => { const rect = element.getBoundingClientRect(); return rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight })
         .at(-1)
-      if (target) target.style.marginTop = "60px"
+      // Warm switches show a kept-alive row that already carries the margin
+      // from its last visit, so each reveal adds another 60 px.
+      if (target) target.style.marginTop = `${(parseFloat(target.style.marginTop) || 0) + 60}px`
     }, 300)
   }
   document.addEventListener("DOMContentLoaded", () => {

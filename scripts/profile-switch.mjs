@@ -251,6 +251,14 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
     ? new PerformanceObserver((list) => { for (const entry of list.getEntries()) state.layoutShifts.push(entry) })
     : null
   layoutShiftObserver?.observe({ type: 'layout-shift', buffered: false })
+  // Grouped activity splits one message into several rows that share its
+  // data-message-id; the slice tells them apart, so an anchor re-finds the row
+  // it was taken from instead of the message's first row.
+  const anchorSelector = (el) => {
+    const id = '[data-message-id="' + CSS.escape(el.getAttribute('data-message-id')) + '"]'
+    const slice = el.getAttribute('data-message-slice')
+    return id + (slice === null ? ':not([data-message-slice])' : '[data-message-slice="' + CSS.escape(slice) + '"]')
+  }
   const checkVisible = () => {
     const fresh = newMessages()
     if (fresh.length === 0) return
@@ -259,7 +267,7 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
     const shown = fresh.filter((el) => onScreen(el, viewport))
     if (shown.length === 0 || !shown.every((el) => effectiveOpacity(el) >= 0.99)) return
     state.visible = elapsed()
-    state.anchors = shown.slice(-12).map((el) => ({ id: el.getAttribute('data-message-id'), offset: el.getBoundingClientRect().top - viewport.top, last: null }))
+    state.anchors = shown.slice(-12).map((el) => ({ selector: anchorSelector(el), offset: el.getBoundingClientRect().top - viewport.top, last: null }))
     for (const anchor of state.anchors) anchor.last = anchor.offset
     state.scrollHeight = state.scroller?.scrollHeight ?? null
     state.scrollTop = state.scroller?.scrollTop ?? null
@@ -268,7 +276,7 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
     const viewport = viewportOf(state.scroller)
     let movedThisFrame = false
     for (const anchor of state.anchors) {
-      const el = document.querySelector('[data-message-id="' + CSS.escape(anchor.id) + '"]')
+      const el = document.querySelector(anchor.selector)
       if (!el) { anchor.lost = true; continue }
       const offset = el.getBoundingClientRect().top - viewport.top
       state.shift.maxPx = Math.max(state.shift.maxPx, Math.abs(offset - anchor.offset))

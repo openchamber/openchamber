@@ -640,7 +640,9 @@ Clicks sidebar session rows with real mouse input and measures, per click:
   `data-timeline-reveal` attribute left the DOM) and `revealStates` (each
   attribute state with its time) are recorded next to it to explain it;
 - layout shift after `visible`, for `--shift-window` ms (default 1500): the
-  messages on screen at reveal are anchors, and `shift.maxPx` is the largest
+  message rows on screen at reveal are anchors (grouped activity splits one
+  message into rows that share its `data-message-id`, so an anchor is re-found
+  by its `data-message-slice` too), and `shift.maxPx` is the largest
   distance any of them moved relative to the chat viewport. That covers late
   code highlighting changing block heights, list re-measurement and scroll
   corrections alike, which is what a user sees as a jump. Also recorded:
