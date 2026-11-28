@@ -21,20 +21,24 @@ const waitForLocation = (
 ): Promise<boolean> => withAbortDeadline(LIMIT_MS, async (signal) => {
   let checkStateless = isStateless
   let statelessProbe: Promise<boolean> | undefined
-  const probeController = new AbortController()
-  const abortProbe = () => probeController.abort()
-  signal.addEventListener("abort", abortProbe, { once: true })
+  const requestController = new AbortController()
+  const abortRequests = () => requestController.abort()
+  signal.addEventListener("abort", abortRequests, { once: true })
   try {
     while (!signal.aborted && isCurrent()) {
-      let plugins
-      try {
-        plugins = (await client.plugin.list(undefined, { signal })).data
-      } catch {
+      const pluginRead = client.plugin.list(undefined, { signal: requestController.signal })
+        .then((response) => response.data, () => null)
+      const plugins = statelessProbe
+        ? await Promise.race([pluginRead, statelessProbe.then<true | Awaited<typeof pluginRead>>((ready) => ready ? true : pluginRead)])
+        : await pluginRead
+      if (plugins === true) return !signal.aborted && isCurrent()
+      if (plugins === null) {
+        if (!signal.aborted && statelessProbe && await statelessProbe) return !signal.aborted && isCurrent()
         return false
       }
       if (plugins.length > 0) return isCurrent()
       if (checkStateless && !signal.aborted && isCurrent()) {
-        statelessProbe = checkStateless(probeController.signal).then((ready) => {
+        statelessProbe = checkStateless(requestController.signal).then((ready) => {
           if (!ready) statelessProbe = undefined
           return ready
         })
@@ -47,8 +51,8 @@ const waitForLocation = (
     }
     return false
   } finally {
-    probeController.abort()
-    signal.removeEventListener("abort", abortProbe)
+    requestController.abort()
+    signal.removeEventListener("abort", abortRequests)
   }
 })
 
