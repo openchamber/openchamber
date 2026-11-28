@@ -19,6 +19,10 @@ Repository issues (GitHub, GitLab, Gitea) are not trackers. They belong to the s
 
 Older bundled UIs know only `kind: 'linear'`. They leave every other kind out of the list they show and rebuild that list when they write a link, so a Linear entry stored as `tracker` would disappear from session metadata the next time such a client links something. While the `/api/linear` alias serves those UIs, a Linear entry is written as `kind: 'linear'` with `provider: 'linear'` beside it, and only other trackers, which older UIs cannot show anyway, are written as `kind: 'tracker'`. Readers (`session-linked-issues.js`, the UI) accept both kinds. Drop this rule together with the alias.
 
+### Why health rides provider answers and not a poll
+
+Nothing calls `auth.verify` again when reads keep succeeding but come back empty, so a poll would never see the token that was revoked and still answers 200. The first read that comes back wrong already carries the reason, which is why the report rides any provider answer and the host only stamps and stores it.
+
 ## Contract
 
 - `createTrackerRegistry(entries, { foreignIds })` returns `has`, `descriptor(id)`, `descriptors()`, `list()` and `implementation(id)`, plus `attachExtension({ descriptor, load })` and `detachExtension(id)` for the extension layer. An unknown id is `null` everywhere, never a throw. `list()` and `descriptors()` answer what is registered now, built-ins first, so every consumer that reads them at call time (routes, the session linker, tracked items, the read cache through `trackerIds: () => trackers.list()`, the session-status fan-out) follows an extension that attaches or detaches.

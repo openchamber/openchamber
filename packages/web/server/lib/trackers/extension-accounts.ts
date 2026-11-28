@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
+import { TRACKER_PROVIDER_HEALTH_REASON_MAX } from '@openchamber/sdk';
+
 import { TrackerRouteError } from './route-error.js';
 import type { TrackerOAuthTarget } from './extension-oauth.js';
 
@@ -39,7 +41,7 @@ const accountSchema = z.object({
   invalidReason: text(256).optional(),
   health: z.object({
     state: z.literal('needs-attention'),
-    reason: text(256),
+    reason: text(TRACKER_PROVIDER_HEALTH_REASON_MAX),
     checkedAt: z.number().int().nonnegative(),
   }).strict().optional(),
   credential: credentialSchema,

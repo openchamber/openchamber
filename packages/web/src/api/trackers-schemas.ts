@@ -1,5 +1,8 @@
 
 import { z } from 'zod';
+
+import { TRACKER_PROVIDER_HEALTH_REASON_MAX } from '@openchamber/sdk';
+
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import type {
   TrackerAccount,
@@ -147,7 +150,7 @@ export const statesResultSchema: z.ZodType<TrackerStatesResult> = z.union([
 
 const accountHealthSchema = z.object({
   state: z.literal('needs-attention'),
-  reason: z.string().trim().min(1).max(256),
+  reason: z.string().trim().min(1).max(TRACKER_PROVIDER_HEALTH_REASON_MAX),
   checkedAt: z.number().int().nonnegative(),
 });
 
