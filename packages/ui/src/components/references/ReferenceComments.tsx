@@ -7,11 +7,9 @@ import { Button } from '@/components/ui/button';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
-import { Textarea } from '@/components/ui/textarea';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
-import { isIMECompositionEvent } from '@/lib/ime';
 import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { cn } from '@/lib/utils';
@@ -150,7 +148,6 @@ const useCommentMenu = (comment: ReferenceCommentItem, actions: ScopedCommentAct
                 placeholder={t('sourceBoard.comment.edit')}
                 disabled={busy !== null}
                 autoFocus
-                maxLines={4}
                 aria-label={t('sourceBoard.comment.edit')}
             />
             <div className="flex items-center justify-end gap-2">
@@ -362,24 +359,15 @@ const ThreadRest: React.FC<{
             ) : null}
             {replying ? (
                 <div className="mt-2 flex flex-col gap-2">
-                    <Textarea
+                    <ReferenceMarkdownEditor
                         value={text}
-                        onChange={(event) => setText(event.target.value)}
-                        onKeyDown={(event) => {
-                            if (isIMECompositionEvent(event)) return;
-                            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                                event.preventDefault();
-                                void sendReply();
-                            } else if (event.key === 'Escape' && !text) {
-                                event.stopPropagation();
-                                setReplying(false);
-                            }
-                        }}
+                        onChange={setText}
+                        onSubmit={() => void sendReply()}
+                        onCancel={() => setReplying(false)}
                         placeholder={t('references.picker.thread.replyPlaceholder')}
-                        aria-label={t('references.picker.thread.replyPlaceholder')}
                         disabled={busy !== null}
-                        rows={2}
                         autoFocus
+                        aria-label={t('references.picker.thread.replyPlaceholder')}
                     />
                     <div className="flex items-center justify-end gap-2">
                         <Button size="sm" variant="ghost" onClick={() => setReplying(false)} disabled={busy !== null}>

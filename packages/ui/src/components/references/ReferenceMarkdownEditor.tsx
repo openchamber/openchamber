@@ -8,6 +8,10 @@ import { isIMECompositionEvent } from '@/lib/ime';
 
 const NO_NAMES: ReadonlySet<string> = new Set();
 
+const REFERENCE_EDITOR_MAX_LINES = 12;
+const REFERENCE_REPLY_FLOOR_CLASS = 'min-h-[calc(4*1lh)]';
+const REFERENCE_EDITOR_FLOOR_CLASS = 'min-h-[calc(12*1lh)]';
+
 interface ReferenceMarkdownEditorProps {
     value: string;
     onChange: (value: string) => void;
@@ -16,12 +20,12 @@ interface ReferenceMarkdownEditorProps {
     placeholder: string;
     disabled?: boolean;
     autoFocus?: boolean;
-    maxLines?: number;
+    compact?: boolean;
     'aria-label'?: string;
 }
 
 export const ReferenceMarkdownEditor: React.FC<ReferenceMarkdownEditorProps> = ({
-    value, onChange, onSubmit, onCancel, placeholder, disabled = false, autoFocus = false, maxLines = 6, 'aria-label': ariaLabel,
+    value, onChange, onSubmit, onCancel, placeholder, disabled = false, autoFocus = false, compact = false, 'aria-label': ariaLabel,
 }) => {
     const editorRef = React.useRef<ComposerEditorHandle>(null);
     const themeVariant = useOptionalThemeSystem()?.currentTheme.metadata.variant === 'light' ? 'light' : 'dark';
@@ -69,7 +73,8 @@ export const ReferenceMarkdownEditor: React.FC<ReferenceMarkdownEditorProps> = (
             editable={!disabled}
             placeholder={placeholder}
             spellCheck
-            maxLines={maxLines}
+            className={`typography-markdown ${compact ? REFERENCE_REPLY_FLOOR_CLASS : REFERENCE_EDITOR_FLOOR_CLASS}`}
+            maxLines={REFERENCE_EDITOR_MAX_LINES}
             aria-label={ariaLabel ?? placeholder}
         />
     );

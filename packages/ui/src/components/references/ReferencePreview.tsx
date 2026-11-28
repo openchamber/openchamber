@@ -710,7 +710,6 @@ const RepositoryPreview: React.FC<{
                             onCancel={cancelEditing}
                             placeholder={t('sourceBoard.edit.body')}
                             disabled={saving}
-                            maxLines={8}
                             aria-label={t('sourceBoard.edit.body')}
                         />
                         {}

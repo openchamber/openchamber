@@ -1,15 +1,14 @@
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { ReferenceMarkdownEditor } from '@/components/references/ReferenceMarkdownEditor';
 import { referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { toast } from '@/components/ui';
 import { ButtonTooltip, TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
-import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { reviewLabelsOf } from '@/lib/source-control/reviewLabels';
@@ -135,26 +134,19 @@ export const SourceBoardReply: React.FC<{
         }
     };
 
-    const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (isIMECompositionEvent(event)) return;
-        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault();
-            void comment();
-        }
-    };
-
     const busyIcon = (kind: Busy) => (busy === kind ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null);
 
     return (
         <section className="flex flex-col gap-2 border-t border-edge pt-4" aria-label={t('sourceBoard.reply.label')}>
-            <Textarea
+            <ReferenceMarkdownEditor
                 value={text}
-                onChange={(event) => setText(event.target.value)}
-                onKeyDown={onKeyDown}
+                onChange={setText}
+                onSubmit={() => void comment()}
+                onCancel={() => undefined}
                 placeholder={t('sourceBoard.reply.placeholder')}
-                aria-label={t('sourceBoard.reply.label')}
                 disabled={busy !== null}
-                rows={3}
+                compact
+                aria-label={t('sourceBoard.reply.label')}
             />
             {openPull && canReview && review.model === 'votes' ? (
                 onLatestRevision ? (

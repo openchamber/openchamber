@@ -7,10 +7,10 @@ import { REFERENCE_META_TEXT } from './referencePickerItems';
 import { RowPerson } from './ReferencePickerRow';
 
 export const MetaRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <>
+    <div className="col-span-2 grid min-h-6 grid-cols-subgrid items-center">
         <dt className={cn('typography-meta', REFERENCE_META_TEXT)}>{label}</dt>
         <dd className="min-w-0 typography-meta text-muted-foreground">{children}</dd>
-    </>
+    </div>
 );
 
 export const ReferenceAssigneesRow: React.FC<{
