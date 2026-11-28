@@ -186,6 +186,10 @@ v2 creates the session on a selection, so the first prompt runs on the model the
 
 `GET /api/linear/issues/get` with host-provided auth is issued by the host, not through the guest proxy. An extension attaching a Linear issue therefore never receives that integration's credentials, and the proxy stays off the path.
 
+### Why the pane answers tracker reads from the frame's provider
+
+A request that named its provider would let one extension read another's tracker. The `tracker` message has no provider field: the pane derives it from the frame's guest id (`ext-<panel.id>`) and calls the tracker routes under that provider, so a panel reads only its own tracker and the account store and service credentials stay on the host side.
+
 ### Why the install link parser is pure
 
 The Markdown sanitizer may run in a worker, so `install-link.ts` imports nothing and touches no DOM. `openchamber://extensions/install?url=…` installs from a repository and `?path=…` from a folder; a link can come from any page outside the app, so the desktop shell passes on only `url`, and only chat content inside the app may carry `path`.
