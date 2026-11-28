@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { OpenCode, type OpenCodeClient } from '@opencode/client';
-import { waitForLocationPlugins } from '../../web/server/lib/opencode/location-plugins.js';
+import { LOCATION_PLUGINS_NOT_READY, waitForCatalogLocation } from '../../web/server/lib/opencode/location-plugins.js';
 import * as gitService from './gitService';
 import { assertOpenCodeDirectoryTrusted, openCodeTrust, type OpenCodeTrustGuard } from './opencodeTrust';
 import { chooseBridgeGitGenerationModel, explicitBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel, type BridgeGitGenerationModelChoice } from './bridge-git-generation-model';
@@ -70,7 +70,7 @@ const fetchBridgeGitModelCatalog = async (
 
   const client = createBridgeGitClient(apiUrl, authHeaders, directory);
   const signal = AbortSignal.timeout(8_000);
-  await waitForLocationPlugins(client, signal);
+  if (!(await waitForCatalogLocation(client, signal))) throw new Error(LOCATION_PLUGINS_NOT_READY);
   const payload = await client.model.list(undefined, { signal });
   const catalog: BridgeGitModelCatalog = { disabled: new Set(), variants: new Map() };
   for (const model of payload.data) {

@@ -37,6 +37,7 @@ let providers: Array<{ id: string; name: string }> = [];
 let models: FakeModel[] = [];
 let requests: SeenRequest[] = [];
 let emptyPluginPolls = 0;
+let stateless = false;
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -46,7 +47,12 @@ const server = http.createServer((req, res) => {
     directory: Array.isArray(directory) ? directory.join(',') : directory,
     authorization: req.headers.authorization,
   });
-  const plugins = emptyPluginPolls-- > 0 ? [] : [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }];
+  if (url.pathname === '/api/debug/location') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(stateless ? [] : [LOCATION]));
+    return;
+  }
+  const plugins = stateless || emptyPluginPolls-- > 0 ? [] : [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }];
   const data = url.pathname === '/api/provider' ? providers
     : url.pathname === '/api/model' ? models
       : url.pathname === '/api/plugin' ? plugins : null;
@@ -80,6 +86,7 @@ beforeEach(() => {
   models = [];
   requests = [];
   emptyPluginPolls = 0;
+  stateless = false;
 });
 
 const ask = (
@@ -144,7 +151,17 @@ describe('GET /api/small-model in VS Code', () => {
     providers = [{ id: 'openai', name: 'OpenAI' }];
 
     assert.deepEqual((await ask({ directory: '/proj' }))?.data, { authenticatedProviders: ['openai'] });
-    assert.deepEqual(requests.slice(0, 3).map((request) => request.path), ['/api/plugin', '/api/plugin', '/api/plugin']);
+    assert.deepEqual(requests.slice(0, 4).map((request) => request.path), ['/api/plugin', '/api/debug/location', '/api/plugin', '/api/plugin']);
+  });
+
+  test('reads a pluginless provider catalog only after the empty location inventory', async () => {
+    stateless = true;
+    models = [MODEL('openai', 'gpt-5-nano')];
+    providers = [{ id: 'openai', name: 'OpenAI' }];
+
+    assert.deepEqual((await ask({ directory: '/proj' }))?.data, { authenticatedProviders: ['openai'] });
+    assert.deepEqual(requests.slice(0, 2).map((request) => request.path), ['/api/plugin', '/api/debug/location']);
+    assert.deepEqual(requests.slice(2).map((request) => request.path).sort(), ['/api/model', '/api/provider']);
   });
 
   test('a failed read is an error, never an empty provider list', async () => {
