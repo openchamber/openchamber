@@ -4,6 +4,8 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { loadedAppFontCSS } from '@/lib/fontLoader';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { Theme } from '@/types/theme';
+import { copyImageToClipboard } from '@/lib/clipboard';
+import type { ImageExportTarget } from '@/stores/useUIStore';
 
 export const MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE = 'data-message-image-export-exclude';
 
@@ -114,7 +116,17 @@ export const collapseMessageImageExportTables = (clone: HTMLElement): void => {
     });
 };
 
-export type MessageImageSaveResult = 'saved' | 'canceled';
+export type MessageImageDelivery = {
+    saved: boolean;
+    copied: boolean;
+    canceled: boolean;
+    copyFailed: boolean;
+};
+
+export const imageDeliveryPlan = (target: ImageExportTarget) => ({
+    save: target !== 'clipboard',
+    copy: target !== 'file',
+});
 
 type VSCodeImageSavePayload = { saved?: boolean; canceled?: boolean; error?: string };
 
@@ -124,7 +136,7 @@ const dataUrlToBlob = (dataUrl: string): Blob => {
     return new Blob([bytes], { type: header.match(/^data:([^;]+)/)?.[1] ?? 'image/png' });
 };
 
-const deliverMessageImage = async (dataUrl: string, fileName: string, vscode: VSCodeAPI | undefined): Promise<MessageImageSaveResult> => {
+const saveImageFile = async (dataUrl: string, fileName: string, vscode: VSCodeAPI | undefined): Promise<'saved' | 'canceled'> => {
     if (isVSCodeRuntime()) {
         // SAFETY: the extension's `api:files/save-image` handler answers with this shape.
         const payload = await vscode?.saveImage?.({ fileName, dataUrl }) as VSCodeImageSavePayload | undefined;
@@ -152,6 +164,19 @@ const deliverMessageImage = async (dataUrl: string, fileName: string, vscode: VS
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     return 'saved';
+};
+
+const deliverMessageImage = async (dataUrl: string, fileName: string, vscode: VSCodeAPI | undefined, target: ImageExportTarget): Promise<MessageImageDelivery> => {
+    const plan = imageDeliveryPlan(target);
+    const copyResult = plan.copy ? await copyImageToClipboard(dataUrlToBlob(dataUrl)) : null;
+    const copied = copyResult?.ok === true;
+    const outcome = plan.save ? await saveImageFile(dataUrl, fileName, vscode) : 'skipped';
+    return {
+        saved: outcome === 'saved',
+        copied,
+        canceled: outcome === 'canceled',
+        copyFailed: plan.copy && !copied,
+    };
 };
 
 const prepareMessageImageClone = (source: HTMLElement): HTMLElement => {
@@ -184,12 +209,13 @@ const prepareMessageImageClone = (source: HTMLElement): HTMLElement => {
     return clone;
 };
 
-export const saveMessageImageExport = async ({ source, width, fileName, vscode }: {
+export const saveMessageImageExport = async ({ source, width, fileName, vscode, target }: {
     source: HTMLElement;
     width: number;
     fileName: string;
     vscode: VSCodeAPI | undefined;
-}): Promise<MessageImageSaveResult> => {
+    target: ImageExportTarget;
+}): Promise<MessageImageDelivery> => {
     let wrapper: HTMLDivElement | null = null;
     try {
         const { getFontEmbedCSS, toPng } = await import('html-to-image');
@@ -231,7 +257,7 @@ export const saveMessageImageExport = async ({ source, width, fileName, vscode }
             backgroundColor,
             fontEmbedCSS: [stylesheetFontCSS, appFontCSS].filter(Boolean).join('\n'),
         });
-        return await deliverMessageImage(dataUrl, fileName, vscode);
+        return await deliverMessageImage(dataUrl, fileName, vscode, target);
     } finally {
         wrapper?.remove();
     }

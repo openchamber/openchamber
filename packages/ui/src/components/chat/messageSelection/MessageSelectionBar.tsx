@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { useMessageSelectionKeys, useMessageSelectionStore } from '@/stores/useMessageSelectionStore';
 import { useLoadedSessionMessageRecords, useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { copySelectionMarkdown, pickSelectedUnits, saveSelectionImage } from './selectionExport';
+import { imageDeliveryToast, selectionImageExportLabelKey, useImageExportTarget } from '../message/imageExportTarget';
 
 type MessageSelectionBarProps = {
     sessionId: string;
@@ -40,6 +41,7 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
     const keys = useMessageSelectionKeys(sessionId);
     const vscode = useRuntimeAPIs().vscode;
     const theme = useOptionalThemeSystem()?.currentTheme;
+    const imageExportTarget = useImageExportTarget();
     const readLoadedRecords = useLoadedSessionMessageRecords();
     const loadCompleteRecords = useSessionMessageRecordsForExport();
     const [busy, setBusy] = React.useState<ExportKind | null>(null);
@@ -86,9 +88,11 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
                     syntaxStyle: column?.closest('.chat-scroll')?.querySelector('[data-markdown-content]')?.getAttribute('style') ?? null,
                     theme,
                     vscode,
+                    target: imageExportTarget,
                 });
-                if (result === 'canceled') return;
-                toast.success(t('chat.messageBody.toast.imageSaved'));
+                const outcome = imageDeliveryToast(result);
+                if (outcome) toast[outcome.tone](t(outcome.key));
+                if (result.canceled) return;
             }
             useMessageSelectionStore.getState().endSelection(selectionId);
         } catch (error) {
@@ -97,7 +101,7 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
         } finally {
             setBusy(null);
         }
-    }, [busy, keys.size, resolveUnits, t, theme, vscode]);
+    }, [busy, imageExportTarget, keys.size, resolveUnits, t, theme, vscode]);
 
     const nothingSelected = keys.size === 0;
     const buttonSize = isMobile ? 'lg' : 'default';
@@ -163,8 +167,8 @@ export const MessageSelectionBar: React.FC<MessageSelectionBarProps> = ({ sessio
                 disabled={nothingSelected || busy !== null}
                 onClick={() => void runExport('image')}
             >
-                {busy === 'image' ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="image-download" className="size-4" />}
-                {iconOnly ? null : t(isMobile ? 'chat.messageSelection.saveImageShort' : 'chat.messageSelection.saveImage')}
+                {busy === 'image' ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name={imageExportTarget === 'clipboard' ? 'file-copy' : 'image-download'} className="size-4" />}
+                {iconOnly ? null : t(isMobile ? 'chat.messageSelection.saveImageShort' : selectionImageExportLabelKey(imageExportTarget))}
             </Button>
         </div>
     );

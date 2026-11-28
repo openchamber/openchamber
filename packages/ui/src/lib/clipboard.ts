@@ -64,6 +64,21 @@ export async function readClipboardText(): Promise<string> {
   return navigator.clipboard.readText();
 }
 
+export async function copyImageToClipboard(blob: Blob): Promise<ClipboardCopyResult> {
+  const clipboard = globalThis.navigator?.clipboard;
+  const ClipboardItemCtor = globalThis.ClipboardItem;
+  if (!clipboard?.write || !ClipboardItemCtor) {
+    return { ok: false, error: 'Clipboard image writes are unavailable in this runtime' };
+  }
+
+  try {
+    await clipboard.write([new ClipboardItemCtor({ [blob.type || 'image/png']: blob })]);
+    return { ok: true, method: 'clipboard' };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function copyMarkdownToClipboard(
   markdown: string,
   html: string,

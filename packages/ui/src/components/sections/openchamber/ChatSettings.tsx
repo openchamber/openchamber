@@ -33,6 +33,7 @@ import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { DEFAULT_SELECTION_APPROVAL_TEXT, useUIStore, type ChatWidth, type DocumentAttachBehavior, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { ChatImageSettingsSection } from './ChatImageSettings';
 
 import { MessageSearchSettings } from './MessageSearchSettings';
 import { SessionGoalCheckerField, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
@@ -398,6 +399,8 @@ const MessagesTab: React.FC = () => {
           />
         </div>
       </SettingsSection>
+
+      <ChatImageSettingsSection />
 
       {isVSCode ? null : <MessageSearchSettings />}
     </>

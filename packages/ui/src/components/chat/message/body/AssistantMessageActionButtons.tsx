@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { imageExportActionKey, useImageExportTarget } from '../imageExportTarget';
 import type { MessageExtraAction } from './messageBodyProps';
 import { AssistantCopyButton } from './AssistantCopyButton';
 import { CopyMessageLinkButton } from './CopyMessageLinkButton';
@@ -41,6 +42,7 @@ export const AssistantMessageActionButtons = React.memo(({
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
+    const imageExportTarget = useImageExportTarget();
     const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS(ttsReadingKey);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
@@ -167,11 +169,11 @@ export const AssistantMessageActionButtons = React.memo(({
                         {isSharing ? (
                             <Icon name="loader-4" className="h-3 w-3 animate-spin" />
                         ) : (
-                            <Icon name="image-download" className="h-3 w-3" />
+                            <Icon name={imageExportTarget === 'clipboard' ? 'file-copy' : 'image-download'} className="h-3 w-3" />
                         )}
                     </Button>
                 </TooltipTrigger>
-                <TooltipContent sideOffset={6}>{isSharing ? t('chat.messageBody.actions.savingImage') : t('chat.messageBody.actions.saveAsImage')}</TooltipContent>
+                <TooltipContent sideOffset={6}>{isSharing ? t('chat.messageBody.actions.savingImage') : t(imageExportActionKey(imageExportTarget))}</TooltipContent>
             </Tooltip> : null}
             {chatSurfaceMode !== 'mini-chat' && showMessageTTSButtons && hasCopyableText && (
                 <Tooltip>

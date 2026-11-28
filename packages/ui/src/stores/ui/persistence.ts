@@ -435,6 +435,7 @@ const uiStorePersistOptions = {
     codeBlockLineWrap: state.codeBlockLineWrap,
     tableCellWrap: state.tableCellWrap,
     copyMessagesAsPlainText: state.copyMessagesAsPlainText,
+    imageExportTarget: state.imageExportTarget,
     selectionApprovalText: state.selectionApprovalText,
     showToolFileIcons: state.showToolFileIcons,
     showLiveActivityPreview: state.showLiveActivityPreview,

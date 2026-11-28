@@ -3,9 +3,9 @@ import type { Theme } from '@/types/theme';
 import { copyMarkdownToClipboard } from '@/lib/clipboard';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type ImageExportTarget } from '@/stores/useUIStore';
 import type { ChatMessageEntry } from '../lib/turns/types';
-import { saveMessageImageExport, type MessageImageSaveResult } from '../message/imageExport';
+import { saveMessageImageExport, type MessageImageDelivery } from '../message/imageExport';
 import { listSelectableUnits, type SelectableAnswer, type SelectableUnit } from './selectableUnits';
 import { formatSelectionMarkdown } from './selectionMarkdown';
 
@@ -76,17 +76,19 @@ const buildSelectionImageSource = async (units: readonly SelectableUnit[], optio
     return source;
 };
 
-export const saveSelectionImage = async ({ units, width, syntaxStyle, theme, vscode }: {
+export const saveSelectionImage = async ({ units, width, syntaxStyle, theme, vscode, target }: {
     units: readonly SelectableUnit[];
     width: number;
     syntaxStyle: string | null;
     theme: Theme | undefined;
     vscode: VSCodeAPI | undefined;
-}): Promise<MessageImageSaveResult> => saveMessageImageExport({
+    target: ImageExportTarget;
+}): Promise<MessageImageDelivery> => saveMessageImageExport({
     source: await buildSelectionImageSource(units, { syntaxStyle, width, theme }),
     width,
     fileName: `messages-${units[0]?.messageId ?? 'selection'}.png`,
     vscode,
+    target,
 });
 
 export const copySelectionMarkdown = async (units: readonly SelectableUnit[]): Promise<boolean> => {

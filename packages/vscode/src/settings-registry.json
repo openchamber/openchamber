@@ -506,6 +506,9 @@
     "copyMessagesAsPlainText": {
       "scope": "profile"
     },
+    "imageExportTarget": {
+      "scope": "profile"
+    },
     "selectionApprovalText": {
       "scope": "profile"
     },
