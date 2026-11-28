@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ExtensionFoldersSection, ExtensionInstallFolders } from './ExtensionFoldersField';
+import { ExtensionProviderPermissions } from './ExtensionProviderPermissions';
 import { useInstallFolders } from './useInstallFolders';
 import { GuestApprovalDialog } from './GuestApprovalDialog';
 import { OpenCodePluginBanner } from './OpenCodePluginBanner';
@@ -506,16 +507,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           {guest.tracker ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.providesTracker', { label: guest.tracker.label })}</p>
           ) : null}
-          {guest.quota ? (
-            <p className="typography-meta text-foreground">
-              {guest.quota.providers.length > 0
-                ? t('settings.extensions.service.providesQuota', { list: guest.quota.providers.join(', ') })
-                : t('settings.extensions.service.providesQuota.none')}
-            </p>
-          ) : null}
-          {guest.capabilities.requested.includes('opencode') ? (
-            <p className="typography-meta text-foreground">{t('settings.extensions.capability.opencode.detail')}</p>
-          ) : null}
+          <ExtensionProviderPermissions guest={guest} />
           {guest.service ? (
             <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>
           ) : null}

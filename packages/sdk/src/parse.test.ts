@@ -2065,6 +2065,15 @@ describe('services that act on their own', () => {
     }
     expect(requestedGuestCapabilities({ service: { entry: 'service/main.js', runtime: 'host' } })).toEqual(['service']);
   });
+
+  test('provider accounts need a service and ask for one capability without a provider list', () => {
+    const panel = { ...pageless, entry: 'panel/index.html' };
+    const accepted = parse({ panel, service, providerAccounts: true });
+    if (!accepted.ok) throw new Error(accepted.message);
+    expect(requestedGuestCapabilities(accepted.manifest.contributes)).toEqual(['service', 'providerAccounts']);
+    expect(parse({ panel, providerAccounts: true })).toMatchObject({ ok: false, code: 'invalid-provider-accounts' });
+    expect(parse({ panel, service, providerAccounts: { providers: ['openai'] } })).toMatchObject({ ok: false, code: 'invalid-provider-accounts' });
+  });
 });
 
 describe('contributes.blocks', () => {

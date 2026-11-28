@@ -84,6 +84,11 @@ export const serviceHostCallSchema = z.discriminatedUnion('method', [
     input: z.object({ needsConfiguration: z.string().trim().min(1).max(SERVICE_STATUS_MESSAGE_MAX).nullable() }).strict(),
   }).strict(),
   z.object({ method: z.literal('marks.set'), input: markInput }).strict(),
+  z.object({ method: z.literal('providerAccounts.list'), input: z.object({}).strict() }).strict(),
+  z.object({
+    method: z.literal('providerAccounts.activate'),
+    input: z.object({ providerId: shortText, accountId: shortText, expectedActiveAccountId: shortText.optional() }).strict(),
+  }).strict(),
 ]);
 
 export const mentionItemSchema = z.object({

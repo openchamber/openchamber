@@ -1,4 +1,5 @@
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
+import type { DeclaredGuestCapability } from './capabilities.ts';
 import type { SourceControlCapabilities } from './source-control-capabilities.ts';
 import type { FileEditorContribution } from './file-editor.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
@@ -514,18 +515,11 @@ export type PublicService = {
   granted: boolean;
 };
 
-export const serviceProvides = (
-  service: Pick<ServiceContribution, 'provides'> | undefined,
-  role: GuestServiceProvides,
-): boolean => Boolean(service?.provides?.includes(role));
-
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'microphone', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links', 'wake', 'marks'] as const;
-
-export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
-
-export const DECLARED_GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'microphone'] as const;
-
-export type DeclaredGuestCapability = (typeof DECLARED_GUEST_CAPABILITIES)[number];
+export {
+  DECLARED_GUEST_CAPABILITIES, GUEST_CAPABILITIES, guestActionsNeedConversation, hasGuestCapability,
+  isGuestApproved, requestedGuestCapabilities, serviceProvides,
+  type DeclaredGuestCapability, type GuestCapability, type PublicGuestCapabilities,
+} from './capabilities.ts';
 
 export const GUEST_ORIGINS_MAX = 8;
 
@@ -616,42 +610,12 @@ export type OpenChamberContributes = {
   sessionControl?: SessionControlContribution;
   instructions?: true;
   marks?: true;
+  providerAccounts?: true;
   skills?: string;
   opencodePlugin?: string;
   mentions?: MentionsContribution;
   blocks?: GuestBlockContribution[];
   links?: LinksContribution;
-};
-
-export const guestActionsNeedConversation = (
-  actions: readonly GuestActionContribution[] | undefined,
-): boolean => Boolean(actions?.some((action) => action.payload?.includes('messages')));
-
-export type PublicGuestCapabilities = {
-  requested: GuestCapability[];
-  granted: GuestCapability[];
-};
-
-export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills' | 'opencodePlugin' | 'links' | 'waits' | 'marks'>,
-): GuestCapability[] => {
-  const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
-  if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
-  if (contributes.service) declared.add('service');
-  if (serviceProvides(contributes.service, 'opencode')) declared.add('opencode');
-  if (contributes.integration) declared.add('network');
-  if (contributes.filesystem && contributes.filesystem.length > 0) declared.add('filesystem');
-  if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
-  if (contributes.sessionEvents?.content || contributes.sessionControl?.content) declared.add('transcript');
-  if (contributes.sessionControl) declared.add('sessionControl');
-  if (contributes.sessionControl?.answers) declared.add('sessionAnswers');
-  if (contributes.instructions) declared.add('instructions');
-  if (contributes.skills) declared.add('skills');
-  if (contributes.opencodePlugin) declared.add('opencodePlugin');
-  if (contributes.links) declared.add('links');
-  if (contributes.waits && contributes.waits.length > 0) declared.add('wake');
-  if (contributes.marks) declared.add('marks');
-  return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
 export const toPublicSessionEvents = (contribution: SessionEventsContribution): PublicSessionEvents => ({
@@ -662,15 +626,6 @@ export const toPublicSessionEvents = (contribution: SessionEventsContribution): 
 export const hasGuestPage = (
   contributes: Pick<OpenChamberContributes, 'panel'>,
 ): boolean => Boolean(contributes.panel.entry);
-
-export const isGuestApproved = (capabilities: PublicGuestCapabilities): boolean => (
-  capabilities.requested.every((capability) => capabilities.granted.includes(capability))
-);
-
-export const hasGuestCapability = (
-  capabilities: PublicGuestCapabilities,
-  capability: GuestCapability,
-): boolean => capabilities.granted.includes(capability);
 
 const isAttachObject = (attach: AttachContribution | undefined): attach is AttachContributionObject => (
   attach !== undefined && attach !== true && attach !== false && attach !== 'panel' && attach !== 'dialog'
@@ -752,6 +707,7 @@ export type ParseManifestErrorCode =
   | 'invalid-session-control'
   | 'invalid-instructions'
   | 'invalid-marks'
+  | 'invalid-provider-accounts'
   | 'invalid-skills'
   | 'invalid-opencode-plugin'
   | 'invalid-mentions'

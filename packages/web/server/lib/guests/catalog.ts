@@ -378,6 +378,9 @@ export const inspectGuestPackage = async (packageRoot: string, { openchamberVers
   if (parsed.manifest.contributes.marks) {
     guest.marks = true;
   }
+  if (parsed.manifest.contributes.providerAccounts) {
+    guest.providerAccounts = true;
+  }
   if (parsed.manifest.contributes.mentions) {
     guest.mentions = parsed.manifest.contributes.mentions;
   }
@@ -426,7 +429,7 @@ export const setGuestConfigurationNote = (guestId: string, message: string | nul
   return true;
 };
 
-export type PublicGuest = Omit<GuestRecord, 'source' | 'packageRoot' | 'service' | 'sourceControl' | 'sessionEvents' | 'waits' | 'notifications' | 'tracker' | 'quota' | 'integration' | 'links' | 'skills' | 'opencodePlugin' | 'capabilities' | 'sessionControl' | 'mentions'> & {
+export type PublicGuest = Omit<GuestRecord, 'source' | 'packageRoot' | 'service' | 'sourceControl' | 'sessionEvents' | 'waits' | 'notifications' | 'tracker' | 'quota' | 'integration' | 'links' | 'skills' | 'opencodePlugin' | 'capabilities' | 'sessionControl' | 'mentions' | 'providerAccounts'> & {
   source: string | undefined;
   path: string | null;
   enabled: boolean;

@@ -1,10 +1,16 @@
-import { describe, expect, test, vi } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
+import express from 'express';
+import request from 'supertest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
+import { createLimitFailoverRuntime } from '../limit-failover/runtime.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { SERVICE_MARKS_MAX, SERVICE_MARK_RATE_MAX } from '@openchamber/sdk';
 
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { createGuestMarks } from './marks.js';
+import { createProviderAccounts } from './provider-accounts.js';
 import { createServiceHostApi } from './service-host-api.js';
 
 const row = (overrides = {}) => ({
@@ -46,6 +52,182 @@ const harness = (guest = row(), overrides = {}) => {
   const call = (method, input, bearer = 'live-token') => api.serve({ bearer, body: { method, input } });
   return { api, control, instructions, emitToFrames, setConfigurationNote, marks, call };
 };
+
+describe('provider account host calls', () => {
+  const primary = { id: 'cred_primary', label: 'Primary', plan: 'Team', active: true };
+  const spare = { id: 'cred_spare', label: 'Spare', plan: null, active: false };
+  const activation = { providerId: 'openai', accountId: spare.id, expectedActiveAccountId: primary.id };
+  const provider = { id: 'openai', name: 'OpenAI' };
+  const approved = row({ providerAccounts: true, capabilityGrants: [...row().capabilityGrants, 'providerAccounts'] });
+
+  const setup = (guest = approved, { onCredentialRead = () => {}, switchAccount = true, onManagedAccountSwitch = vi.fn() } = {}) => {
+    let active = primary.id;
+    const stored = [
+      { id: primary.id, label: primary.label, integrationID: 'openai-login', value: { type: 'oauth', access: 'secret-access', refresh: 'secret-refresh', metadata: { plan: 'Team', private: 'secret-metadata' } } },
+      { id: spare.id, label: spare.label, integrationID: 'openai-login', value: { type: 'key', key: 'secret-key' } },
+      { id: 'cred_mcp', label: 'MCP login', integrationID: 'mcp_test', value: { type: 'oauth', access: 'mcp-secret' } },
+    ];
+    const upstream = vi.fn(async (input, init) => {
+      const request = new Request(input, init);
+      const pathname = new URL(request.url).pathname;
+      if (pathname === '/api/plugin') return Response.json({ location: {}, data: [{ id: 'ready' }] });
+      if (pathname === '/api/provider') {
+        return Response.json({ location: {}, data: [{ ...provider, integrationID: 'openai-login' }, { id: 'no-stored-login', name: 'No stored login' }] });
+      }
+      if (pathname === '/api/credential') {
+        await onCredentialRead(active);
+        return Response.json({ data: stored.map((account) => ({ ...account, active: account.id === active })) });
+      }
+      if (request.method === 'POST' && /^\/api\/credential\/[^/]+\/activate$/.test(pathname)) {
+        if (switchAccount) active = pathname.split('/')[3];
+        return new Response(null, { status: 204 });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal('fetch', upstream);
+    const providerAccounts = createProviderAccounts({
+      buildOpenCodeUrl: () => 'http://localhost:4096',
+      getOpenCodeAuthHeaders: () => ({}),
+      getDefaultDirectory: async () => '/repo',
+      getManagedLimitFailover: () => ({ noteAccountSwitch: onManagedAccountSwitch }),
+    });
+    return { ...harness(guest, { providerAccounts }), providerAccounts, upstream, onManagedAccountSwitch };
+  };
+  const storedState = (activeId) => ({
+    ...provider,
+    accounts: [primary, spare].map((account) => ({ ...account, active: account.id === activeId })),
+  });
+  const activateForFailover = (accounts, id, expected, signal = new AbortController().signal) =>
+    accounts.withManagedAccounts(signal, (activate) => activate(id, expected));
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  test('requires the current declaration and the grant even with OpenCode read access', async () => {
+    for (const guest of [
+      row({ service: { ...row().service, provides: ['opencode'] }, capabilityGrants: [...row().capabilityGrants, 'opencode'] }),
+      row({ providerAccounts: true }),
+      row({ capabilityGrants: approved.capabilityGrants }),
+    ]) {
+      const { call, upstream } = setup(guest);
+      expect(await call('providerAccounts.list', {})).toMatchObject({ status: 403 });
+      expect(await call('providerAccounts.activate', activation)).toMatchObject({ status: 403 });
+      expect(upstream).not.toHaveBeenCalled();
+    }
+  });
+
+  test('lists only model-provider accounts and safe metadata', async () => {
+    const { call } = setup();
+    expect(await call('providerAccounts.list', {})).toEqual({
+      status: 200, body: { result: { providers: [storedState(primary.id)] } },
+    });
+  });
+
+  test('confirms the actual selection after switching and refuses accounts outside the provider', async () => {
+    const { call, onManagedAccountSwitch } = setup();
+    expect(await call('providerAccounts.activate', { ...activation, accountId: 'cred_mcp' })).toMatchObject({ status: 404 });
+    expect(await call('providerAccounts.activate', { providerId: provider.id, accountId: spare.id })).toEqual({
+      status: 200, body: { result: { status: 'activated', provider: storedState(spare.id) } },
+    });
+    expect(await call('providerAccounts.activate', { ...activation, expectedActiveAccountId: spare.id })).toMatchObject({ status: 200 });
+    expect(onManagedAccountSwitch.mock.calls).toEqual([[spare.id]]);
+  });
+
+  test('refuses a stale switch after limit failover leaves a different account active', async () => {
+    const { call, providerAccounts } = setup();
+    expect(await activateForFailover(providerAccounts, spare.id, primary.id)).toBe('activated');
+    expect(await call('providerAccounts.activate', { ...activation, accountId: primary.id })).toEqual({
+      status: 200, body: { result: { status: 'stale', provider: storedState(spare.id) } },
+    });
+    expect(await call('providerAccounts.list', {})).toMatchObject({ body: { result: { providers: [storedState(spare.id)] } } });
+  });
+
+  test('overlapping switches from the same view cannot both apply', async () => {
+    const { call } = setup();
+    const outcomes = await Promise.all([
+      call('providerAccounts.activate', activation),
+      call('providerAccounts.activate', { ...activation, accountId: primary.id }),
+    ]);
+    expect(outcomes[0].body.result.status).toBe('activated');
+    expect(outcomes[1].body.result).toEqual({ status: 'stale', provider: storedState(spare.id) });
+  });
+
+  test('limit failover does not overwrite a switch made after its quota report', async () => {
+    const { call, providerAccounts } = setup();
+    await call('providerAccounts.activate', activation);
+    expect(await activateForFailover(providerAccounts, primary.id, primary.id)).toBe('stale');
+    expect(await call('providerAccounts.list', {})).toMatchObject({ body: { result: { providers: [storedState(spare.id)] } } });
+  });
+
+  test('a late quota report waits for the in-flight extension switch to be confirmed', async () => {
+    const confirming = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const received = Promise.withResolvers();
+    const { call, providerAccounts } = setup(approved, {
+      onCredentialRead: (active) => {
+        if (active !== spare.id) return;
+        confirming.resolve();
+        return release.promise;
+      },
+      onManagedAccountSwitch: (id) => runtime.noteAccountSwitch(id),
+    });
+    const broadcastUiEvent = vi.fn();
+    const runtime = createLimitFailoverRuntime({
+      path,
+      instanceDir: os.tmpdir(),
+      readSettings: async () => ({ accountSwitchProviders: [provider.id] }),
+      authorizeRequest: () => true,
+      withManagedAccounts: (...args) => {
+        received.resolve();
+        return providerAccounts.withManagedAccounts(...args);
+      },
+      broadcastUiEvent,
+    });
+    const app = express();
+    runtime.registerRoutes(app, express);
+    const switched = call('providerAccounts.activate', activation);
+    await confirming.promise;
+    const report = request(app).post('/api/openchamber/limit-failover').send({
+      sessionID: 'late-session',
+      providerID: provider.id,
+      modelID: 'model',
+      error: { type: 'provider.quota', message: 'usage limit reached' },
+      proposed: { retry: false },
+      credentials: [primary, spare],
+      activeCredentialID: spare.id,
+      hostAccountSwitch: true,
+    }).then((response) => response);
+    await received.promise;
+    release.resolve();
+    expect(await switched).toMatchObject({ body: { result: { status: 'activated' } } });
+    expect((await report).body).toEqual({ action: 'retry' });
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
+    expect(await call('providerAccounts.list', {})).toMatchObject({ body: { result: { providers: [storedState(spare.id)] } } });
+  });
+
+  test('a 204 from OpenCode does not confirm that the target is active', async () => {
+    const { call, providerAccounts } = setup(approved, { switchAccount: false });
+    expect(await call('providerAccounts.activate', activation)).toMatchObject({ status: 502, body: { error: { code: 'PROVIDER_ACCOUNTS_UNAVAILABLE' } } });
+    expect(await activateForFailover(providerAccounts, spare.id, primary.id)).toBe('missing');
+  });
+
+  test('a disconnected failover caller cannot switch accounts after the credential read', async () => {
+    const controller = new AbortController();
+    const { call, providerAccounts } = setup(approved, { onCredentialRead: () => controller.abort() });
+    await expect(activateForFailover(providerAccounts, spare.id, primary.id, controller.signal)).rejects.toThrow();
+    expect(await call('providerAccounts.list', {})).toMatchObject({ body: { result: { providers: [storedState(primary.id)] } } });
+  });
+
+  test('dropping effective grants during a credential read prevents disclosure and writes', async () => {
+    for (const [method, input] of [['providerAccounts.list', {}], ['providerAccounts.activate', activation]]) {
+      const guest = { ...approved };
+      const { call, upstream } = setup(guest, {
+        onCredentialRead: () => { guest.capabilityGrants = []; },
+      });
+      expect(await call(method, input)).toMatchObject({ status: 403, body: { error: { code: 'DISABLED' } } });
+      expect(upstream.mock.calls.some(([url, init]) => new Request(url, init).method === 'POST')).toBe(false);
+    }
+  });
+});
 
 describe('service host calls', () => {
   test('refuses a bearer no running service holds, before the body is read', () => {

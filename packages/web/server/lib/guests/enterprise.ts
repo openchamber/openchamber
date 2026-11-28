@@ -3,7 +3,7 @@ import type { OpenChamberManifest } from '@openchamber/sdk';
 
 import { readEnterprisePolicy } from '../enterprise-mode.js';
 
-const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode'];
+const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'providerAccounts'];
 
 const repositoryKey = (value: string) => {
   const trimmed = String(value).trim().replace(/#.*$/, '');

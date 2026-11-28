@@ -104,6 +104,18 @@ export type ServiceMark = {
 
 export const SERVICE_ANSWER_MESSAGE_MAX = 2_000;
 
+export type ServiceProviderAccount = { id: string; label: string; plan: string | null; active: boolean };
+export type ServiceProviderAccounts = { id: string; name: string; accounts: ServiceProviderAccount[] };
+export type ServiceProviderAccountActivation = {
+  providerId: string;
+  accountId: string;
+  expectedActiveAccountId?: string | undefined;
+};
+export type ServiceProviderAccountActivationResult = {
+  status: 'activated' | 'stale';
+  provider: ServiceProviderAccounts;
+};
+
 export type ServiceHostCalls = {
   'sessions.start': { input: ServiceSessionStart; result: ServiceSessionStarted };
   'sessions.send': { input: { sessionId: string; prompt: string }; result: ServiceSessionSent };
@@ -118,6 +130,8 @@ export type ServiceHostCalls = {
   'settings.read': { input: Record<string, never>; result: { settings: Record<string, string> } };
   'status.set': { input: { needsConfiguration: string | null }; result: { saved: true } };
   'marks.set': { input: { target: ServiceMarkTarget; mark: ServiceMark | null }; result: { saved: true } };
+  'providerAccounts.list': { input: Record<string, never>; result: { providers: ServiceProviderAccounts[] } };
+  'providerAccounts.activate': { input: ServiceProviderAccountActivation; result: ServiceProviderAccountActivationResult };
 };
 
 export type ServiceHostMethod = keyof ServiceHostCalls;
@@ -126,6 +140,7 @@ export const SERVICE_HOST_METHODS = [
   'sessions.start', 'sessions.send', 'sessions.retry', 'sessions.status', 'sessions.lastReply',
   'sessions.stop', 'sessions.answerPermission', 'sessions.answerForm',
   'instructions.set', 'panels.emit', 'settings.read', 'status.set', 'marks.set',
+  'providerAccounts.list', 'providerAccounts.activate',
 ] as const satisfies readonly ServiceHostMethod[];
 
 export class ServiceHostError extends Error {
@@ -158,6 +173,10 @@ export type ServiceHost = {
   readSettings: () => Promise<Record<string, string>>;
   needsConfiguration: (message: string | null) => Promise<{ saved: true }>;
   setMark: (target: ServiceMarkTarget, mark: ServiceMark | null) => Promise<{ saved: true }>;
+  providerAccounts: {
+    list: () => Promise<ServiceProviderAccounts[]>;
+    activate: (input: ServiceProviderAccountActivation) => Promise<ServiceProviderAccountActivationResult>;
+  };
 };
 
 export const createServiceHost = ({ env }: { env: ServiceHostEnv }): ServiceHost => {
@@ -200,5 +219,9 @@ export const createServiceHost = ({ env }: { env: ServiceHostEnv }): ServiceHost
     readSettings: () => call('settings.read', {}).then(({ settings }) => settings),
     needsConfiguration: (message) => call('status.set', { needsConfiguration: message }),
     setMark: (target, mark) => call('marks.set', { target, mark }),
+    providerAccounts: {
+      list: () => call('providerAccounts.list', {}).then(({ providers }) => providers),
+      activate: (input) => call('providerAccounts.activate', input),
+    },
   };
 };

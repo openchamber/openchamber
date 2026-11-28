@@ -136,6 +136,7 @@ export const reportSchema = z.object({
       return credential.success ? [credential.data] : [];
     })),
   activeCredentialID: z.string().min(1).optional().catch(undefined),
+  hostAccountSwitch: z.literal(true).optional(),
 });
 
 export type LimitReport = z.output<typeof reportSchema>;

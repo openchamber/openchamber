@@ -201,6 +201,8 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 | `sessions.answerForm(sessionId, formId, values, message?)` | `sessionControl: { answers: true }` | Answers the form a `question-asked` event names in `event.question.id` (`kind: "form"`). `values` are keyed by the field `key` from the event's content; a choice field takes an option's `value`. `null` dismisses the form and `message` tells the agent why. A `page` cannot be answered from a service: send to the session instead |
 | `setInstructions(directory, text)` | `contributes.instructions` | Text the agent reads in every session under `directory`, or everywhere with `null`, up to `SERVICE_INSTRUCTIONS_MAX` (4096). Empty text removes it. It stays on the server, so no message waits on your process |
 | `setMark(target, mark)` | `contributes.marks` | Puts one icon on the sidebar rows `target` names, in place of the one you set there before; `null` removes it. `target` is `{ sessionId }`, `{ directory, branch }` or `{ directory }`; `mark` is `{ icon, tone, text, url? }`. Answers `{ saved: true }`. See *Marks on sidebar rows* |
+| `providerAccounts.list()` | `contributes.providerAccounts` | Lists connected model providers with stored accounts. See [Switch provider accounts](#switch-provider-accounts) |
+| `providerAccounts.activate({ providerId, accountId, expectedActiveAccountId? })` | `contributes.providerAccounts` | Switches the provider's active account and returns its current state |
 | `emit(topic, data?)` | nothing | Sends `data` to the extension's open frames, which hear it through `host.onServiceEvent`. Up to `SERVICE_EVENT_RATE_MAX` (30) a second and `SERVICE_EVENT_DATA_MAX` (64 000) characters of JSON. Nothing replays: a frame that opens later reads the current state from the service |
 | `readSettings()` | nothing | The fields of `contributes.integration.settings`, the `secret` ones included |
 | `needsConfiguration(message)` | nothing | Shows `message` on the extension's card until cleared with `null` |
@@ -208,6 +210,34 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Marks change at most `SERVICE_MARK_RATE_MAX` (60) times a minute. Past a limit the call answers 429 and does nothing.
 
 `sessionControl` shows in the approval dialog as its own line, and `content: true` adds `transcript`. `answers: true` adds `sessionAnswers`, a line of its own too: the service answers for the user in any session, so a messenger bridge can carry the agent's requests to the user and their decisions back. Hosts up to 2.6.1 refuse the key, so declare an `engines.openchamber` floor above it. An answer to a request that settled meanwhile, in the app or on another device, is a 404. A failed session call answers what the session service told the caller, never its internals.
+
+## Switch provider accounts
+
+Add `"providerAccounts": true` beside `contributes.service`. The resulting `providerAccounts` capability appears on its own line in the approval dialog. One grant covers all connected model providers. Filter the list in your extension. The `opencode` role is unnecessary and still refuses raw credential reads and all writes.
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+const providers = await host.providerAccounts.list();
+// After the user chooses an account, use the provider and account IDs from the list.
+const result = await host.providerAccounts.activate({
+	providerId,
+	accountId,
+	expectedActiveAccountId,
+});
+```
+
+Each provider has `{ id, name, accounts }`. Each account has `{ id, label, plan, active }`. `plan` is the stored plan label, or `null` when OpenCode does not store one. Keys, tokens, and other credential fields stay on the host. Environment-only connections and integrations that do not serve a model provider are absent.
+
+Activation changes the account for the whole OpenCode instance. The result contains `{ status, provider }`, where `provider` has the same shape as a list entry:
+
+- `activated`: OpenCode reports the target as active, including when it was already active.
+- `stale`: the supplied `expectedActiveAccountId` differs from the current selection. The call changes nothing and returns the current account list for that provider. Refresh your UI before asking the user to confirm another switch. A retry can reuse the original expectation, but must not automatically switch using the new one.
+
+Omit `expectedActiveAccountId` for an unconditional switch. The host orders extension switches together with limit failover on the OpenCode instance it starts. Writers that call OpenCode directly can still change the selection concurrently because OpenCode does not accept an activation precondition. This includes the limit-failover bridge in an independently started OpenCode.
+
+An unknown provider or an account outside that provider throws `ServiceHostError` with `ACCOUNT_NOT_FOUND` (404). A failed read or an unconfirmed switch throws `PROVIDER_ACCOUNTS_UNAVAILABLE` (502). After an unconfirmed switch, read the provider again before you retry: OpenCode may have applied the write. An absent or withdrawn approval is refused as `NOT_GRANTED` or `DISABLED`. Enterprise extension policy applies to both calls. Both methods require a host release that supports `contributes.providerAccounts`.
 
 ## Marks on sidebar rows (`contributes.marks`)
 

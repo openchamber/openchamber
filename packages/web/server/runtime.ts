@@ -168,9 +168,9 @@ import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
 import { findInstalledGuest, listInstalledGuests, setGuestConfigurationNote } from './lib/guests/catalog.js';
 import { createExtensionSessionEvents } from './lib/guests/session-events.js';
 import { createGuestAgentContext } from './lib/guests/agent-context.js';
-import { getGuestAuth, guestAuthPersistPath } from './lib/guests/auth-store.js';
 import { createGuestInstructions } from './lib/guests/instructions.js';
-import { createServiceHostApi } from './lib/guests/service-host-api.js';
+import { registerServiceHostApi } from './lib/guests/service-host-api.js';
+import { createProviderAccounts } from './lib/guests/provider-accounts.js';
 import { createServiceLifetime } from './lib/guests/service-lifetime.js';
 import { extensionsPersistPath } from './lib/guests/persist.js';
 import { createGuestSurfaceRuntime } from './lib/guests/surface.js';
@@ -2140,8 +2140,16 @@ onGuestServiceEnded((guestId) => {
   if (guestMarks.dropEnded(guestId)) announceGuestMarksChanged();
 });
 
-const serviceHostApi = createServiceHostApi({
-  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+const providerAccounts = createProviderAccounts({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getDefaultDirectory: () => openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(),
+  getManagedLimitFailover: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START ? limitFailoverRuntime : null,
+});
+registerServiceHostApi({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  broadcast: broadcastOpenChamberUiEvent,
+  providerAccounts,
   control: {
     execute: executeServiceControl,
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
@@ -2151,14 +2159,6 @@ const serviceHostApi = createServiceHostApi({
     dismissOpenForms: (sessionID) => openChamberControlService.dismissOpenForms(sessionID),
   },
   instructions: guestInstructions,
-  readSettings: async (guest) => (await getGuestAuth(guest.id, guestAuthPersistPath(OPENCHAMBER_DATA_DIR)))?.settings ?? {},
-  emitToFrames: (guestId, topic, data) => broadcastOpenChamberUiEvent({
-    type: 'openchamber:guest-service-event',
-    properties: { guestId, topic, data },
-  }),
-  setConfigurationNote: (guestId, message) => {
-    if (setGuestConfigurationNote(guestId, message)) broadcastOpenChamberUiEvent({ type: 'openchamber:guests-changed', properties: {} });
-  },
   marks: {
     set: (...args) => {
       const outcome = guestMarks.set(...args);
@@ -2167,7 +2167,6 @@ const serviceHostApi = createServiceHostApi({
     },
   },
 });
-serviceHostApi.register();
 
 function executeServiceControl(action: 'session.create' | 'session.send', input?: ControlInput, contextDirectory?: ControlInput['directory'], options?: ControlOptions): Promise<SessionActionResult>;
 function executeServiceControl<Action extends SessionReadAction>(action: Action, input?: ControlInput, contextDirectory?: ControlInput['directory'], options?: ControlOptions): Promise<SessionReadResults[Action]>;
@@ -2413,6 +2412,7 @@ async function main(options: WebUiServerOptions = {}) {
     path,
     instanceDir,
     readSettings: () => readSettingsFromDiskMigrated(),
+    withManagedAccounts: providerAccounts.withManagedAccounts,
     authorizeRequest: (req) => {
       if (!agentToolRuntime) throw new TypeError("Cannot read properties of null (reading 'authorizeRequest')");
       return agentToolRuntime.authorizeRequest(req);

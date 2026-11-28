@@ -762,6 +762,7 @@ const contributesSchema = z.object({
   sessionControl: z.object({ content: z.literal(true).optional(), answers: z.literal(true).optional() }).strict().optional(),
   instructions: z.literal(true).optional(),
   marks: z.literal(true).optional(),
+  providerAccounts: z.literal(true).optional(),
   skills: z.string().trim().refine(isSafeAssetPath).optional(),
   opencodePlugin: z.string().trim().refine(isSafeAssetPath).optional(),
   mentions: z.object({ label: z.string().trim().min(1).max(GUEST_MENTIONS_LABEL_MAX) }).strict().optional(),
@@ -920,7 +921,7 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    for (const key of ['sessionControl', 'instructions', 'marks', 'mentions', 'waits'] as const) {
+    for (const key of ['sessionControl', 'instructions', 'marks', 'mentions', 'waits', 'providerAccounts'] as const) {
       if (contributes[key] !== undefined && !contributes.service) {
         ctx.addIssue({
           code: 'custom', path: [key],
@@ -1131,11 +1132,10 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path === 'contributes.sessionControl' || path.startsWith('contributes.sessionControl.')) {
     return fail('invalid-session-control', issue.code === 'custom' ? issue.message : 'contributes.sessionControl is { content?: true, answers?: true }.');
   }
-  if (path === 'contributes.instructions') {
-    return fail('invalid-instructions', issue.code === 'custom' ? issue.message : 'contributes.instructions is true.');
-  }
-  if (path === 'contributes.marks') {
-    return fail('invalid-marks', issue.code === 'custom' ? issue.message : 'contributes.marks is true.');
+  switch (path) {
+    case 'contributes.instructions': return fail('invalid-instructions', issue.code === 'custom' ? issue.message : `${path} is true.`);
+    case 'contributes.marks': return fail('invalid-marks', issue.code === 'custom' ? issue.message : `${path} is true.`);
+    case 'contributes.providerAccounts': return fail('invalid-provider-accounts', issue.code === 'custom' ? issue.message : `${path} is true.`);
   }
   if (path === 'contributes.skills') {
     return fail('invalid-skills', 'contributes.skills is a folder inside the package.');
