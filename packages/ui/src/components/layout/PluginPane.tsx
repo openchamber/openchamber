@@ -20,7 +20,6 @@ import {
   type HostMessage,
   type HostReadyContext,
   type ResolveResultPayload,
-  trackerProviderIdOf,
 } from '@openchamber/sdk';
 import { guestMessageSchema } from '@openchamber/sdk/schemas';
 
@@ -75,9 +74,7 @@ import {
   startGuestOauth,
 } from '@/lib/guests/oauth';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
-import { trackerGuestConnection } from '@/lib/guests/tracker-connection';
-import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { useTrackerAuthEntry, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
+import { useGuestTracker } from '@/lib/guests/useGuestTracker';
 import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
 import { useGuestsStore } from '@/lib/guests/store';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
@@ -200,15 +197,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const oauthStatus = useGuestOauthStore((state) => state.byId[guestId]);
   const setOauthStatus = useGuestOauthStore((state) => state.setStatus);
   const refreshOauth = useGuestOauthStore((state) => state.refresh);
-  const runtimeTrackers = React.useContext(RuntimeAPIContext)?.trackers;
-  const refreshTrackerStatus = useTrackerAuthStore((state) => state.refreshStatus);
-  const trackerProvider = guest?.tracker && !guest.integration ? trackerProviderIdOf(guestId) : null;
-  const trackerEntry = useTrackerAuthEntry(trackerProvider);
-  const trackerStatus = trackerProvider ? trackerEntry.status : null;
-  const connection = React.useMemo(
-    () => (trackerProvider ? trackerGuestConnection(trackerStatus) : oauthStatus?.connection ?? EMPTY_GUEST_CONNECTION),
-    [oauthStatus?.connection, trackerProvider, trackerStatus],
-  );
+  const tracker = useGuestTracker(guest, guestId, oauthStatus?.connection);
+  const connection = tracker.connection;
   const railItem = usePanelItem({ guestId, surface, headless, itemProp, panelOpen });
   const item = headless ? null : itemProp !== undefined ? itemProp : railItem;
   const clearBadge = useGuestBadgeStore((state) => state.clearBadge);
@@ -497,8 +487,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   }, [guest?.id, guest?.revision, hasIntegration, refreshOauth]);
 
   React.useEffect(() => {
-    if (trackerProvider) void refreshTrackerStatus(runtimeTrackers, trackerProvider, { force: true });
-  }, [refreshTrackerStatus, runtimeTrackers, trackerProvider]);
+    tracker.refresh();
+  }, [tracker.refresh]);
 
   React.useEffect(() => {
     if (guest && !guestEnabled) {
@@ -857,6 +847,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           return proxyGuestServiceRequest(guestIdRef.current, request, getSurfaceViewerId(guestIdRef.current));
         },
         serviceStatus: () => loadGuestServiceStatus(guestIdRef.current),
+        trackerRead: tracker.read,
         file: (request) => {
           if (!guestEnabledRef.current) {
             return Promise.resolve({
@@ -1007,7 +998,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       runtimeUnsubscribe();
       window.removeEventListener('message', onMessage);
     };
-  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface]);
+  }, [acknowledgeHandshake, backgroundAction, clearPopoverCloseTimer, closeActivePopover, connectFileChannel, frameKey, guestEnabled, guestEntry, headless, popover, postToGuest, pushHostState, refreshOauth, registerResolver, schedulePopoverClose, sendBackgroundAction, setOauthStatus, src, srcDoc, stopOauthPoll, surface, tracker.read]);
 
   React.useLayoutEffect(() => { statusControlsRef.current?.retire(); }, [statusContextKey]);
 

@@ -14,6 +14,7 @@ export { guestStatusViewSchema } from './status-view-schemas.ts';
 export { mentionItemSchema, mentionsResolveResultSchema, serviceHostCallSchema } from './service-host-schemas.ts';
 export type { ServiceHostCall } from './service-host-schemas.ts';
 export { guestPopoverClosedEventSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
+export { guestTrackerRequestSchema, guestTrackerResultSchema } from './tracker-reads-schemas.ts';
 export {
   guestMessageSchema,
   hostMessageSchema,

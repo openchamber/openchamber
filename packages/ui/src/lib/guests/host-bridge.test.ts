@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { HostRequestError, OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestStatusControl, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
+import { HostRequestError, OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestStatusControl, type GuestTrackerRequest, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
 import type { GuestFileProxyResult, GuestFileRequest } from './files.ts';
 import type { GuestGenerateProxyResult } from './generate.ts';
 
@@ -48,6 +48,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   request: overrides.request ?? (async () => ({ ok: true, result: { status: 200, body: '{}' } })),
   serviceRequest: overrides.serviceRequest ?? (async () => ({ ok: true, result: { status: 200, body: '{}' } })),
   serviceStatus: overrides.serviceStatus ?? (async () => ({ ok: true, result: { status: 'ready' as const } })),
+  trackerRead: overrides.trackerRead ?? (async () => ({ ok: false, code: 'NOT_GRANTED', message: 'This extension has no tracker.' })),
   file: overrides.file ?? (async () => ({ ok: true, result: { written: true as const } })),
   generate: overrides.generate ?? (async () => ({ ok: true, result: { text: '' } })),
   setBadge: overrides.setBadge ?? (() => {}),
@@ -62,6 +63,23 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
 });
 
 describe('answerGuestMessage', () => {
+  test('answers a tracker read through the proxy and keeps its failure code', async () => {
+    const message: GuestMessage = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'tracker', id: 'tracker-1', payload: { op: 'list', options: { state: 'open' } } };
+    const seen: GuestTrackerRequest[] = [];
+    const result = await answerGuestMessage(message, effects({
+      trackerRead: async (request) => {
+        seen.push(request);
+        return { ok: true, result: { op: 'list', result: { connected: false } } };
+      },
+    }));
+    expect(seen).toEqual([{ op: 'list', options: { state: 'open' } }]);
+    expect(result).toMatchObject({ type: 'result', id: 'tracker-1', ok: true, payload: { op: 'list', result: { connected: false } } });
+    const refused = await answerGuestMessage(message, effects({
+      trackerRead: async () => ({ ok: false, code: 'NOT_GRANTED', message: 'This extension has no tracker.' }),
+    }));
+    expect(refused).toMatchObject({ type: 'result', id: 'tracker-1', ok: false, code: 'NOT_GRANTED', error: 'This extension has no tracker.' });
+  });
+
   test('publishes status controls through the frame owner and reports unsupported owners', async () => {
     const controls: GuestStatusControl[] = [{ kind: 'button', id: 'refresh', label: 'Refresh' }];
     const seen: GuestStatusControl[][] = [];

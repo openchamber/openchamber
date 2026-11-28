@@ -36,6 +36,7 @@ import {
   type SessionSnapshot,
   type StartSessionResult,
   type ToastRequest,
+  type GuestTrackerRequest,
 } from '@openchamber/sdk';
 
 import type { GuestFileProxyResult, GuestFileRequest } from '@/lib/guests/files';
@@ -44,6 +45,7 @@ import type { GuestOpenCommitResult } from '@/lib/guests/open-commit';
 import type { GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
 import type { GuestOpenWalkthroughResult } from '@/lib/guests/open-walkthrough';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
+import type { GuestTrackerProxyResult } from '@/lib/guests/tracker-reads';
 
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 
@@ -88,6 +90,7 @@ type HostBridgeEffects = {
     | { ok: true; result: { status: import('@openchamber/sdk').ServiceStatus } }
     | { ok: false; code: HostRequestErrorCode; message: string }
   >;
+  trackerRead: (request: GuestTrackerRequest) => Promise<GuestTrackerProxyResult>;
   file: (request: GuestFileRequest) => Promise<GuestFileProxyResult>;
   generate: (request: GenerateRequest) => Promise<GuestGenerateProxyResult>;
   setBadge: (count: number | null) => void;
@@ -380,6 +383,10 @@ export const answerGuestMessage = async (
         return errorResult(message.id, result.message, result.code);
       }
       return okResult(message.id, result.result);
+    }
+    case 'tracker': {
+      const result = await effects.trackerRead(message.payload);
+      return result.ok ? okResult(message.id, result.result) : errorResult(message.id, result.message, result.code);
     }
     case 'file-read':
       return fileResult(message.id, await effects.file({ op: 'read', path: message.payload.path }));
