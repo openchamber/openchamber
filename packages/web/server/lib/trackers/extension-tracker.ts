@@ -25,7 +25,7 @@ import { TrackerRouteError, routeError } from './route-error.js';
 import { createSessionStatusRuntime } from './session-status-runtime.js';
 import { buildSessionOpenUrl, buildSessionStatusComment, isPublicSessionOrigin, readSessionOrigin } from './session-origin.js';
 import { z } from 'zod';
-import type { TrackerProviderInputs, TrackerProviderMethod } from '@openchamber/sdk';
+import type { TrackerProviderHealth, TrackerProviderInputs, TrackerProviderMethod } from '@openchamber/sdk';
 import type { GuestRecord } from '../guests/contracts.js';
 import type { createOutboundHandles } from '../source-control/outbound-handles.js';
 import type { createTrackerAccounts, StoredTracker, StoredTrackerAccount, TrackerCredential } from './extension-accounts.js';
@@ -152,8 +152,8 @@ export function createExtensionTracker({
     return value;
   };
 
-  function forward<K extends TrackerProviderMethod>(method: K, options: ForwardOptions<K>): Promise<ProviderData[K]>;
-  async function forward(method: TrackerProviderMethod, { instance, credential, account, input }: ForwardOptions<TrackerProviderMethod>) {
+  function forwardAnswer<K extends TrackerProviderMethod>(method: K, options: ForwardOptions<K>): Promise<{ data: ProviderData[K]; health: TrackerProviderHealth | null }>;
+  async function forwardAnswer(method: TrackerProviderMethod, { instance, credential, account, input }: ForwardOptions<TrackerProviderMethod>) {
     const current = await eligibleGuest();
     const timeoutMs = trackerProviderTimeoutMs(method);
     const grant = handles.mint({
@@ -215,11 +215,12 @@ export function createExtensionTracker({
       }
       const data = schemas.data[method].safeParse(envelope.data.data);
       if (!data.success) throw malformed(`${method} does not match its schema`);
-      return data.data;
+      return { data: data.data, health: envelope.data.health ?? null };
     } finally {
       grant.revoke();
     }
   }
+  const forward = async <K extends TrackerProviderMethod>(method: K, options: ForwardOptions<K>): Promise<ProviderData[K]> => (await forwardAnswer(method, options)).data;
 
   const currentAccount = (stored: StoredTracker | null) => {
     if (!stored) return null;
@@ -252,12 +253,19 @@ export function createExtensionTracker({
     const account = current ? await freshAccount(stored, current) : null;
     if (!account || !stored) return null;
     try {
-      return await forward(method, {
+      const answer = await forwardAnswer(method, {
         instance: stored.instance,
         credential: credentialOf(account.credential),
         account: { id: account.id, login: account.login },
         input,
       });
+      if (answer.health) {
+        await accounts.setHealth(id, account.id, answer.health, account.revision).catch((error) => {
+          warn(`[trackers] ${id}: the account's health report could not be kept: ${hasErrorFields(error) ? error.message ?? error : error}`);
+          return false;
+        });
+      }
+      return answer.data;
     } catch (error) {
       if (hasErrorFields(error) && error.kind === 'invalid-token') {
         const invalidated = await accounts.markInvalid(id, account.id, 'unauthorized', account.revision).catch(() => false);
@@ -314,6 +322,7 @@ export function createExtensionTracker({
       method: account.credential.kind,
     };
     if (account.invalidReason) view.invalidReason = account.invalidReason;
+    if (account.health) view.health = account.health;
     return view;
   };
 

@@ -48,6 +48,8 @@ export type TrackerListOptions = {
   containerId?: string | null;
 };
 
+export type TrackerAccountHealth = { state: 'needs-attention'; reason: string; checkedAt: number };
+
 export type TrackerAccount = {
   id: string;
   name: string | null;
@@ -56,6 +58,7 @@ export type TrackerAccount = {
   authorizedAt?: number | null;
   status?: 'valid' | 'invalid';
   invalidReason?: string;
+  health?: TrackerAccountHealth;
   method?: 'oauth' | 'token';
 };
 
@@ -122,7 +125,7 @@ export interface TrackerSessionStatusRuntime {
 
 export type TrackerAccountsView = {
   instance: string | null;
-  accounts: Array<{ id: string; login: string | null; name?: string; avatarUrl?: string; connectedAt: number; status: 'valid' | 'invalid'; invalidReason?: string; method: 'oauth' | 'token' }>;
+  accounts: Array<{ id: string; login: string | null; name?: string; avatarUrl?: string; connectedAt: number; status: 'valid' | 'invalid'; invalidReason?: string; health?: TrackerAccountHealth; method: 'oauth' | 'token' }>;
   activeAccountId: string | null;
   hasClient: boolean;
 };

@@ -54,6 +54,13 @@ describe('web trackers: an extension tracker\'s status', () => {
     trackerServer(() => Response.json({ connected: false, accounts: [{ id: 42 }], connect: { instance: null, instances: { kind: 'fixed', origin: 'https://yt.example.com' }, hasClient: true, redirectUri: null } }));
     await expect(api.authStatus('ext-youtrack')).resolves.toMatchObject({ connected: false, accounts: [], connect: { hasClient: true } });
   });
+
+  it('keeps the reason a provider gives for an account that needs attention', async () => {
+    const account = { id: 'u-1', name: 'Mona', user: { name: 'Mona', avatarUrl: null }, current: true, authorizedAt: 5, status: 'valid', method: 'token', health: { state: 'needs-attention', reason: 'The token was revoked', checkedAt: 9 } };
+    trackerServer(() => Response.json({ connected: true, account, accounts: [account], connect: { instance: 'https://yt.example.com', instances: { kind: 'user', label: 'Server address' }, hasClient: false, redirectUri: null } }));
+    const api = createWebTrackerAPI({ fetch: fetchMock });
+    await expect(api.authStatus('ext-youtrack')).resolves.toMatchObject({ connected: true, account: { health: { state: 'needs-attention', reason: 'The token was revoked', checkedAt: 9 } } });
+  });
 });
 
 describe('web trackers: providers', () => {

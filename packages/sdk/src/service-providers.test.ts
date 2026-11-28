@@ -509,6 +509,21 @@ describe('tracker provider contract', () => {
     expect(schemas.envelope.safeParse({ ok: false, error: { message: 'Not found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
     expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
   });
+
+  test('an answer may say how the account is doing, bounded and only beside data', () => {
+    const schemas = trackerProviderSchemasV1;
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'ok' } }).success).toBe(true);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'needs-attention', reason: 'The token was revoked' } }).success).toBe(true);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'needs-attention', reason: 'x'.repeat(256) } }).success).toBe(true);
+    expect(schemas.envelope.safeParse({ ok: true, data: {} }).success).toBe(true);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'needs-attention' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'needs-attention', reason: '' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'needs-attention', reason: '   ' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'needs-attention', reason: 'x'.repeat(257) } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'expiring' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: true, data: {}, health: { state: 'ok', reason: 'fine' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'Not found' }, health: { state: 'ok' } }).success).toBe(false);
+  });
 });
 
 describe('quota provider contract', () => {

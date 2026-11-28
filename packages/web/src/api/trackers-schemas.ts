@@ -145,6 +145,12 @@ export const statesResultSchema: z.ZodType<TrackerStatesResult> = z.union([
   z.object({ connected: z.literal(true), states: listOf(workflowStateSchema) }),
 ]);
 
+const accountHealthSchema = z.object({
+  state: z.literal('needs-attention'),
+  reason: z.string().trim().min(1).max(256),
+  checkedAt: z.number().int().nonnegative(),
+});
+
 const accountSchema: z.ZodType<TrackerAccount> = z.object({
   id: text,
   name: optionalText,
@@ -154,6 +160,7 @@ const accountSchema: z.ZodType<TrackerAccount> = z.object({
 
   status: z.enum(['valid', 'invalid']).optional().catch(undefined),
   invalidReason: z.string().trim().min(1).max(256).optional().catch(undefined),
+  health: accountHealthSchema.optional().catch(undefined),
   method: z.enum(['oauth', 'token']).optional().catch(undefined),
 });
 

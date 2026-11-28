@@ -186,4 +186,41 @@ describe('tracker accounts', () => {
     expect(await accounts.preferences('ext-a')).toEqual({ sessionComments: true });
     expect(await accounts.preferences('ext-b')).toEqual({ sessionComments: false });
   });
+
+  it('keeps a reported problem on its account until the provider reports ok, and starts a reconnected or activated account clean', async () => {
+    const { accounts } = await store();
+    await accounts.connect('ext-yt', { instance: 'https://yt.example.com', account: mona, credential: token('a') });
+    expect(await accounts.setHealth('ext-yt', 'u-1', { state: 'needs-attention', reason: 'The token was revoked' })).toBe(true);
+    let view = await accounts.publicView('ext-yt');
+    expect(view.accounts[0]).toMatchObject({ status: 'valid', health: { state: 'needs-attention', reason: 'The token was revoked' } });
+    expect(typeof view.accounts[0].health.checkedAt).toBe('number');
+
+    expect(await accounts.setHealth('ext-yt', 'u-1', { state: 'ok' })).toBe(true);
+    view = await accounts.publicView('ext-yt');
+    expect(view.accounts[0].health).toBeUndefined();
+
+    await accounts.setHealth('ext-yt', 'u-1', { state: 'needs-attention', reason: 'The token was revoked' });
+    await accounts.activate('ext-yt', 'u-1');
+    expect((await accounts.publicView('ext-yt')).accounts[0].health).toBeUndefined();
+
+    await accounts.setHealth('ext-yt', 'u-1', { state: 'needs-attention', reason: 'The site now needs SSO' });
+    const stored = await accounts.read('ext-yt');
+    await accounts.updateCredential('ext-yt', 'u-1', token('renewed'), stored.accounts[0].revision);
+    expect((await accounts.publicView('ext-yt')).accounts[0].health).toMatchObject({ reason: 'The site now needs SSO' });
+
+    await accounts.connect('ext-yt', { instance: 'https://yt.example.com', account: mona, credential: token('fresh') });
+    expect((await accounts.publicView('ext-yt')).accounts[0].health).toBeUndefined();
+  });
+
+  it('ignores a health report for a changed revision or an account that is gone', async () => {
+    const { accounts } = await store();
+    await accounts.connect('ext-yt', { instance: 'https://yt.example.com', account: mona, credential: token('a') });
+    const stored = await accounts.read('ext-yt');
+    const revision = stored.accounts[0].revision;
+    expect(await accounts.setHealth('ext-yt', 'u-1', { state: 'needs-attention', reason: 'x' }, '00000000-0000-4000-8000-000000000000')).toBe(false);
+    expect(await accounts.setHealth('ext-yt', 'nobody', { state: 'needs-attention', reason: 'x' })).toBe(false);
+    expect((await accounts.publicView('ext-yt')).accounts[0].health).toBeUndefined();
+    expect(await accounts.setHealth('ext-yt', 'u-1', { state: 'needs-attention', reason: 'x' }, revision)).toBe(true);
+    expect((await accounts.publicView('ext-yt')).accounts[0].health).toEqual({ state: 'needs-attention', reason: 'x', checkedAt: expect.any(Number) });
+  });
 });

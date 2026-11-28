@@ -671,3 +671,39 @@ describe('a detached extension tracker', () => {
     expect(await h.accounts.read('ext-youtrack')).toBeNull();
   });
 });
+
+describe('what an answer says about the account', () => {
+  const listed = (health) => ({ ok: true, data: { items: [summary()], cursor: null, hasMore: false }, ...(health ? { health } : {}) });
+
+  it('records the report on the account, keeps it through answers that say nothing, and clears it on ok', async () => {
+    const h = await harness();
+    await connect(h);
+    h.answers['items.list'] = () => listed({ state: 'needs-attention', reason: 'The token was revoked' });
+    await h.tracker.list();
+    expect((await h.tracker.auth.status()).account).toMatchObject({ status: 'valid', health: { state: 'needs-attention', reason: 'The token was revoked' } });
+
+    h.answers['items.list'] = () => listed();
+    await h.tracker.list();
+    expect((await h.tracker.auth.status()).account.health).toMatchObject({ reason: 'The token was revoked' });
+
+    h.answers['items.list'] = () => listed({ state: 'ok' });
+    await h.tracker.list();
+    expect((await h.tracker.auth.status()).account.health).toBeUndefined();
+  });
+
+  it('records a report that rides an item read', async () => {
+    const h = await harness();
+    await connect(h);
+    h.answers['items.get'] = () => ({ ok: true, data: { item: summary() }, health: { state: 'needs-attention', reason: 'The site now needs an SSO sign-in' } });
+    await h.tracker.get('id-PROJ-1');
+    expect((await h.tracker.auth.status()).account.health).toMatchObject({ reason: 'The site now needs an SSO sign-in' });
+  });
+
+  it('refuses a report OpenChamber cannot use without passing the answer on', async () => {
+    const h = await harness();
+    await connect(h);
+    h.answers['items.list'] = () => listed({ state: 'needs-attention', reason: 'x'.repeat(257) });
+    await expect(h.tracker.list()).rejects.toMatchObject({ status: 502, code: 'MALFORMED_PROVIDER_RESPONSE' });
+    expect((await h.tracker.auth.status()).account.health).toBeUndefined();
+  });
+});

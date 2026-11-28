@@ -333,6 +333,19 @@ describe('TrackerSettings', () => {
     expect(buttonLabels()).toContain('Connect');
   });
 
+  test('shows the reason a provider gives for an account that needs attention', async () => {
+    const accounts = [
+      { id: 'org-a', name: 'Acme Org', user: { name: 'Ada', avatarUrl: null }, current: true, status: 'valid' as const, health: { state: 'needs-attention' as const, reason: 'The API token was revoked', checkedAt: 1 } },
+      { id: 'org-b', name: 'Beta Org', user: { name: 'Ada B', avatarUrl: null }, current: false },
+    ];
+    status = { connected: true, account: accounts[0], accounts };
+    await mount(linearLikeTrackerDescriptor({ capabilities: { ...linearLikeTrackerDescriptor().capabilities, multipleAccounts: true } }));
+    expect(container.textContent).toContain('Account needs attention');
+    expect(container.textContent).toContain('The API token was revoked');
+    // The other account keeps its ordinary row; the report belongs to one account.
+    expect(container.textContent).toContain('Beta Org');
+  });
+
   test('the browser sign-in saves the client the user typed before it starts', async () => {
     status = { connected: false, connect: { ...connect, instance: 'https://yt.example.com' } };
     await mount(youtrack({ authMethods: ['oauth'] }), extensionOf({ ...tokenAndOauth, authMethods: ['oauth'], token: undefined }));
