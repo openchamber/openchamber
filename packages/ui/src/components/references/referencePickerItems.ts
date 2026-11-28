@@ -58,11 +58,13 @@ export const normalizedTrackerFilter = (
     filter: TrackerReferenceFilter,
     descriptor: TrackerDescriptor,
     savedFilters: readonly TrackerSavedFilter[],
+    savedFiltersSettled = true,
 ): TrackerReferenceFilter => ({
     state: descriptor.stateFilters.includes(filter.state) ? filter.state : DEFAULT_TRACKER_FILTER.state,
     people: descriptor.capabilities.filters.people ? filter.people : DEFAULT_TRACKER_FILTER.people,
     priority: descriptor.capabilities.filters.priority ? filter.priority : DEFAULT_TRACKER_FILTER.priority,
-    saved: descriptor.capabilities.filters.saved && savedFilters.some((entry) => entry.id === filter.saved)
+    saved: descriptor.capabilities.filters.saved
+        && (!savedFiltersSettled || savedFilters.some((entry) => entry.id === filter.saved))
         ? filter.saved
         : DEFAULT_TRACKER_FILTER.saved,
 });

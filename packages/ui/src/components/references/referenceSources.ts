@@ -340,8 +340,14 @@ export function useRepositoryAcrossProvider(directories: readonly string[] | nul
 }
 
 const NO_SAVED_FILTERS: TrackerSavedFilter[] = [];
+const UNREAD_SAVED_FILTERS: TrackerSavedFilterRead = { filters: NO_SAVED_FILTERS, settled: false };
 
-export function useTrackerSavedFilters(options: { enabled: boolean; provider: string | null }): readonly TrackerSavedFilter[] {
+export type TrackerSavedFilterRead = {
+    filters: readonly TrackerSavedFilter[];
+    settled: boolean;
+};
+
+export function useTrackerSavedFilters(options: { enabled: boolean; provider: string | null }): TrackerSavedFilterRead {
     const { trackers } = useRuntimeAPIs();
     const { enabled, provider } = options;
     const account = useTrackerAccount(provider);
@@ -352,7 +358,9 @@ export function useTrackerSavedFilters(options: { enabled: boolean; provider: st
         return result.connected === false ? [] : result.filters;
     }, [provider, trackers]);
     const cached = useCachedValue(trackerSavedFilterLists, key, fetch);
-    return cached.status === 'ready' ? cached.value : NO_SAVED_FILTERS;
+    const settled = cached.status === 'ready';
+    const filters = settled ? cached.value : NO_SAVED_FILTERS;
+    return React.useMemo(() => (settled ? { filters, settled } : UNREAD_SAVED_FILTERS), [filters, settled]);
 }
 
 export function useTrackerReferenceList(options: {

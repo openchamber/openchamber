@@ -94,7 +94,7 @@ export function useReferenceBrowser({
     const tracker = trackerOfSource(source);
     const trackerDescriptor = useTrackerDescriptor(tracker);
     const trackerStatus = useTrackerSourceStatus(tracker);
-    const trackerSavedFilters = useTrackerSavedFilters({
+    const { filters: trackerSavedFilters, settled: savedFiltersSettled } = useTrackerSavedFilters({
         enabled: tracker !== null && trackerStatus === 'ready' && trackerDescriptor.capabilities.filters.saved,
         provider: tracker,
     });
@@ -103,8 +103,8 @@ export function useReferenceBrowser({
         ?? (tracker ? lastTrackerFilter.get(tracker) : undefined)
         ?? DEFAULT_TRACKER_FILTER;
     const trackerFilter = React.useMemo<TrackerReferenceFilter>(
-        () => normalizedTrackerFilter(rememberedFilter, trackerDescriptor, trackerSavedFilters),
-        [rememberedFilter, trackerDescriptor, trackerSavedFilters],
+        () => normalizedTrackerFilter(rememberedFilter, trackerDescriptor, trackerSavedFilters, savedFiltersSettled),
+        [rememberedFilter, trackerDescriptor, trackerSavedFilters, savedFiltersSettled],
     );
     const [query, setQueryState] = React.useState('');
     const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);

@@ -693,3 +693,14 @@ capped at 12 rem. A `labels` section (the pull request pickers, see
 loaded and reads nothing. It starts as one collapsed row with the chosen labels
 as chips, because those pickers are small, and opens a list capped at seven
 rows (14 rem, 19.25 rem on touch).
+
+## A remembered saved filter waits for the list
+
+The filter menu narrows a tracker board by a saved filter the provider declares.
+The choice is remembered per tracker in `lastTrackerFilter`, apart from the read
+that lists the filters. `useTrackerSavedFilters` therefore reports whether that
+read has settled: while it is loading or has failed, `normalizedTrackerFilter`
+keeps the remembered id instead of reading the empty list as "no such filter".
+The first `items.list` already carries the id, so a remembered choice never
+starts with an unfiltered read after an account or runtime switch, and only a
+settled list drops an id the provider no longer offers.

@@ -43,7 +43,14 @@ const flush = async () => {
 const renders: ReferenceBrowser[] = [];
 const current = (): ReferenceBrowser | undefined => renders.at(-1);
 
-const show = async (capabilities = { saved: true, people: true, priority: true }) => {
+type SavedFilterFetch = () => Promise<{ connected: boolean; filters: { id: string; name: string }[] }>;
+const readySavedFilters: SavedFilterFetch = async () => ({ connected: true, filters: SAVED });
+
+const show = async (
+  capabilities = { saved: true, people: true, priority: true },
+  savedFilters: SavedFilterFetch = readySavedFilters,
+  account = 'u-1',
+) => {
   const [{ useReferenceBrowser }, { I18nProvider }, { RuntimeAPIContext }, { createWebAPIs }, { useTrackerRegistry }, { useTrackerAuthStore }, { linearLikeTrackerDescriptor }] = await Promise.all([
     import('./useReferenceBrowser'),
     import('@/lib/i18n'),
@@ -65,7 +72,7 @@ const show = async (capabilities = { saved: true, people: true, priority: true }
   useTrackerRegistry.setState(registry);
   Object.assign(useTrackerRegistry.getInitialState(), registry);
   useTrackerAuthStore.setState({
-    entries: { [PROVIDER]: { status: { connected: true, account: { id: 'u-1', name: 'Mona', current: true }, accounts: [] }, isLoading: false, hasChecked: true } },
+    entries: { [PROVIDER]: { status: { connected: true, account: { id: account, name: 'Mona', current: true }, accounts: [] }, isLoading: false, hasChecked: true } },
   });
 
   const baseAPIs = createWebAPIs();
@@ -76,7 +83,7 @@ const show = async (capabilities = { saved: true, people: true, priority: true }
     ...baseAPIs,
     trackers: {
       ...trackers,
-      savedFilters: async () => ({ connected: true, filters: SAVED }),
+      savedFilters,
       list: async (_provider, options) => {
         reads.push(options ?? {});
         return { connected: true, items: [], cursor: null, hasMore: false };
@@ -124,5 +131,43 @@ describe('tracker saved filters', () => {
     expect(current()?.savedFilters).toEqual([]);
     expect(current()?.trackerFilter.saved).toBe('');
     expect(reads.every((options) => options.savedFilter === undefined)).toBe(true);
+  });
+
+  test('after an account switch, a remembered saved filter reaches the first read before the provider list answers', async () => {
+    await show();
+    await act(async () => { current()?.selectTrackerFilter({ saved: 'f-1' }); });
+    await flush();
+    expect(current()?.trackerFilter.saved).toBe('f-1');
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    let answer: (value: { connected: boolean; filters: { id: string; name: string }[] }) => void = () => undefined;
+    const pending = new Promise<{ connected: boolean; filters: { id: string; name: string }[] }>((resolve) => { answer = resolve; });
+    const reads = await show(undefined, () => pending, 'u-2');
+
+    expect(current()?.savedFilters).toEqual([]);
+    expect(current()?.trackerFilter.saved).toBe('f-1');
+    expect(reads.at(-1)?.savedFilter).toBe('f-1');
+
+    await act(async () => { answer({ connected: true, filters: SAVED }); });
+    await flush();
+    expect(current()?.trackerFilter.saved).toBe('f-1');
+    expect(reads.filter((options) => options.savedFilter === undefined)).toEqual([]);
+  });
+
+  test('after an account switch, a failed saved-filters read keeps the remembered scope instead of clearing it', async () => {
+    await show();
+    await act(async () => { current()?.selectTrackerFilter({ saved: 'f-1' }); });
+    await flush();
+    expect(current()?.trackerFilter.saved).toBe('f-1');
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    const reads = await show(undefined, async () => { throw new Error('filters are down'); }, 'u-3');
+
+    expect(current()?.savedFilters).toEqual([]);
+    expect(current()?.trackerFilter.saved).toBe('f-1');
+    expect(reads.at(-1)?.savedFilter).toBe('f-1');
+    expect(reads.every((options) => options.savedFilter === 'f-1')).toBe(true);
   });
 });

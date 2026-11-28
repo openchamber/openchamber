@@ -14,6 +14,13 @@ describe('the tracker filter', () => {
     expect(normalizedTrackerFilter({ ...DEFAULT_TRACKER_FILTER, saved: 'f-1' }, linearLikeTrackerDescriptor(), saved).saved).toBe('');
   });
 
+  test('keeps the remembered filter until the provider list has answered', () => {
+    const withSaved = linearLikeTrackerDescriptor({ capabilities: { ...linearLikeTrackerDescriptor().capabilities, filters: { people: true, priority: true, saved: true } } });
+    expect(normalizedTrackerFilter({ ...DEFAULT_TRACKER_FILTER, saved: 'f-1' }, withSaved, [], false).saved).toBe('f-1');
+    expect(normalizedTrackerFilter({ ...DEFAULT_TRACKER_FILTER, saved: 'f-1' }, withSaved, [], true).saved).toBe('');
+    expect(normalizedTrackerFilter({ ...DEFAULT_TRACKER_FILTER, saved: 'f-1' }, linearLikeTrackerDescriptor(), [], false).saved).toBe('');
+  });
+
   test('drops a filter the descriptor no longer offers', () => {
     const plain = acmeTrackerDescriptor();
     expect(normalizedTrackerFilter({ state: 'started', people: 'me', priority: 'high', saved: 'f-1' }, plain, saved)).toEqual(DEFAULT_TRACKER_FILTER);
