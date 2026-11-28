@@ -1886,7 +1886,7 @@ describe('contributes.tracker', () => {
     const parsed = result.manifest.contributes.tracker!;
     // Capabilities left out are off; filters default together.
     expect(parsed.capabilities).toEqual({
-      multipleAccounts: false, stateUpdate: true, children: false, labels: true, priority: true,
+      multipleAccounts: false, stateUpdate: true, children: false, labels: true, priority: true, fields: false,
       filters: { people: true, priority: false }, projectMapping: true, sessionComments: true,
     });
     expect(toPublicTracker(parsed)).toEqual({
@@ -1896,6 +1896,8 @@ describe('contributes.tracker', () => {
       token: { scheme: 'bearer', username: false, scopes: ['YouTrack'], createPath: '/users/me?tab=account-security' },
       oauth: { scopes: ['YouTrack'] },
     });
+    const withFields = parse({ panel: pageless, service: role, tracker: { ...tracker, capabilities: { ...tracker.capabilities, fields: true } } });
+    expect(withFields).toMatchObject({ ok: true, manifest: { contributes: { tracker: { capabilities: { fields: true } } } } });
     const fixed = parse({ panel: pageless, service: role, tracker: { ...tracker, instances: { kind: 'fixed', origin: 'https://tracker.example.com' }, auth: { token: tracker.auth.token } } });
     expect(fixed).toMatchObject({ ok: true });
     if (!fixed.ok) throw new Error(fixed.message);

@@ -32,6 +32,7 @@ export const BUILT_IN_LINEAR_TRACKER: TrackerDescriptor = {
     children: true,
     labels: true,
     priority: true,
+    fields: false,
     filters: { people: true, priority: true },
     projectMapping: true,
     sessionComments: true,

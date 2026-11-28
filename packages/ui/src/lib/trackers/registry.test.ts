@@ -66,7 +66,7 @@ describe('tracker registry', () => {
       name: 'jira',
       authMethods: [],
       capabilities: {
-        multipleAccounts: false, stateUpdate: false, children: false, labels: false, priority: false,
+        multipleAccounts: false, stateUpdate: false, children: false, labels: false, priority: false, fields: false,
         filters: { people: false, priority: false }, projectMapping: false, sessionComments: false, hostAccess: false,
       },
       stateFilters: ['open', 'all'],

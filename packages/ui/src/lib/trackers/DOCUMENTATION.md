@@ -96,8 +96,9 @@ on the source-control side (`lib/source-control/`).
   the rest open), the status menu's order (triage, backlog, todo, in progress,
   done, canceled, unknown last), and settled (done or canceled: not followed).
 - Capabilities gate what a surface offers: `stateUpdate` the status menu,
-  `children` parent and children, `labels`, `priority`, `filters` the list
-  filters, `projectMapping` the container picker and start-in project,
+  `children` parent and children, `labels`, `priority`, `fields` the provider's
+  own label/value rows on the item, `filters` the list filters,
+  `projectMapping` the container picker and start-in project,
   `multipleAccounts` the account switch, `sessionComments` the session status
   post. A session started before the tracker list is held waits for it
   (bounded, dropped on a runtime switch) before that gate is read.
@@ -123,8 +124,9 @@ on the source-control side (`lib/source-control/`).
   is, and browser sign-in only where `authMethods` has `oauth`.
 - Item `id` is the provider's stable id for get and update calls; `identifier`
   is the case-insensitive human key used for other identities. Related items
-  omit labels because the provider is not asked for them. Progress counts only
-  the first few children; `more` marks additional children. The children list
+  omit labels because the provider is not asked for them, and fields because
+  they are drawn on the item alone. Progress counts only the first few
+  children; `more` marks additional children. The children list
   preserves provider order and contains only the first page, with
   `childrenMore` marking additional pages.
 - Extension connect information belongs to the Settings card. Its `instance`

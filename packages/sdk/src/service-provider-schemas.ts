@@ -34,6 +34,7 @@ import {
   type TrackerProviderMethod,
   type TrackerProviderStatesData,
 } from './service-providers.ts';
+import { TRACKER_PROVIDER_FIELD_LABEL_MAX, TRACKER_PROVIDER_FIELD_VALUE_MAX, TRACKER_PROVIDER_FIELDS_MAX } from './tracker-provider-items.ts';
 import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
 import { SOURCE_CONTROL_REVIEW_STATES } from './source-control-reviews.ts';
 
@@ -464,6 +465,11 @@ const trackerItemFields = {
   state: trackerState.nullable(),
   priority: trackerPriority.nullable().optional(),
   labels: z.array(z.object({ id: trackerText, name: z.string().min(1).max(256), color: z.string().max(32).nullable() }).strict()).max(TRACKER_PROVIDER_LIST_MAX).optional(),
+  fields: z.array(z.object({
+    id: trackerText,
+    label: z.string().trim().min(1).max(TRACKER_PROVIDER_FIELD_LABEL_MAX),
+    value: z.string().trim().min(1).max(TRACKER_PROVIDER_FIELD_VALUE_MAX),
+  }).strict()).max(TRACKER_PROVIDER_FIELDS_MAX).optional(),
   assignee: trackerPerson.nullable().optional(),
   container: trackerContainer.nullable().optional(),
   progress: z.object({ total: z.number().int().nonnegative(), done: z.number().int().nonnegative(), more: z.boolean() }).strict().nullable().optional(),

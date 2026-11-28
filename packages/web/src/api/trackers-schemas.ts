@@ -97,6 +97,7 @@ const summaryObject = z.object({
   ...summaryFields,
 
   labels: listOf(z.object({ id: text, name: text, color: labelColor })).optional(),
+  fields: listOf(z.object({ id: text, label: text, value: text })).optional(),
   parent: relatedSchema.nullish().catch(null),
   progress: progressSchema.optional(),
 });

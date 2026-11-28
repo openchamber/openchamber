@@ -26,12 +26,12 @@ import { foldTrackerCollapsibles } from './trackerCollapsibles';
 import { PreviewRefreshButton } from './PreviewRefreshButton';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
-import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
 import { type ReferenceCommentActions, type ReferenceThreadActions, type ScopedCommentActions } from './ReferenceComments';
 import { ReferenceReviews, type ReviewActionsTarget } from './ReferenceReviews';
 import { ReferenceCommentsSection, type CommentAttachments } from './ReferenceCommentsSection';
+import { RelatedTrackerItem, TrackerItemMeta } from './TrackerItemMeta';
 import { commentDraftScope } from './referenceCommentDrafts';
 import { useRepositoryReadContext } from './referenceSources';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -50,7 +50,6 @@ import {
     relativeTimeOf,
     type ReferencePickerItem,
     referenceNumberLabel,
-    TRACKER_PRIORITY_KEYS,
 } from './referencePickerItems';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { DiffCount } from '@/components/ui/diff-count';
@@ -742,37 +741,6 @@ const RepositoryPreview: React.FC<{
     );
 };
 
-const RelatedTrackerItem: React.FC<{
-    issue: TrackerItemSummary;
-    onOpen?: (issue: TrackerItemSummary) => void;
-    showAssignee?: boolean;
-}> = ({ issue, onOpen, showAssignee = false }) => {
-    const look = trackerStateGlyph(issue.state?.category);
-    const assignee = issue.assignee?.name;
-    const content = (
-        <>
-            <Icon name={look.icon} className="size-3.5 shrink-0" style={{ color: look.color }} />
-            <span className={cn('shrink-0 font-mono', REFERENCE_META_TEXT)}>{issue.identifier}</span>
-            <span dir="auto" className="min-w-0 truncate">{issue.title}</span>
-            {showAssignee && assignee ? (
-                <span className={cn('ms-auto shrink-0 ps-2', REFERENCE_META_TEXT)}>{assignee}</span>
-            ) : null}
-        </>
-    );
-    const className = 'flex w-full min-w-0 items-center gap-1.5 text-start typography-meta';
-    if (!onOpen) return <span className={cn(className, 'text-muted-foreground')}>{content}</span>;
-    return (
-        <button
-            type="button"
-            onClick={() => onOpen(issue)}
-            title={issue.title}
-            className={cn(className, 'rounded-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring')}
-        >
-            {content}
-        </button>
-    );
-};
-
 const SubIssuesSection: React.FC<{
     issue: TrackerItem;
     onOpen?: (issue: TrackerItemSummary) => void;
@@ -889,22 +857,15 @@ const TrackerPreview: React.FC<{
                 </>
             }
             meta={
-                <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5">
-                    {parent ? (
-                        <MetaRow label={t('references.picker.preview.parent')}>
-                            <RelatedTrackerItem issue={parent} onOpen={onOpenIssue} />
-                        </MetaRow>
-                    ) : null}
-                    {assignee ? <MetaRow label={t('references.picker.preview.assignee')}>{assignee}</MetaRow> : null}
-                    {issue.container ? <MetaRow label={t(trackerPresentation(issue.provider).copy.containerMeta)}>{issue.container.name}</MetaRow> : null}
-                    {capabilities.priority && issue.priority && issue.priority !== 'none' ? (
-                        <MetaRow label={t('references.picker.preview.priority')}>{t(TRACKER_PRIORITY_KEYS[issue.priority])}</MetaRow>
-                    ) : null}
-                    {updated ? <MetaRow label={t('references.picker.preview.updated')}>{updated}</MetaRow> : null}
-                    {labels.length > 0 ? (
-                        <MetaRow label={t('references.picker.preview.labels')}><ReferenceLabelChips labels={labels} /></MetaRow>
-                    ) : null}
-                </dl>
+                <TrackerItemMeta
+                    issue={issue}
+                    parent={parent}
+                    assignee={assignee}
+                    updated={updated}
+                    labels={labels}
+                    capabilities={capabilities}
+                    onOpenIssue={onOpenIssue}
+                />
             }
         >
             <div className="min-w-0 flex-1">

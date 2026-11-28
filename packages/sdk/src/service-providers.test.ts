@@ -409,6 +409,26 @@ describe('notifications provider contract', () => {
     expect(schemas.envelope.safeParse({ ok: false, error: { message: 'channel_not_found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
     expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
   });
+
+  test('an item may carry a short list of provider fields, bounded', () => {
+    const schemas = trackerProviderSchemasV1;
+    const summary = {
+      id: 'i-1', identifier: 'PROJ-42', title: 'Broken login', url: 'https://youtrack.example.com/issue/PROJ-42',
+      state: { id: 's-1', name: 'Open', category: 'todo' },
+      fields: [{ id: 'f-1', label: 'Story points', value: '5' }, { id: 'f-2', label: 'Sprint', value: 'Sprint 12' }],
+    };
+    expect(schemas.data['items.list'].safeParse({ items: [summary], cursor: null, hasMore: false }).success).toBe(true);
+    expect(schemas.data['items.get'].safeParse({ item: summary }).success).toBe(true);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [] }], cursor: null, hasMore: false }).success).toBe(true);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [{ id: 'f-1', label: 'Points', value: '5', color: '#fff' }] }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [{ id: '', label: 'Points', value: '5' }] }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [{ id: 'f-1', label: '', value: '5' }] }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [{ id: 'f-1', label: '   ', value: '5' }] }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [{ id: 'f-1', label: 'Points', value: '' }] }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [{ id: 'f-1', label: 'x'.repeat(129), value: '5' }] }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: [{ id: 'f-1', label: 'Points', value: 'x'.repeat(1_025) }] }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, fields: Array.from({ length: 21 }, (_, index) => ({ id: `f-${index}`, label: 'Field', value: 'v' })) }], cursor: null, hasMore: false }).success).toBe(false);
+  });
 });
 
 describe('tracker provider contract', () => {

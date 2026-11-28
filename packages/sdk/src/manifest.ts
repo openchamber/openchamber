@@ -1,5 +1,7 @@
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
 import type { SourceControlCapabilities } from './source-control-capabilities.ts';
+import type { TrackerCapabilities } from './tracker-capabilities.ts';
+export type { TrackerCapabilities } from './tracker-capabilities.ts';
 import type { FileEditorContribution } from './file-editor.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
 import type { PublicSessionEvents, SessionEventsContribution } from './session-events.ts';
@@ -377,17 +379,6 @@ export type TrackerOAuth = {
   authorizeUrl: string;
   tokenUrl: string;
   scopes?: string[];
-};
-
-export type TrackerCapabilities = {
-  multipleAccounts: boolean;
-  stateUpdate: boolean;
-  children: boolean;
-  labels: boolean;
-  priority: boolean;
-  filters: { people: boolean; priority: boolean };
-  projectMapping: boolean;
-  sessionComments: boolean;
 };
 
 export type TrackerContribution = {

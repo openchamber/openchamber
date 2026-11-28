@@ -10,6 +10,7 @@ export type TrackerItemState = { id: string | null; name: string; category: Trac
 export type TrackerContainer = { id: string; key: string | null; name: string };
 
 export type TrackerLabel = { id: string; name: string; color: string | null };
+export type TrackerField = { id: string; label: string; value: string };
 
 export type TrackerProgress = { total: number; done: number; more: boolean };
 
@@ -22,6 +23,7 @@ export type TrackerItemSummary = {
   state: TrackerItemState | null;
   priority?: TrackerPriority | null;
   labels?: TrackerLabel[];
+  fields?: TrackerField[];
   assignee?: TrackerPerson | null;
   container?: TrackerContainer | null;
   parent?: TrackerItemSummary | null;
@@ -118,6 +120,7 @@ export type TrackerDescriptor = {
     children: boolean;
     labels: boolean;
     priority: boolean;
+    fields: boolean;
     filters: { people: boolean; priority: boolean };
     projectMapping: boolean;
     sessionComments: boolean;

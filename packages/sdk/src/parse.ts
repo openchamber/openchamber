@@ -79,6 +79,7 @@ import {
   GUEST_LINK_KEYS_MAX,
 } from './manifest.ts';
 import { isBuildableLinkTemplate, isWildcardLinkOrigin, linkOriginValidator } from './links.ts';
+import { trackerCapabilitiesSchema } from './tracker-capabilities.ts';
 import { isGuestRequestPath } from './contract.ts';
 import { sourceControlUrlsSchema } from './source-control-urls.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
@@ -476,16 +477,7 @@ const trackerSchema = z.object({
       scopes: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
     }).strict().optional(),
   }).strict().refine((auth) => auth.token !== undefined || auth.oauth !== undefined, { message: 'declare token, oauth or both' }),
-  capabilities: z.object({
-    multipleAccounts: z.boolean().default(false),
-    stateUpdate: z.boolean().default(false),
-    children: z.boolean().default(false),
-    labels: z.boolean().default(false),
-    priority: z.boolean().default(false),
-    filters: z.object({ people: z.boolean().default(false), priority: z.boolean().default(false) }).strict().default({ people: false, priority: false }),
-    projectMapping: z.boolean().default(false),
-    sessionComments: z.boolean().default(false),
-  }).strict(),
+  capabilities: trackerCapabilitiesSchema,
   stateFilters: z.array(z.string().trim().regex(TRACKER_STATE_FILTER)).min(TRACKER_BASE_STATE_FILTERS.length).max(TRACKER_STATE_FILTERS_MAX)
     .refine((filters) => new Set(filters).size === filters.length, { message: 'state filters must be unique' })
     .refine((filters) => TRACKER_BASE_STATE_FILTERS.every((filter, index) => filters[index] === filter), {

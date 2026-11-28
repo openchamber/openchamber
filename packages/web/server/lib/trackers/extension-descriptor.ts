@@ -93,6 +93,7 @@ export function buildExtensionTrackerDescriptor({ guestId, contribution, instanc
       children: capabilities.children === true,
       labels: capabilities.labels === true,
       priority: capabilities.priority === true,
+      fields: capabilities.fields === true,
       filters: Object.freeze({ people: capabilities.filters?.people === true, priority: capabilities.filters?.priority === true }),
       projectMapping: capabilities.projectMapping === true,
       sessionComments: capabilities.sessionComments === true,

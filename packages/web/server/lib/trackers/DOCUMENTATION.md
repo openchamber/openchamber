@@ -72,7 +72,7 @@ Status codes copy the legacy Linear routes: disconnected is 200 `{ connected: fa
 - Browser sign-in appears first when a tracker also accepts tokens, because it needs no manually created token.
 - User-supplied tracker instances require HTTPS except for loopback HTTP, which permits a local development server. Paths, queries, fragments and credentials do not belong in an instance origin.
 - Basic-auth accounts keep the username the user supplied and the server accepted. A service-reported login cannot replace that authentication identity.
-- Item `id` is the provider's stable get/update identity; `identifier` is the case-insensitive human key used elsewhere. Absent `labels` means the provider is not asked for them. Progress counts may cover only the first children, with `more` indicating others.
+- Item `id` is the provider's stable get/update identity; `identifier` is the case-insensitive human key used elsewhere. Absent `labels` means the provider is not asked for them; absent `fields` means it sends none. Progress counts may cover only the first children, with `more` indicating others.
 - Session-status routes leave identifier requirements to the tracker after checking kind, session id and input bounds. Disconnected trackers and disabled comments answer before a missing identifier can fail.
 - Session links use public origins because other readers of the tracker item must be able to open them. Loopback, private LAN, overlay-network and single-label machine addresses do not qualify, and comments never include conversation content.
 - Session-comment labels describe the event without repeating the item title. Brackets in item titles can break the Markdown link label.
