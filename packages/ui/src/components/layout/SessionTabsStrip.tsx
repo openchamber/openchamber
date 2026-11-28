@@ -45,6 +45,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
+import { isLeadSession } from '@/lib/sessionLead';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 import { SessionProjectIcon } from './SessionProjectIcon';
@@ -96,6 +97,7 @@ const SessionTabItem: React.FC<{
   const markedUnread = useSessionMarkedUnread(tab.id);
   const showUnread = isUnread && (!isActive || markedUnread) && !isStreaming;
   const showDot = isStreaming || showUnread;
+  const isLead = isLeadSession(tab.session);
 
   const menuArgs: SessionTabMenuArgs = {
     session: tab.session,
@@ -197,6 +199,9 @@ const SessionTabItem: React.FC<{
                         </div>
                       )}
                     </div>
+                    {isLead ? (
+                      <Icon name="lead" className="ms-1.5 size-3 shrink-0 text-muted-foreground" role="img" aria-hidden={false} aria-label={t('sessions.sidebar.session.leadMark')} />
+                    ) : null}
                     {isAiRenaming ? (
                       <Icon name="loader-4" className="ms-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
                     ) : showDot ? (

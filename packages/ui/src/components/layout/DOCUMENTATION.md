@@ -80,6 +80,9 @@ new-session draft decline it.
 - The running or unread mark sits at the tab's end and takes room only while
   shown. The project icon sits at the start; on hover or keyboard focus the
   close button takes its slot, so the tab reserves no room for a control.
+- A lead session's tab carries the sidebar's muted lead mark at the tab's end,
+  just before the running or unread mark, so the working set shows which of
+  its sessions are leads.
 - The session menu opens on right-click only, without changing the active
   tab. It is the sidebar row's session menu (`SessionActionsMenuItems` in
   `components/session/sidebar/sessions/`, through
@@ -383,6 +386,15 @@ window at the start and after scrolling, next to a clipped tab too. A strip that
 drag through the header. Tab controls keep their no-drag class for the header's
 gesture handler; open dialogs and menus turn the gap regions off like the
 header's.
+
+### Why the lead mark sits at the tab's end and not beside the project icon
+
+The sidebar puts the flag in the row's leading slot, where a chevron or an
+empty spacer otherwise sits. A tab's leading slot holds the project icon, and
+the close button takes that slot on hover, so a flag there would either push
+the project identity aside or vanish under the close button. At the tab's end
+it keeps the sidebar's muted token and reads before the running or unread
+mark.
 
 ### Why grouped hidden settings and not a visible allowlist
 
