@@ -66,6 +66,7 @@ const harness = async ({ guest = trackerGuest(), server = async () => new Respon
     'items.liveSummaries': (request) => ({ ok: true, data: { items: request.input.identifiers.map((identifier) => ({ identifier, title: `Item ${identifier}`, state: { name: 'Open', category: 'todo' } })) } }),
     'states.list': () => ({ ok: true, data: { states: [{ id: 's-1', name: 'Open', category: 'todo', position: 0 }] } }),
     'containers.list': () => ({ ok: true, data: { containers: [{ id: 'p-1', key: 'PROJ', name: 'Project' }, { id: 'p-2', key: 'OPS', name: 'Ops' }] } }),
+    'filters.list': () => ({ ok: true, data: { filters: [{ id: 'f-1', name: 'My queue' }, { id: 'f-2', name: 'Reported by me' }] } }),
     'comments.create': () => ({ ok: true, data: { comment: { id: 'c-1' } } }),
   };
   let proxyFailure = null;
@@ -270,16 +271,17 @@ describe('reading and writing through an extension tracker', () => {
     expect(await h.tracker.liveSummaries(['PROJ-1'])).toEqual({ connected: false });
     expect(await h.tracker.mapping.get()).toEqual({ connected: false });
     expect(await h.tracker.mapping.set({ defaultProjectPath: '/repo', containerProjectPaths: {} })).toEqual({ connected: false });
+    expect(await h.tracker.filters()).toEqual({ connected: false });
     expect(h.calls).toHaveLength(0);
   });
 
   it('forwards reads as the current account and sets the provider on every item, parent and child', async () => {
     const h = await harness();
     await connect(h);
-    const list = await h.tracker.list({ query: 'login', state: 'todo', people: 'me', priority: 'all', containerId: null });
+    const list = await h.tracker.list({ query: 'login', state: 'todo', people: 'me', priority: 'all', containerId: null, savedFilter: 'f-1' });
     expect(list).toMatchObject({ connected: true, hasMore: false, cursor: null, items: [{ provider: 'ext-youtrack', identifier: 'PROJ-1' }] });
     const listCall = h.calls.at(-1).request;
-    expect(listCall).toMatchObject({ method: 'items.list', session: { instance: INSTANCE, account: { id: 'u-1', login: 'mona' } }, input: { query: 'login', state: 'todo', people: 'me', priority: 'all', containerId: null } });
+    expect(listCall).toMatchObject({ method: 'items.list', session: { instance: INSTANCE, account: { id: 'u-1', login: 'mona' } }, input: { query: 'login', state: 'todo', people: 'me', priority: 'all', containerId: null, savedFilter: 'f-1' } });
     expect(h.calls.at(-1).params.granted).toEqual(['service']);
     const got = await h.tracker.get('id-PROJ-1');
     expect(got.item).toMatchObject({ provider: 'ext-youtrack', parent: { provider: 'ext-youtrack', identifier: 'PROJ-0' }, children: [{ provider: 'ext-youtrack', identifier: 'PROJ-2' }] });
@@ -288,7 +290,9 @@ describe('reading and writing through an extension tracker', () => {
     expect(updated.item).toMatchObject({ provider: 'ext-youtrack', state: { id: 's-9', category: 'done' } });
     // Defaults the shell leaves out are filled in before the service sees them.
     await h.tracker.list();
-    expect(h.calls.at(-1).request.input).toEqual({ state: 'open', people: 'any', priority: 'all', containerId: null });
+    expect(h.calls.at(-1).request.input).toEqual({ state: 'open', people: 'any', priority: 'all', containerId: null, savedFilter: null });
+    expect(await h.tracker.filters()).toEqual({ connected: true, filters: [{ id: 'f-1', name: 'My queue' }, { id: 'f-2', name: 'Reported by me' }] });
+    expect(h.calls.at(-1).request).toMatchObject({ method: 'filters.list', input: {}, session: { instance: INSTANCE, account: { id: 'u-1', login: 'mona' } } });
   });
 
   it('a pasted link the patterns claim, or an identifier of the declared shape, reads that one item instead of searching', async () => {

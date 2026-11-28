@@ -14,6 +14,7 @@ import type {
   TrackerMappingWrite,
   TrackerPreferences,
   TrackerProviderId,
+  TrackerSavedFiltersResult,
   TrackerSessionStatusPostInput,
   TrackerSessionStatusPostResult,
   TrackerStatesResult,
@@ -30,6 +31,7 @@ import {
   listResultSchema,
   mappingResultSchema,
   preferencesSchema,
+  savedFiltersResultSchema,
   sessionStatusResultSchema,
   connectResultOf,
   failureOf,
@@ -112,6 +114,7 @@ export const createWebTrackerAPI = ({
     set('people', options?.people);
     set('priority', options?.priority);
     set('containerId', options?.containerId);
+    set('savedFilter', options?.savedFilter);
     const query = params.toString();
     return query ? `?${query}` : '';
   };
@@ -191,6 +194,11 @@ export const createWebTrackerAPI = ({
     async states(provider, containerId): Promise<TrackerStatesResult> {
       if (await onLegacyWire()) return legacy.states(provider, containerId);
       return call(provider, `/states?${new URLSearchParams({ containerId }).toString()}`, GET, statesResultSchema, 'Failed to load workflow states');
+    },
+
+    async savedFilters(provider): Promise<TrackerSavedFiltersResult> {
+      if (await onLegacyWire()) return legacy.savedFilters(provider);
+      return call(provider, '/filters', GET, savedFiltersResultSchema, 'Failed to load tracker filters');
     },
 
     async updateState(provider, input: TrackerStateUpdateInput): Promise<TrackerItemResult> {

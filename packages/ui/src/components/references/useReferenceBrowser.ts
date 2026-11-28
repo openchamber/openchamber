@@ -19,6 +19,7 @@ import {
     trackerOfSource,
     DEFAULT_REPOSITORY_FILTER,
     DEFAULT_TRACKER_FILTER,
+    normalizedTrackerFilter,
     REPOSITORY_PEOPLE,
     REPOSITORY_STATES,
     type ReferencePickerItem,
@@ -36,6 +37,7 @@ import {
     useRepositorySourceStatus,
     useTrackerItemDetail,
     useTrackerReferenceList,
+    useTrackerSavedFilters,
 } from './referenceSources';
 import { useRepositoryFilterMemory } from './useRepositoryFilterMemory';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
@@ -91,15 +93,19 @@ export function useReferenceBrowser({
     const [chosenRepositoryFilter, setRepositoryFilter] = React.useState<RepositoryReferenceFilter>(lastRepositoryFilter.get(initialGitHubKind ?? lastRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER);
     const tracker = trackerOfSource(source);
     const trackerDescriptor = useTrackerDescriptor(tracker);
+    const trackerStatus = useTrackerSourceStatus(tracker);
+    const trackerSavedFilters = useTrackerSavedFilters({
+        enabled: tracker !== null && trackerStatus === 'ready' && trackerDescriptor.capabilities.filters.saved,
+        provider: tracker,
+    });
     const [chosenFilter, setTrackerFilter] = React.useState<{ tracker: string; filter: TrackerReferenceFilter } | null>(null);
     const rememberedFilter = (chosenFilter && chosenFilter.tracker === tracker ? chosenFilter.filter : undefined)
         ?? (tracker ? lastTrackerFilter.get(tracker) : undefined)
         ?? DEFAULT_TRACKER_FILTER;
-    const trackerFilter = React.useMemo<TrackerReferenceFilter>(() => ({
-        state: trackerDescriptor.stateFilters.includes(rememberedFilter.state) ? rememberedFilter.state : DEFAULT_TRACKER_FILTER.state,
-        people: trackerDescriptor.capabilities.filters.people ? rememberedFilter.people : DEFAULT_TRACKER_FILTER.people,
-        priority: trackerDescriptor.capabilities.filters.priority ? rememberedFilter.priority : DEFAULT_TRACKER_FILTER.priority,
-    }), [rememberedFilter, trackerDescriptor]);
+    const trackerFilter = React.useMemo<TrackerReferenceFilter>(
+        () => normalizedTrackerFilter(rememberedFilter, trackerDescriptor, trackerSavedFilters),
+        [rememberedFilter, trackerDescriptor, trackerSavedFilters],
+    );
     const [query, setQueryState] = React.useState('');
     const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
     const [highlightedKey, setHighlightedKey] = React.useState<string | null>(null);
@@ -150,7 +156,6 @@ export function useReferenceBrowser({
     const filterPending = filterMemory.key !== null && alignedFilterKey !== filterMemory.key;
 
     const repositoryStatus = useRepositorySourceStatus(across ? null : directory);
-    const trackerStatus = useTrackerSourceStatus(tracker);
     const sourceStatus = source === 'repository' ? repositoryStatus : trackerStatus;
 
     const repositoryList = useRepositoryReferenceList({
@@ -331,6 +336,7 @@ export function useReferenceBrowser({
         tracker,
         trackerDescriptor,
         trackerFilter,
+        savedFilters: trackerSavedFilters,
         query,
         debouncedQuery,
         setQuery,

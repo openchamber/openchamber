@@ -24,6 +24,7 @@ import {
   TRACKER_PROVIDER_LIST_MAX,
   TRACKER_PROVIDER_LIVE_SUMMARIES_MAX,
   TRACKER_PROVIDER_METHODS,
+  TRACKER_PROVIDER_SAVED_FILTERS_MAX,
   type TrackerProviderAccountData,
   type TrackerProviderContainersData,
   type TrackerProviderItem,
@@ -32,6 +33,7 @@ import {
   type TrackerProviderListData,
   type TrackerProviderLiveSummariesData,
   type TrackerProviderMethod,
+  type TrackerProviderSavedFiltersData,
   type TrackerProviderStatesData,
 } from './service-providers.ts';
 import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
@@ -510,6 +512,8 @@ const trackerLiveSummariesSchema = z.object({
   }).strict()).max(TRACKER_PROVIDER_LIVE_SUMMARIES_MAX),
 }).strict();
 const trackerContainersSchema = z.object({ containers: z.array(trackerContainer).max(TRACKER_PROVIDER_CONTAINERS_MAX) }).strict();
+const trackerSavedFilterSchema = z.object({ id: trackerText, name: z.string().min(1).max(256) }).strict();
+const trackerSavedFiltersSchema = z.object({ filters: z.array(trackerSavedFilterSchema).max(TRACKER_PROVIDER_SAVED_FILTERS_MAX) }).strict();
 const trackerCommentDataSchema = z.object({ comment: z.object({ id: trackerText }).strict().nullable() }).strict();
 
 type Parsed<T extends z.ZodType> = z.output<T>;
@@ -521,8 +525,9 @@ const assertTrackerItemData: (value: Parsed<typeof trackerItemDataSchema>) => Tr
 const assertTrackerStates: (value: Parsed<typeof trackerStatesSchema>) => TrackerProviderStatesData = (value) => value;
 const assertTrackerLive: (value: Parsed<typeof trackerLiveSummariesSchema>) => TrackerProviderLiveSummariesData = (value) => value;
 const assertTrackerContainers: (value: Parsed<typeof trackerContainersSchema>) => TrackerProviderContainersData = (value) => value;
+const assertTrackerSavedFilters: (value: Parsed<typeof trackerSavedFiltersSchema>) => TrackerProviderSavedFiltersData = (value) => value;
 void assertTrackerSummary; void assertTrackerItem; void assertTrackerAccount; void assertTrackerList;
-void assertTrackerItemData; void assertTrackerStates; void assertTrackerLive; void assertTrackerContainers;
+void assertTrackerItemData; void assertTrackerStates; void assertTrackerLive; void assertTrackerContainers; void assertTrackerSavedFilters;
 
 const trackerDataSchemas = {
   'auth.probe': probeSchema,
@@ -533,6 +538,7 @@ const trackerDataSchemas = {
   'items.liveSummaries': trackerLiveSummariesSchema,
   'states.list': trackerStatesSchema,
   'containers.list': trackerContainersSchema,
+  'filters.list': trackerSavedFiltersSchema,
   'comments.create': trackerCommentDataSchema,
 } satisfies Record<TrackerProviderMethod, z.ZodType>;
 
@@ -547,6 +553,7 @@ export const trackerProviderSchemasV1 = {
   states: trackerStatesSchema,
   liveSummaries: trackerLiveSummariesSchema,
   containers: trackerContainersSchema,
+  savedFilters: trackerSavedFiltersSchema,
   comment: trackerCommentDataSchema,
   outboundRequest: outboundRequestSchema,
   data: trackerDataSchemas,

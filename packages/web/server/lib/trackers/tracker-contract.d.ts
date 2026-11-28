@@ -36,6 +36,8 @@ export type TrackerLiveSummaryWire = TrackerLiveSummary & { state: TrackerLiveSu
 
 export type TrackerWorkflowState = { id: string; name: string; category: TrackerStateCategory | null; position: number };
 
+export type TrackerSavedFilter = { id: string; name: string };
+
 export type TrackerPeopleFilter = 'any' | 'me' | 'created';
 export type TrackerPriorityFilter = 'all' | TrackerPriority;
 
@@ -46,6 +48,7 @@ export type TrackerListOptions = {
   people?: TrackerPeopleFilter;
   priority?: TrackerPriorityFilter;
   containerId?: string | null;
+  savedFilter?: string | null;
 };
 
 export type TrackerAccount = {
@@ -84,7 +87,7 @@ export type TrackerDescriptor = {
     children: boolean;
     labels: boolean;
     priority: boolean;
-    filters: { people: boolean; priority: boolean };
+    filters: { people: boolean; priority: boolean; saved: boolean };
     projectMapping: boolean;
     sessionComments: boolean;
     hostAccess: boolean;
@@ -140,6 +143,7 @@ export interface TrackerImplementation {
   list(options: TrackerListOptions): Promise<Connected<{ items: TrackerItemSummary[]; cursor: string | null; hasMore: boolean }>>;
   get(id: string): Promise<Connected<{ item: TrackerItem | null }>>;
   states(containerId: string): Promise<Connected<{ states: TrackerWorkflowState[] }>>;
+  filters?(): Promise<Connected<{ filters: TrackerSavedFilter[] }>>;
   updateState(input: { id: string; stateId: string }): Promise<Connected<{ item: TrackerItem | null }>>;
   liveSummaries(identifiers: string[]): Promise<Connected<{ items: TrackerLiveSummaryWire[] }>>;
   matchUrl(url: string): string | null;

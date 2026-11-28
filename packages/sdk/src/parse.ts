@@ -482,7 +482,7 @@ const trackerSchema = z.object({
     children: z.boolean().default(false),
     labels: z.boolean().default(false),
     priority: z.boolean().default(false),
-    filters: z.object({ people: z.boolean().default(false), priority: z.boolean().default(false) }).strict().default({ people: false, priority: false }),
+    filters: z.object({ people: z.boolean().default(false), priority: z.boolean().default(false), saved: z.boolean().default(false) }).strict().default({ people: false, priority: false, saved: false }),
     projectMapping: z.boolean().default(false),
     sessionComments: z.boolean().default(false),
   }).strict(),

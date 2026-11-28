@@ -26,6 +26,7 @@ import {
     repositoryKindOfTab,
     repositoryKindTabs,
     stateQualifierIn,
+    trackerSavedFilterOptions,
     trackerStateFilterLabel,
     type ReferencePickerItem,
 } from './referencePickerItems';
@@ -62,7 +63,7 @@ const NO_LABEL_NAMES: readonly string[] = [];
 const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser }) => {
     const { t } = useI18n();
     const { source, trackerDescriptor } = browser;
-    const { state, people, priority } = browser.trackerFilter;
+    const { state, people, priority, saved } = browser.trackerFilter;
     const { filters } = trackerDescriptor.capabilities;
     const repository = browser.repositoryFilter;
     const applied = repository.labels;
@@ -82,7 +83,8 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
     const peopleText = peopleFromSearch ? peopleQualifier : source === 'repository'
         ? (repository.people === 'any' ? null : t(REPOSITORY_PEOPLE_LABEL_KEYS[repository.people]))
         : (people === 'any' ? null : t(TRACKER_PEOPLE_LABEL_KEYS[people]));
-    const summary = [statusText, peopleText, source === 'repository' ? labelSummary : priority === 'all' ? null : t(TRACKER_PRIORITY_LABEL_KEYS[priority])]
+    const savedName = saved ? browser.savedFilters.find((filter) => filter.id === saved)?.name ?? null : null;
+    const summary = [savedName, statusText, peopleText, source === 'repository' ? labelSummary : priority === 'all' ? null : t(TRACKER_PRIORITY_LABEL_KEYS[priority])]
         .filter(Boolean)
         .join(' · ');
     const title = source === 'repository' ? [statusText, peopleText, appliedNames || null].filter(Boolean).join(' · ') : summary;
@@ -111,6 +113,13 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
             group(t('references.picker.filter.group.people'), repository.people, REPOSITORY_PEOPLE[browser.repositoryKind], (option) => t(REPOSITORY_PEOPLE_LABEL_KEYS[option]), (option) => browser.selectRepositoryFilter({ people: option }), peopleQualifier),
         ]
         : [
+            ...(filters.saved && browser.savedFilters.length > 0 ? [{
+                label: t('references.picker.filter.group.saved'),
+                value: saved,
+                options: trackerSavedFilterOptions(browser.savedFilters, t('references.picker.filter.state.all')),
+                onSelect: (next: string) => browser.selectTrackerFilter({ saved: next }),
+                taken: false,
+            }] : []),
             group(t('references.picker.filter.group.status'), state, trackerDescriptor.stateFilters, (option) => trackerStateFilterLabel(option, t), (option) => browser.selectTrackerFilter({ state: option })),
             ...(filters.people ? [group(t('references.picker.filter.group.people'), people, TRACKER_PEOPLE_FILTERS, (option) => t(TRACKER_PEOPLE_LABEL_KEYS[option]), (option) => browser.selectTrackerFilter({ people: option }))] : []),
             ...(filters.priority ? [group(t('references.picker.filter.group.priority'), priority, TRACKER_PRIORITY_FILTERS, (option) => t(TRACKER_PRIORITY_LABEL_KEYS[option]), (option) => browser.selectTrackerFilter({ priority: option }))] : []),

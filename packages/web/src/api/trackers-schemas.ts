@@ -16,6 +16,7 @@ import type {
   TrackerMappingResult,
   TrackerPerson,
   TrackerPreferences,
+  TrackerSavedFiltersResult,
   TrackerSessionStatusPostResult,
   TrackerStatesResult,
   TrackerWorkflowState,
@@ -143,6 +144,11 @@ const workflowStateSchema: z.ZodType<TrackerWorkflowState> = z.object({
 export const statesResultSchema: z.ZodType<TrackerStatesResult> = z.union([
   disconnected,
   z.object({ connected: z.literal(true), states: listOf(workflowStateSchema) }),
+]);
+
+export const savedFiltersResultSchema: z.ZodType<TrackerSavedFiltersResult> = z.union([
+  disconnected,
+  z.object({ connected: z.literal(true), filters: listOf(z.object({ id: text, name: text })) }),
 ]);
 
 const accountSchema: z.ZodType<TrackerAccount> = z.object({

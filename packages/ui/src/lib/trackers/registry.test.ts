@@ -67,7 +67,7 @@ describe('tracker registry', () => {
       authMethods: [],
       capabilities: {
         multipleAccounts: false, stateUpdate: false, children: false, labels: false, priority: false,
-        filters: { people: false, priority: false }, projectMapping: false, sessionComments: false, hostAccess: false,
+        filters: { people: false, priority: false, saved: false }, projectMapping: false, sessionComments: false, hostAccess: false,
       },
       stateFilters: ['open', 'all'],
       urlPatterns: [],
@@ -260,6 +260,6 @@ describe('tracker descriptor list', () => {
     expect(parsed?.authMethods).toEqual(['oauth']);
     expect(parsed?.capabilities.stateUpdate).toBe(true);
     expect(parsed?.capabilities.children).toBe(false);
-    expect(parsed?.capabilities.filters).toEqual({ people: false, priority: false });
+    expect(parsed?.capabilities.filters).toEqual({ people: false, priority: false, saved: false });
   });
 });

@@ -28,6 +28,7 @@ const fakeTracker = () => ({
   list: vi.fn(async () => ({ connected: true, items: [item], cursor: null, hasMore: false })),
   get: vi.fn(async () => ({ connected: true, item })),
   states: vi.fn(async () => ({ connected: true, states: [] })),
+  filters: vi.fn(async () => ({ connected: true, filters: [{ id: 'f-1', name: 'My queue' }] })),
   updateState: vi.fn(async () => ({ connected: true, item })),
   liveSummaries: vi.fn(),
   matchUrl: () => null,
@@ -59,7 +60,7 @@ describe('tracker routes', () => {
 
   beforeEach(() => {
     tracker = fakeTracker();
-    app = createApp([{ descriptor: descriptorFor('fake'), load: async () => tracker }]);
+    app = createApp([{ descriptor: descriptorFor('fake', { filters: { people: true, priority: true, saved: true } }), load: async () => tracker }]);
   });
 
   afterEach(() => {
@@ -95,7 +96,7 @@ describe('tracker routes', () => {
 
   it('lists provider descriptors as plain JSON', async () => {
     const response = await request(app).get('/api/tracker/providers').expect(200);
-    expect(response.body).toEqual({ providers: [descriptorFor('fake')] });
+    expect(response.body).toEqual({ providers: [descriptorFor('fake', { filters: { people: true, priority: true, saved: true } })] });
   });
 
   it('answers 404 UNKNOWN_TRACKER for an unknown provider on every route', async () => {
@@ -108,6 +109,7 @@ describe('tracker routes', () => {
       request(app).get('/api/tracker/nope/items/get?id=ENG-12'),
       request(app).post('/api/tracker/nope/items/update').send({ id: 'ENG-12', stateId: 's' }),
       request(app).get('/api/tracker/nope/states?containerId=t'),
+      request(app).get('/api/tracker/nope/filters'),
       request(app).get('/api/tracker/nope/mapping'),
       request(app).put('/api/tracker/nope/mapping').send({}),
       request(app).get('/api/tracker/nope/preferences'),
@@ -156,15 +158,15 @@ describe('tracker routes', () => {
   it('lists items with defaults and checks filters against the descriptor', async () => {
     await request(app).get('/api/tracker/fake/items/list').expect(200);
     expect(tracker.list).toHaveBeenLastCalledWith({
-      query: undefined, cursor: undefined, state: 'open', people: 'any', priority: 'all', containerId: null,
+      query: undefined, cursor: undefined, state: 'open', people: 'any', priority: 'all', containerId: null, savedFilter: null,
     });
 
     await request(app)
       .get('/api/tracker/fake/items/list')
-      .query({ query: 'login', cursor: 'c1', state: 'inReview', people: 'me', priority: 'high', containerId: 'team-1' })
+      .query({ query: 'login', cursor: 'c1', state: 'inReview', people: 'me', priority: 'high', containerId: 'team-1', savedFilter: 'f-1' })
       .expect(200);
     expect(tracker.list).toHaveBeenLastCalledWith({
-      query: 'login', cursor: 'c1', state: 'inReview', people: 'me', priority: 'high', containerId: 'team-1',
+      query: 'login', cursor: 'c1', state: 'inReview', people: 'me', priority: 'high', containerId: 'team-1', savedFilter: 'f-1',
     });
 
     for (const query of [{ state: 'started' }, { people: 'someone' }, { priority: 'p1' }]) {
@@ -175,18 +177,28 @@ describe('tracker routes', () => {
 
   it('refuses filters the tracker does not have', async () => {
     const plain = createApp([{
-      descriptor: descriptorFor('plain', { filters: { people: false, priority: false } }),
+      descriptor: descriptorFor('plain', { filters: { people: false, priority: false, saved: false } }),
       load: async () => tracker,
     }]);
     await request(plain).get('/api/tracker/plain/items/list').expect(200);
     await request(plain).get('/api/tracker/plain/items/list?people=me').expect(400);
     await request(plain).get('/api/tracker/plain/items/list?priority=high').expect(400);
+    await request(plain).get('/api/tracker/plain/items/list?savedFilter=f-1').expect(400);
+    expect((await request(plain).get('/api/tracker/plain/filters').expect(404)).body.code).toBe('UNSUPPORTED');
+  });
+
+  it('reads the saved filters the tracker declares, and refuses the route when it declares none', async () => {
+    expect((await request(app).get('/api/tracker/fake/filters').expect(200)).body).toEqual({ connected: true, filters: [{ id: 'f-1', name: 'My queue' }] });
+    expect(tracker.filters).toHaveBeenCalledTimes(1);
+    tracker.filters.mockResolvedValueOnce({ connected: false });
+    expect((await request(app).get('/api/tracker/fake/filters').expect(200)).body).toEqual({ connected: false });
   });
 
   it('answers 200 { connected: false } when disconnected', async () => {
     tracker.list.mockResolvedValueOnce({ connected: false });
     tracker.get.mockResolvedValueOnce({ connected: false });
     tracker.states.mockResolvedValueOnce({ connected: false });
+    tracker.filters.mockResolvedValueOnce({ connected: false });
     tracker.updateState.mockResolvedValueOnce({ connected: false });
     tracker.mapping.get.mockResolvedValueOnce({ connected: false });
     tracker.mapping.set.mockResolvedValueOnce({ connected: false });
@@ -197,6 +209,7 @@ describe('tracker routes', () => {
       request(app).get('/api/tracker/fake/items/list'),
       request(app).get('/api/tracker/fake/items/get?id=ENG-12'),
       request(app).get('/api/tracker/fake/states?containerId=team-1'),
+      request(app).get('/api/tracker/fake/filters'),
       request(app).post('/api/tracker/fake/items/update').send({ id: 'ENG-12', stateId: 's-1' }),
       request(app).get('/api/tracker/fake/mapping'),
       request(app).put('/api/tracker/fake/mapping').send({ defaultProjectPath: '/p' }),
@@ -274,6 +287,7 @@ describe('tracker routes', () => {
       mapping: undefined,
       preferences: undefined,
       sessionStatus: undefined,
+      filters: undefined,
     };
     const limited = createApp([
       {
@@ -282,11 +296,13 @@ describe('tracker routes', () => {
       },
       // Capabilities claim more than the implementation carries.
       { descriptor: descriptorFor('bare'), load: async () => bare },
+      { descriptor: descriptorFor('bare-saved', { filters: { people: false, priority: false, saved: true } }), load: async () => bare },
     ]);
     const calls = [
       request(limited).post('/api/tracker/limited/auth/activate').send({ accountId: 'known' }),
       request(limited).post('/api/tracker/limited/items/update').send({ id: 'ENG-12', stateId: 's' }),
       request(limited).get('/api/tracker/limited/states?containerId=t'),
+      request(limited).get('/api/tracker/limited/filters'),
       request(limited).get('/api/tracker/limited/mapping'),
       request(limited).put('/api/tracker/limited/mapping').send({}),
       request(limited).get('/api/tracker/limited/preferences'),
@@ -294,6 +310,7 @@ describe('tracker routes', () => {
       request(limited).post('/api/tracker/limited/session-status').send({ kind: 'started', sessionId: 's' }),
       request(limited).get('/api/tracker/bare/mapping'),
       request(limited).get('/api/tracker/bare/preferences'),
+      request(limited).get('/api/tracker/bare-saved/filters'),
       request(limited).post('/api/tracker/bare/session-status').send({ kind: 'started', sessionId: 's' }),
     ];
     for (const response of await Promise.all(calls)) {
