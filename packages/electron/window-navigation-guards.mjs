@@ -1,6 +1,42 @@
 import { parseAutoOpenableExternalUrl } from './external-url-policy.mjs';
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 
+const withoutTrailingSlashes = (pathname) => pathname.replace(/\/+$/, '');
+
+const savedUrls = (host) => [host.url, host.apiUrl]
+  .filter((candidate) => candidate && URL.canParse(candidate))
+  .map((candidate) => new URL(candidate));
+
+const isWithinPath = (pathname, prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`);
+
+export const findSavedHostForUrl = (raw, hosts) => {
+  if (!URL.canParse(raw)) return null;
+  const link = new URL(raw);
+  if (link.origin === 'null') return null;
+  const linkPath = withoutTrailingSlashes(link.pathname);
+  let found = null;
+  let foundPathLength = -1;
+  for (const host of hosts) {
+    for (const saved of savedUrls(host)) {
+      if (saved.origin !== link.origin) continue;
+      const savedPath = withoutTrailingSlashes(saved.pathname);
+      const pathLength = isWithinPath(linkPath, savedPath) ? savedPath.length : -1;
+      if (!found || pathLength > foundPathLength) {
+        found = host;
+        foundPathLength = pathLength;
+      }
+    }
+  }
+  return found;
+};
+
+export const opensHostWindow = (raw, host, { sessionRouteFromUrl }) => {
+  if (sessionRouteFromUrl(raw)) return true;
+  const link = new URL(raw);
+  const linkPath = withoutTrailingSlashes(link.pathname);
+  return savedUrls(host).some((saved) => saved.origin === link.origin && withoutTrailingSlashes(saved.pathname) === linkPath);
+};
+
 export const attachWindowNavigationGuards = ({
   webContents,
   uiProtocol,
@@ -48,13 +84,13 @@ export const attachWindowNavigationGuards = ({
   webContents.setWindowOpenHandler(({ url }) => {
     if (routeLinks) {
       const host = findConfiguredHostForUrl(url);
-      if (host) {
+      if (host && opensHostWindow(url, host, { sessionRouteFromUrl })) {
         void openHostWindow(host, sessionRouteFromUrl(url), { reuseOpenWindow: true }).catch((error) => {
           log.warn('[electron] failed to open host window from link:', error);
         });
         return { action: 'deny' };
       }
-      if (isAllowedNavigationUrl(url, { includeHosts: false })) {
+      if (!host && isAllowedNavigationUrl(url, { includeHosts: false })) {
         const route = sessionRouteFromUrl(url);
         if (route) onOpenSession(route);
         return { action: 'deny' };
