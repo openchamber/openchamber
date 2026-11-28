@@ -22,6 +22,25 @@ export const getParentDirectoryPath = (path: string): string => {
   return parent;
 };
 
+export const expandedFoldersOnScreen = (root: string, expandedPaths: readonly string[]): string[] => {
+  const normalizedRoot = normalizePath(root);
+  if (!normalizedRoot) return [];
+  const rootPrefix = normalizedRoot.endsWith('/') ? normalizedRoot : `${normalizedRoot}/`;
+  const expanded = new Set<string>();
+  for (const path of expandedPaths) {
+    const normalized = normalizePath(path);
+    if (normalized !== normalizedRoot && normalized.startsWith(rootPrefix)) expanded.add(normalized);
+  }
+  const onScreen: string[] = [];
+  for (const path of expanded) {
+    let current = getParentDirectoryPath(path);
+    while (current !== normalizedRoot && expanded.has(current)) current = getParentDirectoryPath(current);
+    if (current === normalizedRoot) onScreen.push(path);
+  }
+  const depth = (path: string) => path.split('/').length;
+  return onScreen.sort((a, b) => depth(a) - depth(b));
+};
+
 export const sortNodes = (items: FileNode[]) =>
   items.slice().sort((a, b) => {
     if (a.type !== b.type) {

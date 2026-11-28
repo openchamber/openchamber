@@ -7,6 +7,7 @@ import { DirectoryRequests } from '@/components/views/files/directoryRequests';
 import { areDirectoryNodesEqual } from '@/components/views/files/fileTreeStatus';
 import { AUTO_RELIST_MAX_ENTRIES, useFileTreeChanges, type FileTreeChangeBatch } from '@/components/views/files/useFileTreeChanges';
 import { opencodeClient } from '@/lib/opencode/client';
+import { expandedFoldersOnScreen } from '@/components/views/files/view/fileViewPaths';
 import { sortNodes, type FileNode } from './fileNode';
 import { getParentPath, getRootPrefix, isAbsolutePath, normalizePath, shouldIgnoreEntryName } from './treePaths';
 import { fileTreeCacheByRoot, fileTreeCacheKey, getOrCreateCache, touchCache } from './treeCache';
@@ -31,6 +32,8 @@ export const useFileTreeListing = ({
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
+  const childrenByDirRef = React.useRef(childrenByDir);
+  childrenByDirRef.current = childrenByDir;
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const entryCountByDirRef = React.useRef<Map<string, number>>(new Map());
   const directoryRequests = React.useMemo(() => new DirectoryRequests(), []);
@@ -148,18 +151,10 @@ export const useFileTreeListing = ({
     directoryRequests.clear();
 
     try {
-      const currentExpanded = useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths ?? [];
-      const normalizedExpanded = currentExpanded
-        .map((p) => normalizePath(p))
-        .filter((normalized): normalized is string =>
-          Boolean(normalized) && normalized !== root && normalized.startsWith(getRootPrefix(root)),
-        );
+      const normalizedExpanded = expandedFoldersOnScreen(root, useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths ?? []);
       const pathsToRefresh = [root, ...normalizedExpanded];
 
-      loadedDirsRef.current = new Set(loadedDirsRef.current);
-      for (const dirPath of pathsToRefresh) {
-        loadedDirsRef.current.delete(dirPath);
-      }
+      loadedDirsRef.current = new Set();
 
       setLoadErrorsByDir((prev) => {
         if (Object.keys(prev).length === 0) return prev;
@@ -216,16 +211,8 @@ export const useFileTreeListing = ({
   React.useEffect(() => {
     if (!visible || !root || expandedPaths.length === 0) return;
 
-    const toLoad = expandedPaths
-      .map((p) => normalizePath(p))
-      .filter((normalized): normalized is string =>
-        !!normalized &&
-        normalized !== root &&
-        normalized.startsWith(getRootPrefix(root)) &&
-        !loadedDirsRef.current.has(normalized) &&
-          !directoryRequests.has(normalized),
-      )
-      .sort((a, b) => a.split('/').length - b.split('/').length);
+    const toLoad = expandedFoldersOnScreen(root, expandedPaths)
+      .filter((dir) => !loadedDirsRef.current.has(dir) && !directoryRequests.has(dir));
 
     if (toLoad.length === 0) return;
 
@@ -261,7 +248,7 @@ export const useFileTreeListing = ({
     };
     const nearestLoaded = (dir: string): string | null => {
       for (let current = dir; current === root || current.startsWith(rootPrefix); current = getParentPath(current)) {
-        if (loadedDirsRef.current.has(current)) return current;
+        if (loadedDirsRef.current.has(current) || current in childrenByDirRef.current) return current;
         if (current === root) break;
       }
       return null;

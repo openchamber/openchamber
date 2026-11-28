@@ -242,8 +242,28 @@ forgotten so expanding it reads it again; a new folder re-lists its nearest
 loaded ancestor. An unknown change re-lists the root and every expanded folder
 on screen. Changes made outside the agent (an editor, a terminal) still need
 the refresh button or reopening the tab. VS Code has no file tree, so nothing
-subscribes there. Desktop `FilesView` keeps its own 8-second poll of expanded
-folders.
+subscribes there. `FilesView` shows its own tree only in the mobile layout and
+keeps an 8-second poll there while the tree is on screen; an open file covers
+the tree, and the poll stops.
+
+### Why only folders on screen are listed
+
+A folder stays in `expandedPaths` when its parent collapses, so reopening the
+parent restores the subtree. The stored list therefore grows with every folder
+ever opened in that root. Mounting the tree, reopening its tab, refreshing and
+the `FilesView` poll list only `expandedFoldersOnScreen`: expanded folders whose
+every ancestor is expanded too, parents first. Listing every stored folder made
+opening the tab send a request per folder ever opened, in batches of three,
+before the folders on screen were read; a folder out of sight is read when its
+parent opens.
+
+Refresh forgets every loaded folder before reading the ones on screen, so a
+folder out of sight is read again when it shows. A forgotten folder still keeps
+its old listing in `childrenByDir`, and a file change inside it counts against
+that folder: it stays forgotten, and the change never climbs to a loaded
+ancestor on screen and re-lists it. In `FilesView` an expansion change reads
+(unforced) every folder on screen that has no listing yet, so a remembered child
+of a parent that just opened appears at once instead of on the next poll.
 
 ## Artifact previews
 

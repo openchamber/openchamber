@@ -3,7 +3,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { areDirectoryNodesEqual } from '../fileTreeStatus';
 import { opencodeClient } from '@/lib/opencode/client';
 import { type FileNode } from './fileViewTypes';
-import { sortNodes, normalizePath, isAbsolutePath } from './fileViewPaths';
+import { sortNodes, normalizePath, isAbsolutePath, expandedFoldersOnScreen } from './fileViewPaths';
 import { shouldIgnoreEntryName } from './fileViewEntries';
 import { DirectoryRequests } from '../directoryRequests';
 import { type useFileDocument } from './useFileDocument';
@@ -14,13 +14,13 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
 export function useFileDirectory({ fileDocument, layout, scope, tabs, files }: {
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'activeFileLoadIdRef' | 'loadingFilePathRef' | 'setDesktopImageSrc' | 'setFileContent' | 'setFileError' | 'setLoadedFilePath'>;
-  layout: Pick<ReturnType<typeof useFileLayout>, 'setShowMobilePageContent'>;
+  layout: Pick<ReturnType<typeof useFileLayout>, 'setShowMobilePageContent' | 'showMobilePageContent'>;
   scope: Pick<ReturnType<typeof useFileScope>, 'fileScope' | 'root' | 'showGitignored' | 'showHidden' | 'treeActive' | 'treeScope' | 'treeScopeRef'>;
   tabs: Pick<ReturnType<typeof useFileTabs>, 'expandedPaths' | 'removeExpandedPathsByPrefix'>;
   files: ReturnType<typeof useRuntimeAPIs>['files'];
 }) {
   const { activeFileLoadIdRef, loadingFilePathRef, setDesktopImageSrc, setFileContent, setFileError, setLoadedFilePath } = fileDocument;
-  const { setShowMobilePageContent } = layout;
+  const { setShowMobilePageContent, showMobilePageContent } = layout;
   const { fileScope, root, showGitignored, showHidden, treeActive, treeScope, treeScopeRef } = scope;
   const { expandedPaths, removeExpandedPathsByPrefix } = tabs;
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
@@ -128,6 +128,13 @@ export function useFileDirectory({ fileDocument, layout, scope, tabs, files }: {
     await loadDirectory(normalized, true);
   }, [loadDirectory, refreshRoot]);
 
+  const refreshFoldersOnScreen = React.useCallback(() => {
+    if (!root) return;
+    for (const dir of expandedFoldersOnScreen(root, expandedPaths)) {
+      if (!directoryRequests.has(dir)) void refreshDirectory(dir);
+    }
+  }, [directoryRequests, expandedPaths, refreshDirectory, root]);
+
   const lastFileScopeRef = React.useRef<string>('');
   const lastFilesViewTreeKeyRef = React.useRef<string>('');
 
@@ -165,47 +172,42 @@ export function useFileDirectory({ fileDocument, layout, scope, tabs, files }: {
     }
   }, [directoryRequests, fileScope, loadDirectory, root, treeScope]);
 
+  const treeOnScreen = treeActive && !showMobilePageContent;
+
   React.useEffect(() => {
-    if (!treeActive || !files.listDirectory) return;
+    if (!treeOnScreen || !files.listDirectory) return;
 
     const handleVisibilityChange = () => {
-      if (!document.hidden && expandedPaths.length > 0) {
-        for (const dir of expandedPaths) {
-          if (!directoryRequests.has(dir)) void refreshDirectory(dir);
-        }
-      }
+      if (!document.hidden) refreshFoldersOnScreen();
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [directoryRequests, expandedPaths, files.listDirectory, refreshDirectory, treeActive]);
+  }, [files.listDirectory, refreshFoldersOnScreen, treeOnScreen]);
 
   const treeWasActiveRef = React.useRef(false);
   React.useEffect(() => {
-    const resumed = treeActive && !treeWasActiveRef.current;
-    treeWasActiveRef.current = treeActive;
-    if (!treeActive || !root) return;
-    void loadDirectory(root);
+    const resumed = treeOnScreen && !treeWasActiveRef.current;
+    treeWasActiveRef.current = treeOnScreen;
+    if (!treeOnScreen || !root) return;
     if (resumed) {
-      for (const dir of expandedPaths) {
-        if (!directoryRequests.has(dir)) void refreshDirectory(dir);
-      }
+      void loadDirectory(root);
+      refreshFoldersOnScreen();
+      return;
     }
-  }, [directoryRequests, expandedPaths, loadDirectory, refreshDirectory, root, treeActive]);
+    for (const dir of [root, ...expandedFoldersOnScreen(root, expandedPaths)]) void loadDirectory(dir);
+  }, [expandedPaths, loadDirectory, refreshFoldersOnScreen, root, treeOnScreen]);
 
   React.useEffect(() => {
-    if (!treeActive || !files.listDirectory) return;
+    if (!treeOnScreen || !files.listDirectory) return;
     if (expandedPaths.length === 0) return;
 
     const interval = setInterval(() => {
-      if (document.hidden) return;
-      for (const dir of expandedPaths) {
-        if (!directoryRequests.has(dir)) void refreshDirectory(dir);
-      }
+      if (!document.hidden) refreshFoldersOnScreen();
     }, 8000);
 
     return () => clearInterval(interval);
-  }, [directoryRequests, expandedPaths, files.listDirectory, refreshDirectory, treeActive]);
+  }, [expandedPaths.length, files.listDirectory, refreshFoldersOnScreen, treeOnScreen]);
 
   return {
   mapDirectoryEntries, loadDirectory, refreshRoot, refreshDirectory,
