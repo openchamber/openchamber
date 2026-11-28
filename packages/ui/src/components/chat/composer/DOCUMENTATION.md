@@ -1229,7 +1229,13 @@ DOM-only tests cannot verify these.
 
 `editor/` wraps CodeMirror. The document is a plain string: `getValue()` is
 exactly what gets sent, so nothing downstream serializes a rich document model
-back into a prompt.
+back into a prompt. `.cm-content` reserves a physical 12px right gutter inside
+`.cm-scroller` (wider than `OverlayScrollbar`'s 10px vertical thumb hit area) so
+RTL lines and full LTR lines stay clickable clear of the scrollbar; callers that
+frame the composer (`renderComposerForm`, `MobileCommentComposer`) keep their
+right host padding at 0 so the scrollbar sits in that gutter instead of inset
+over the text. `hostMouseDown` ignores presses on `[data-overlay-scrollbar-thumb]`
+so dragging the scrollbar leaves the caret where it is.
 
 ### Why word gestures share a script-aware boundary
 

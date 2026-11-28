@@ -12,6 +12,9 @@ export function handleComposerHostMouseDown(
 ): void {
     if (!view || view.state.readOnly || !view.contentDOM.isContentEditable) return;
     if (view.contentDOM.contains(event.target as Node)) return;
+    if (globalThis.Element && event.target instanceof globalThis.Element && event.target.closest('[data-overlay-scrollbar-thumb]')) {
+        return;
+    }
 
     event.preventDefault();
     const position = view.posAtCoords({ x: event.clientX, y: clampToText(view, event.clientY) })

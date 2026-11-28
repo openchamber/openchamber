@@ -11,7 +11,8 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     '&.cm-focused': { outline: 'none' },
     '.cm-content': {
         padding: '0',
-        paddingInlineStart: '1px',
+        paddingLeft: '1px',
+        paddingRight: '12px',
         fontFamily: 'inherit',
         fontSize: 'inherit',
         lineHeight: 'inherit',

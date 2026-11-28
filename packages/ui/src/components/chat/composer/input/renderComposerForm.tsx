@@ -467,7 +467,8 @@ export function renderComposerForm({
                                 boundSelector={isMobile ? '[data-composer-bound]' : undefined}
                                 boundGapPx={MOBILE_COMPOSER_BOUND_GAP_PX}
                                 className={cn(
-                                    'min-h-[52px] px-3 relative z-10',
+                                    // oxlint-disable-next-line openchamber/no-physical-sides -- OverlayScrollbar anchors to physical right; .cm-content reserves the 12px right gutter inside the scroller
+                                    'min-h-[52px] pl-3 pr-0 relative z-10',
                                     isComposerExpanded
                                         ? cn('h-full min-h-0', isMobile ? 'py-2.5' : 'py-4')
                                         : isMobile

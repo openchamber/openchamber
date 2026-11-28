@@ -151,7 +151,8 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                     returnKeySends={commentKeys.returnKeySends}
                     spellCheck
                     maxLines={MOBILE_COMMENT_MAX_LINES}
-                    className="min-h-[44px] flex-1 px-2.5 py-2 typography-markdown"
+                    // oxlint-disable-next-line openchamber/no-physical-sides -- OverlayScrollbar anchors to physical right; .cm-content reserves the 12px right gutter inside the scroller
+                    className="min-h-[44px] flex-1 pl-2.5 pr-0 py-2 typography-markdown"
                 />
                 <div className="mb-1 flex h-9 shrink-0 items-center">
                     <ComposerDictation

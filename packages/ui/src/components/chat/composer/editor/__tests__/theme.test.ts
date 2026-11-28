@@ -149,6 +149,17 @@ describe('composerEditorTheme', () => {
         expect(guarded![1]).toBe(base![1]);
         expect(css.indexOf(guarded![0]) > css.indexOf(base![0])).toBe(true);
     });
+
+    /**
+     * PopupOverlayScrollbar mounts a 10px-wide vertical thumb at the physical
+     * right edge of `.cm-scroller`. Without right padding inside `.cm-content`,
+     * the thumb sits directly over the start of RTL lines (and the end of full
+     * LTR lines), intercepting clicks on the first character.
+     */
+    test('content reserves physical right gutter wider than the 10px overlay scrollbar thumb', () => {
+        const contentRule = COMPOSER_EDITOR_THEME_SPEC['.cm-content'];
+        expect(parseFloat(contentRule.paddingRight)).toBeGreaterThan(10);
+    });
 });
 
 describe('composerNativeSelectionTheme', () => {

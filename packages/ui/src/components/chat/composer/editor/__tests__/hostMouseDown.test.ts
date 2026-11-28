@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import { drawSelection, type EditorView } from '@codemirror/view';
+import { Window } from 'happy-dom';
 
 import { handleComposerHostMouseDown } from '../hostMouseDown';
 
@@ -128,5 +129,24 @@ describe('composer host mouse down', () => {
         readOnlyView.mouseDown(padding);
         expect(readOnlyView.prevented).toBe(false);
         expect(readOnlyView.contentActive).toBe(false);
+    });
+
+    test('ignores presses on the overlay scrollbar thumb', () => {
+        const view = new ComposerViewHarness();
+        const dom = new Window();
+        const previousElement = globalThis.Element;
+        const previousDocument = globalThis.document;
+        Object.assign(globalThis, { Element: dom.Element, document: dom.document });
+        try {
+            const thumb = document.createElement('div');
+            thumb.setAttribute('data-overlay-scrollbar-thumb', 'vertical');
+            view.mouseDown(thumb);
+        } finally {
+            Object.assign(globalThis, { Element: previousElement, document: previousDocument });
+            dom.close();
+        }
+        expect(view.prevented).toBe(false);
+        expect(view.contentActive).toBe(false);
+        expect(view.state.selection.main.head).toBe(0);
     });
 });
