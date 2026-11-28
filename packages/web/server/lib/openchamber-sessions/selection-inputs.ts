@@ -1,7 +1,7 @@
 import { asNonEmptyString, isRecord } from '../shared/guards.js';
 import { parseModelSelection } from '../opencode/config-v2.js';
 import { controlErrorFields } from '../openchamber-control/error.js';
-import { LOCATION_PLUGINS_NOT_READY, waitForLocationPlugins } from '../opencode/location-plugins.js';
+import { LOCATION_PLUGINS_NOT_READY, waitForCatalogLocation } from '../opencode/location-plugins.js';
 import type { OpenCodeClient } from '@opencode/client';
 
 const asList = <T>(value: T[] | null | undefined): T[] => (Array.isArray(value) ? value : []);
@@ -23,7 +23,7 @@ const pluginActivationFailure = (cause: unknown) => {
 
 export const fetchSelectionInputs = async <Settings>({ client, readSettingsFromDiskMigrated }: SelectionInputDependencies<Settings>) => {
   const settings = await readSettingsFromDiskMigrated();
-  let notReadyReason: string | null = await waitForLocationPlugins(client, AbortSignal.timeout(10_000)) ? null : LOCATION_PLUGINS_NOT_READY;
+  let notReadyReason: string | null = await waitForCatalogLocation(client, AbortSignal.timeout(10_000)) ? null : LOCATION_PLUGINS_NOT_READY;
   const options = { signal: AbortSignal.timeout(10_000) };
   const [models, agents, configEntries] = await Promise.all([
     // external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/server/src/location.ts OpenCode before 2.4 waits for plugins itself and refuses with 503 when they take too long.

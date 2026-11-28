@@ -2,7 +2,7 @@ import { OpenCode } from '@opencode/client';
 import type { ModelInfo, OpenCodeClient } from '@opencode/client';
 import type { SmallModelClient } from './contracts.js';
 import { asNonEmptyString } from '../shared/guards.js';
-import { readLocationCatalog, waitForLocationPlugins } from '../opencode/location-plugins.js';
+import { readLocationCatalog, waitForCatalogLocation } from '../opencode/location-plugins.js';
 
 export interface OpenCodeRuntimeProviders {
   buildOpenCodeUrl: (requestPath: string, query: string) => string;
@@ -105,7 +105,7 @@ export async function listModelInfos(client: OpenCodeClient, directory?: string 
     return modelCache;
   }
   try {
-    await waitForLocationPlugins(client);
+    await waitForCatalogLocation(client);
     const models = unwrap(await client.model.list());
     if (models.length === 0) return models;
     modelCache = models;
@@ -121,7 +121,7 @@ export async function listModelInfos(client: OpenCodeClient, directory?: string 
 
 export async function listProviderInfos(client: OpenCodeClient) {
   try {
-    await waitForLocationPlugins(client);
+    await waitForCatalogLocation(client);
     return unwrap(await client.provider.list());
   } catch (error) {
     const refusal = getTrustRefusal(error);

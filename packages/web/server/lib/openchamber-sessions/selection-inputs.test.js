@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchSelectionInputs } from './selection-inputs.js';
 
 const agents = [{ id: 'build', mode: 'primary' }];
+const models = [{ id: 'example/model', providerID: 'example' }];
 
 // OpenCode 2.4 on a location it has just built: every catalog read answers at once with what has loaded,
 // and plugin.list stays empty until the plugins have activated.
@@ -9,6 +10,7 @@ const coldLocation = ({ activatesAfterPolls = 2, modelList = async () => ({ data
   let polls = 0;
   const active = () => polls >= activatesAfterPolls;
   return {
+    debug: { location: { list: async () => [{ directory: '/native' }] } },
     plugin: { list: async () => {
       polls += 1;
       return { data: active() ? [{ state: { status: 'active' } }] : [] };
@@ -26,6 +28,20 @@ afterEach(() => {
 });
 
 describe('fetchSelectionInputs', () => {
+  it('returns selection inputs without a not-ready reason on a stateless backend', async () => {
+    vi.useFakeTimers();
+    const client = {
+      plugin: { list: async () => ({ data: [] }) },
+      debug: { location: { list: async () => [] } },
+      model: { list: async () => ({ data: models }) },
+      agent: { list: async () => ({ data: agents }) },
+      config: { get: async () => [] },
+    };
+    const reading = read(client);
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(await reading).toMatchObject({ models, agents, notReadyReason: null });
+  });
+
   it('reads the agents of a new location after its plugins have activated', async () => {
     const inputs = await read(coldLocation());
     expect(inputs.agents).toEqual(agents);
