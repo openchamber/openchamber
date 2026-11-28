@@ -58,6 +58,7 @@ export interface ComposerEditorHandle {
 export interface ComposerEditorProps {
     value: string;
     valueRevision?: number;
+    historyRevision?: number;
     onChange: (change: ComposerChange) => void;
     onSelectionChange?: (selection: ComposerSelection) => void;
     onKeyDown?: (event: KeyboardEvent) => boolean;
@@ -99,6 +100,7 @@ function isDeferredSyntheticEvent(event: KeyboardEvent): boolean {
     return Boolean((event as unknown as { synthetic?: boolean }).synthetic);
 }
 
+const historyCompartment = new Compartment();
 const editableCompartment = new Compartment();
 const placeholderCompartment = new Compartment();
 const enterKeyHintCompartment = new Compartment();
@@ -130,6 +132,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
         const {
             value,
             valueRevision,
+            historyRevision,
             languageContext,
             placeholder,
             editable = true,
@@ -197,7 +200,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                 state: EditorState.create({
                     doc: handlersRef.current.value,
                     extensions: [
-                        history(),
+                        historyCompartment.of(history()),
                         drawSelection(),
                         timerCaretBlink(),
                         composerSelectionExtension(),
@@ -304,23 +307,29 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             // oxlint-disable-next-line react-hooks/exhaustive-deps
         }, []);
 
+        const localHistoryEmptiedForRevision = React.useRef(historyRevision);
+        if (store && !store.historyEmptiedForRevision) store.historyEmptiedForRevision = { current: historyRevision };
+        const historyEmptiedForRevision = store?.historyEmptiedForRevision ?? localHistoryEmptiedForRevision;
         React.useEffect(() => {
             const view = viewRef.current;
             if (!view) return;
             const current = view.state.doc.toString();
-            if (current === value) return;
-            if (view.compositionStarted) return;
-            view.dispatch({
-                ...replaceWithCaret(view.state, 0, current.length, value),
-                annotations: valuePropWrite.of(true),
-            });
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    if (viewRef.current !== view) return;
-                    view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight;
+            if (current !== value && !view.compositionStarted) {
+                view.dispatch({
+                    ...replaceWithCaret(view.state, 0, current.length, value),
+                    annotations: valuePropWrite.of(true),
                 });
-            });
-        }, [value, valueRevision]);
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        if (viewRef.current !== view) return;
+                        view.scrollDOM.scrollTop = view.scrollDOM.scrollHeight;
+                    });
+                });
+            }
+            if (historyEmptiedForRevision.current === historyRevision) return;
+            historyEmptiedForRevision.current = historyRevision;
+            emptyUndoHistory(view);
+        }, [value, valueRevision, historyRevision, historyEmptiedForRevision]);
 
         React.useEffect(() => {
             viewRef.current?.dispatch({ effects: setLanguageContext.of(languageContext) });
@@ -508,6 +517,11 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
         );
     },
 ));
+
+function emptyUndoHistory(view: EditorView): void {
+    view.dispatch({ effects: historyCompartment.reconfigure([]) });
+    view.dispatch({ effects: historyCompartment.reconfigure(history()) });
+}
 
 function readSelection(state: EditorState): ComposerSelection {
     const range = state.selection.main;

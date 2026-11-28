@@ -725,6 +725,30 @@ current text; the revision makes the editor write a value equal to the one it
 last rendered with, which happens because typing no longer renders it (type
 after a render, then the app restores the text of that render).
 
+### Why a draft switch empties the undo history
+
+One CodeMirror view serves every session, so its undo history recorded the
+write that swapped one session's draft for another: Cmd+Z right after a switch
+put the previous session's text into this one, and walking undo and redo went
+through other sessions' drafts. `setMessage(text, { otherDraft: true })` bumps
+`historyRevision`, and the editor writes the text, then empties its history
+(`emptyUndoHistory`: CodeMirror keeps a history field through a reconfigure
+that still includes it, so the history compartment is reconfigured to nothing
+and back).
+The draft switch in `useComposerDraft` passes it, except when the draft on
+screen moves to a new identity (a new-session draft becoming its session, a
+`/btw` draft reaching its fork through `migrateDraft`), so undo of what was
+just typed survives. A parallel-composer variant passes it when it is added
+(the copy starts with the same text), switched to, or replaces the removed one
+on screen. The revision the history was last emptied for lives in the view
+store next to the retained view, so a remount (the mobile composer collapsing)
+still empties the history the view brought along. Every other app write (a
+completion, a chip, a restored send) stays in the history and undoes as an
+edit. Keeping one history per draft and swapping it on a switch was the
+alternative; CodeMirror can only restore a history by rebuilding the whole
+editor state, which a switch would then pay for, and undo of edits made before
+leaving a session is not something a user expects after coming back to it.
+
 A glass surface never carries its own shadow: the shadow sits on a wrapper
 (or the glass moves to an inner layer). Chromium grows a backdrop-filter
 layer by the shadow's blur, and that band painted a flat grey strip over

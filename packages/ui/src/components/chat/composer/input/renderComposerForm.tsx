@@ -71,7 +71,7 @@ type Dependencies = {
     dropState: Pick<ReturnType<typeof useComposerDropState>, 'isDragging' | 'dropZoneRef' | 'isInternalDrag'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef' | 'composerViewStore'>;
-    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText' | 'editorValueRevision'>;
+    draftText: Pick<ReturnType<typeof useComposerDraftText>, 'composerText' | 'editorValueRevision' | 'editorHistoryRevision'>;
     mobilePanels: Pick<ReturnType<typeof useComposerMobilePanels>, 'mobileControlsPanel' | 'setMobileControlsPanel'>;
     sessionScope: Pick<ReturnType<typeof useComposerSessionScope>, 'isBtwActive' | 'claimAttachmentSlot' | 'messageSelectionActive' | 'currentSessionId' | 'currentSessionDirectoryForSync' | 'currentDirectory' | 'newSessionDraftOpen' | 'inputMode' | 'btwComposerSessionId' | 'isBtwPanelVisible' | 'hasPendingPermission' | 'btwPanel'>;
     sessionLifecycle: Pick<ReturnType<typeof useComposerSessionLifecycle>, 'handleExitBtw'>;
@@ -119,7 +119,7 @@ export function renderComposerForm({
     const { isDragging, dropZoneRef, isInternalDrag } = dropState;
     const { t } = i18n;
     const { composerRef, composerViewStore } = editorState;
-    const { composerText, editorValueRevision } = draftText;
+    const { composerText, editorValueRevision, editorHistoryRevision } = draftText;
     const { mobileControlsPanel, setMobileControlsPanel } = mobilePanels;
     const {
         isBtwActive, claimAttachmentSlot, messageSelectionActive, currentSessionId,
@@ -441,6 +441,7 @@ export function renderComposerForm({
                                 data-testid="chat-input"
                                 value={composerText.get()}
                                 valueRevision={editorValueRevision}
+                                historyRevision={editorHistoryRevision}
                                 languageContext={languageContext}
                                 onChange={handleEditorChange}
                                 onKeyDown={handleEditorKeyDown}

@@ -26,7 +26,7 @@ function draftSignature(text: string, confirmedMentions: Iterable<string>): stri
 
 export interface ComposerDraftOptions {
     text: ComposerText;
-    setMessage: (text: string) => void;
+    setMessage: (text: string, options?: { otherDraft?: boolean }) => void;
     confirmedMentionsRef: React.RefObject<Set<string>>;
     identity: ChatDraftIdentity | null;
     selectAttachmentsOnIdentityChange?: boolean;
@@ -64,6 +64,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
     const currentIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraft.identity);
     const draftMemoryRef = React.useRef(new Map<string, ChatDraftSnapshot>());
     const skipOutgoingDraftRef = React.useRef(false);
+    const shownDraftMigratedToKeyRef = React.useRef<string | null>(null);
     const initialKey = initialDraft.identity ? getChatDraftIdentityKey(initialDraft.identity) : null;
     if (initialKey && !draftMemoryRef.current.has(initialKey) && initialDraft.text) {
         draftMemoryRef.current.set(initialKey, {
@@ -159,6 +160,8 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             persistNow(previous, outgoing.text);
         }
         skipOutgoingDraftRef.current = false;
+        const migratedHere = shownDraftMigratedToKeyRef.current !== null && shownDraftMigratedToKeyRef.current === currentKey;
+        shownDraftMigratedToKeyRef.current = null;
 
         const saved = (currentKey && draftMemoryRef.current.get(currentKey))
             || (identity && isBtwPendingComposerKey(identity.sessionId)
@@ -171,7 +174,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             }
             : saved;
         confirmedMentionsRef.current = new Set(restored.confirmedMentions);
-        setMessage(restored.text);
+        setMessage(restored.text, { otherDraft: !sameDraftMoved && !migratedHere });
         if (carriesText) {
             persistNow(identity, restored.text);
         } else if (restored.text) {
@@ -307,6 +310,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         if (from && current && getChatDraftIdentityKey(from) === getChatDraftIdentityKey(current)) {
             clearPending();
             skipOutgoingDraftRef.current = true;
+            shownDraftMigratedToKeyRef.current = getChatDraftIdentityKey(to);
             confirmedMentionsRef.current = new Set();
             setMessage('');
         }

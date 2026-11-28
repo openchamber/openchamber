@@ -25,8 +25,10 @@ export function useComposerDraftText(chatColumnSession: ReturnType<typeof useCom
     });
 
     const [editorValueRevision, setEditorValueRevision] = React.useState(0);
+    const [editorHistoryRevision, setEditorHistoryRevision] = React.useState(0);
 
-    const setMessage = React.useCallback((value: string) => {
+    const setMessage = React.useCallback((value: string, options?: { otherDraft?: boolean }) => {
+        if (options?.otherDraft) setEditorHistoryRevision((revision) => revision + 1);
         if (value === composerText.get()) return;
         composerText.set(value);
         setEditorValueRevision((revision) => revision + 1);
@@ -42,7 +44,7 @@ export function useComposerDraftText(chatColumnSession: ReturnType<typeof useCom
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
 
     return {
-    initialDraftRef, initialDraftIdentityRef, composerText, editorValueRevision, setEditorValueRevision,
+    initialDraftRef, initialDraftIdentityRef, composerText, editorValueRevision, editorHistoryRevision, setEditorValueRevision,
     setMessage, hasText, confirmedMentionsRef, storedInputMode, setInputMode, inputModeParentRef,
     currentChatDraftIdentityRef,
     };

@@ -61,7 +61,7 @@ export function useParallelComposer(input: {
   draftOpen: boolean;
   draftProjectId: string | null;
   text: ComposerText;
-  setMessage: (text: string) => void;
+  setMessage: (text: string, options?: { otherDraft?: boolean }) => void;
 }) {
   const { t } = useI18n();
   const { enabled, draftOpen, draftProjectId, text: composerText, setMessage } = input;
@@ -135,20 +135,22 @@ export function useParallelComposer(input: {
   }, [updateActiveModels]);
 
   const addVariant = React.useCallback(() => {
+    if (!state) return;
     update((current) => {
       const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
       const source = variants[current.active];
       const next: ParallelVariant = { id: variantId(variants.length), text: source.text, models: source.models.map((model) => ({ ...model })) };
       return { ...current, variants: [...variants, next], active: variants.length };
     });
-  }, [composerText, update]);
+    setMessage(composerText.get(), { otherDraft: true });
+  }, [composerText, setMessage, state, update]);
 
   const switchVariant = React.useCallback((target: number) => {
     const current = state;
     if (!current || target === current.active || !current.variants[target]) return;
     const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
     setState({ ...current, variants, active: target });
-    setMessage(variants[target].text);
+    setMessage(variants[target].text, { otherDraft: true });
   }, [composerText, setMessage, state]);
 
   const removeVariant = React.useCallback((target: number) => {
@@ -158,7 +160,7 @@ export function useParallelComposer(input: {
     const variants = withText.filter((_, index) => index !== target).map((variant, index) => ({ ...variant, id: variantId(index) }));
     const active = Math.min(target <= current.active && current.active > 0 ? current.active - 1 : current.active, variants.length - 1);
     setState({ ...current, variants, active });
-    setMessage(variants[active].text);
+    setMessage(variants[active].text, { otherDraft: target === current.active });
   }, [composerText, setMessage, state]);
 
   const setIsolate = React.useCallback((isolate: boolean) => update((current) => ({ ...current, isolate })), [update]);

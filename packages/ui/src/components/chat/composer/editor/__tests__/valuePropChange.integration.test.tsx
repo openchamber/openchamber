@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { undo } from '@codemirror/commands';
+import { EditorView } from '@codemirror/view';
 import { ComposerEditor, type ComposerChange, type ComposerEditorHandle } from '../ComposerEditor';
 import type { ComposerLanguageContext } from '../../language/tokenize';
+import { createComposerEditorViewStore } from '../viewStore';
 
 const languageContext: ComposerLanguageContext = {
     inputMode: 'normal', knownAgentNames: new Set(), confirmedMentions: new Set(),
@@ -22,10 +25,14 @@ describe('composer change reports text set through the value prop', () => {
     let changes: ComposerChange[];
     const editor = React.createRef<ComposerEditorHandle>();
 
-    const render = (value: string, valueRevision?: number) => act(async () => root.render(
-        <ComposerEditor ref={editor} value={value} valueRevision={valueRevision} languageContext={languageContext}
-            onChange={(change) => { changes.push(change); }} />,
+    const render = (value: string, valueRevision?: number, historyRevision?: number) => act(async () => root.render(
+        <ComposerEditor ref={editor} value={value} valueRevision={valueRevision} historyRevision={historyRevision}
+            languageContext={languageContext} onChange={(change) => { changes.push(change); }} />,
     ));
+    const undoOnce = () => act(async () => {
+        const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!);
+        if (view) undo(view);
+    });
 
     beforeEach(async () => {
         browser = new Window();
@@ -74,5 +81,36 @@ describe('composer change reports text set through the value prop', () => {
         await render('draft', 2);
         expect(editor.current?.getValue()).toBe('draft');
         expect(changes.at(-1)).toMatchObject({ value: 'draft', fromValueProp: true });
+    });
+
+    // One editor serves every session: undo after a switch must not bring back
+    // the draft it replaced, while a write inside one draft stays undoable.
+    test('undo stops at a value from another draft and walks through one draft', async () => {
+        await act(async () => editor.current?.insertText('first session'));
+        await render('second session', 1, 1);
+        await undoOnce();
+        expect(editor.current?.getValue()).toBe('second session');
+
+        await render('second session with a chip', 2, 1);
+        await undoOnce();
+        expect(editor.current?.getValue()).toBe('second session');
+    });
+
+    // The mobile composer unmounts when it collapses and reattaches the view it kept.
+    test('a retained view reattached with another draft has nothing to undo', async () => {
+        const viewStore = createComposerEditorViewStore();
+        const renderKept = (value: string, valueRevision: number, historyRevision: number) => act(async () => root.render(
+            <ComposerEditor ref={editor} value={value} valueRevision={valueRevision} historyRevision={historyRevision}
+                viewStore={viewStore} languageContext={languageContext} onChange={() => {}} />,
+        ));
+        await act(async () => root.render(null));
+        await renderKept('', 0, 0);
+        await act(async () => editor.current?.insertText('draft A'));
+        await act(async () => root.render(null));
+        await renderKept('draft B', 1, 1);
+        await undoOnce();
+        expect(editor.current?.getValue()).toBe('draft B');
+        await act(async () => root.render(null));
+        viewStore.view?.destroy();
     });
 });

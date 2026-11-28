@@ -15,13 +15,14 @@ const fork: ChatDraftIdentity = { ...parent, sessionId: 'fork-1' };
 
 
 /** The composer's text the way ChatInput holds it: outside state, with a render per write. */
-function useProbeText(initial: string) {
+function useProbeText(initial: string, otherDraftWrites: string[]) {
     const [text] = React.useState(() => createComposerText(initial));
     const [, setRevision] = React.useState(0);
-    const setMessage = React.useCallback((next: string) => {
+    const setMessage = React.useCallback((next: string, options?: { otherDraft?: boolean }) => {
+        if (options?.otherDraft) otherDraftWrites.push(next);
         text.set(next);
         setRevision((revision) => revision + 1);
-    }, [text]);
+    }, [otherDraftWrites, text]);
     return { text, setMessage };
 }
 
@@ -35,10 +36,12 @@ function renderComposer(initialText: string) {
     const root = createRoot(dom.container);
     const mentionsRef: React.RefObject<Set<string>> = { current: new Set() };
     let controlsForTest: ComposerDraftControls | undefined;
-    const result = { text: initialText, mentionsRef, controls: () => controlsForTest };
+    // Writes that empty the editor's undo history: a different draft took the screen.
+    const otherDraftWrites: string[] = [];
+    const result = { text: initialText, mentionsRef, controls: () => controlsForTest, otherDraftWrites };
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
-        const { text, setMessage } = useProbeText(initialText);
+        const { text, setMessage } = useProbeText(initialText, otherDraftWrites);
         const controls = useComposerDraft({
             text, setMessage, confirmedMentionsRef: mentionsRef, identity,
             initialDraft: { text: '', identity },
@@ -92,6 +95,8 @@ describe('/btw fork still being created', () => {
                 act(() => { composer.result.controls()?.migrateDraft(pending, fork); });
                 composer.render(fork);
                 expect(composer.result.text).toBe('typed while creating');
+                // Coming to the fork from another chat is a switch.
+                expect(composer.result.otherDraftWrites.at(-1)).toBe('typed while creating');
                 expect(readChatDraft(fork).text).toBe('typed while creating');
                 expect(readChatDraft(pending).text).toBe('');
                 composer.render(pending);
@@ -166,6 +171,8 @@ describe('/btw fork still being created', () => {
             composer.render(fork);
 
             expect(composer.result.text).toBe('first question');
+            // The editor stayed on this draft, so undo keeps what was typed.
+            expect(composer.result.otherDraftWrites).toEqual([]);
             expect(readChatDraft(fork).text).toBe('first question');
             expect(readChatDraft(pending).text).toBe('');
         } finally {
