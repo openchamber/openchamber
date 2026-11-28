@@ -6,6 +6,8 @@ const LIMIT_MS = 5_000;
 
 export const LOCATION_PLUGINS_NOT_READY = 'Location plugins did not finish activating';
 
+type CatalogReadErrorHandler = (error: Error) => void;
+
 const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
   const done = () => {
     clearTimeout(timer);
@@ -20,6 +22,7 @@ export const waitForPluginList = async (
   listPlugins: (signal: AbortSignal) => Promise<readonly unknown[]>,
   signal?: AbortSignal,
   probeStateless?: (signal: AbortSignal) => Promise<boolean>,
+  onReadError?: CatalogReadErrorHandler,
 ): Promise<boolean> => {
   const limit = new AbortController();
   const timer = setTimeout(() => limit.abort(), LIMIT_MS);
@@ -28,7 +31,10 @@ export const waitForPluginList = async (
   let probed = false;
   try {
     while (!bounded.aborted) {
-      const read = Promise.resolve().then(() => listPlugins(bounded)).catch(() => null);
+      const read = Promise.resolve().then(() => listPlugins(bounded)).catch((error) => {
+        onReadError?.(error instanceof Error ? error : new Error(LOCATION_PLUGINS_NOT_READY, { cause: error }));
+        return null;
+      });
       const plugins = probe
         ? await Promise.race([read, probe.then<true | Awaited<typeof read>>((ready) => ready ? true : read)])
         : await read;
@@ -37,7 +43,10 @@ export const waitForPluginList = async (
       if (!plugins && !probed) return false;
       if (plugins && probeStateless && !probed) {
         probed = true;
-        probe = probeStateless(bounded).catch(() => false).then((ready) => {
+        probe = probeStateless(bounded).catch((error) => {
+          onReadError?.(error instanceof Error ? error : new Error(LOCATION_PLUGINS_NOT_READY, { cause: error }));
+          return false;
+        }).then((ready) => {
           if (!ready) probe = undefined;
           return ready;
         });
@@ -60,7 +69,11 @@ export const waitForLocationPlugins = (client: Pick<OpenCodeClient, 'plugin'>, s
   waitForPluginList((bounded) => client.plugin.list(undefined, { signal: bounded }).then((response) => response.data), signal)
 );
 
-export const waitForCatalogLocation = (client: Pick<OpenCodeClient, 'plugin' | 'debug'>, signal?: AbortSignal) => (
+export const waitForCatalogLocation = (
+  client: Pick<OpenCodeClient, 'plugin' | 'debug'>,
+  signal?: AbortSignal,
+  onReadError?: CatalogReadErrorHandler,
+) => (
   waitForPluginList(
     async (bounded) => (await client.plugin.list(undefined, { signal: bounded })).data,
     signal,
@@ -68,6 +81,7 @@ export const waitForCatalogLocation = (client: Pick<OpenCodeClient, 'plugin' | '
       const locations = await client.debug.location.list({ signal: bounded });
       return Array.isArray(locations) && locations.length === 0;
     },
+    onReadError,
   )
 );
 

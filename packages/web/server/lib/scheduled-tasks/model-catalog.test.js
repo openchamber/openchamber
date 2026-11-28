@@ -36,9 +36,33 @@ describe('model catalog reader', () => {
   it('returns the catalog entries', async () => {
     const read = createModelCatalogReader(base({
       isOpenCodeDirectoryTrusted: async () => true,
-      createClient: () => ({ model: { list: async () => ({ data: [{ providerID: 'p', id: 'm' }] }) } }),
+      createClient: () => ({
+        plugin: { list: async () => ({ data: [] }) },
+        debug: { location: { list: async () => [] } },
+        model: { list: async () => ({ data: [{ providerID: 'p', id: 'm' }] }) },
+      }),
     }));
 
     await expect(read('/repo')).resolves.toEqual([{ providerID: 'p', id: 'm' }]);
+  });
+
+  it('does not return early models when a failed inventory leaves the location not ready', async () => {
+    vi.useFakeTimers();
+    try {
+      const model = { list: vi.fn(async () => ({ data: [{ providerID: 'p', id: 'early' }] })) };
+      const read = createModelCatalogReader(base({
+        createClient: () => ({
+          plugin: { list: async () => ({ data: [] }) },
+          debug: { location: { list: async () => { throw new Error('Inventory unavailable'); } } },
+          model,
+        }),
+      }));
+      const reading = read('/repo');
+      await vi.advanceTimersByTimeAsync(5_100);
+      expect(await reading).toEqual([]);
+      expect(model.list).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

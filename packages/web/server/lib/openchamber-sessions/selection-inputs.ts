@@ -23,7 +23,10 @@ const pluginActivationFailure = (cause: unknown) => {
 
 export const fetchSelectionInputs = async <Settings>({ client, readSettingsFromDiskMigrated }: SelectionInputDependencies<Settings>) => {
   const settings = await readSettingsFromDiskMigrated();
-  let notReadyReason: string | null = await waitForCatalogLocation(client, AbortSignal.timeout(10_000)) ? null : LOCATION_PLUGINS_NOT_READY;
+  if (!(await waitForCatalogLocation(client, AbortSignal.timeout(10_000)))) {
+    return { settings, models: [], agents: null, config: null, notReadyReason: LOCATION_PLUGINS_NOT_READY };
+  }
+  let notReadyReason: string | null = null;
   const options = { signal: AbortSignal.timeout(10_000) };
   const [models, agents, configEntries] = await Promise.all([
     // external: https://github.com/anomalyco/opencode/blob/v2.3.2/packages/server/src/location.ts OpenCode before 2.4 waits for plugins itself and refuses with 503 when they take too long.

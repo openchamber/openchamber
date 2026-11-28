@@ -53,8 +53,17 @@ describe('fetchSelectionInputs', () => {
     const reading = read(coldLocation({ activatesAfterPolls: Infinity }));
     await vi.advanceTimersByTimeAsync(5_100);
     const inputs = await reading;
-    expect(inputs.agents).toEqual([]);
+    expect(inputs.agents).toBeNull();
     expect(inputs.notReadyReason).toBe('Location plugins did not finish activating');
+  });
+
+  it('does not expose early selection inputs after a failed location inventory', async () => {
+    vi.useFakeTimers();
+    const client = coldLocation({ activatesAfterPolls: Infinity, modelList: async () => ({ data: models }) });
+    client.debug.location.list = async () => { throw new Error('Inventory unavailable'); };
+    const reading = read(client);
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(await reading).toMatchObject({ models: [], agents: null, config: null, notReadyReason: expect.any(String) });
   });
 
   it("passes on the reason an OpenCode before 2.4 gives when its own wait for plugins ran out", async () => {

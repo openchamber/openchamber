@@ -30,7 +30,7 @@ export const createModelCatalogReader = ({
       headers,
       fetch,
     });
-    await waitForCatalogLocation(client);
+    if (!(await waitForCatalogLocation(client))) return [];
     const catalog = await client.model.list();
     return Array.isArray(catalog?.data) ? catalog.data : [];
   } catch {

@@ -99,13 +99,20 @@ export function getTrustRefusal(cause: unknown) {
   return null;
 }
 
+function rethrowTrustRefusal(cause: Error) {
+  const refusal = getTrustRefusal(cause);
+  if (refusal) throw refusal;
+}
+
 export async function listModelInfos(client: OpenCodeClient, directory?: string | null) {
   const key = isDirectory(directory) ? directory : '';
   if (modelCache && modelCacheKey === key && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) {
     return modelCache;
   }
   try {
-    await waitForCatalogLocation(client);
+    if (!(await waitForCatalogLocation(client, undefined, rethrowTrustRefusal))) {
+      return modelCacheKey === key && modelCache ? modelCache : [];
+    }
     const models = unwrap(await client.model.list());
     if (models.length === 0) return models;
     modelCache = models;
@@ -121,7 +128,7 @@ export async function listModelInfos(client: OpenCodeClient, directory?: string 
 
 export async function listProviderInfos(client: OpenCodeClient) {
   try {
-    await waitForCatalogLocation(client);
+    if (!(await waitForCatalogLocation(client, undefined, rethrowTrustRefusal))) return [];
     return unwrap(await client.provider.list());
   } catch (error) {
     const refusal = getTrustRefusal(error);
