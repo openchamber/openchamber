@@ -1871,7 +1871,7 @@ describe('contributes.tracker', () => {
       token: { header: 'authorization', scheme: 'bearer', scopes: ['YouTrack'], createPath: '/users/me?tab=account-security' },
       oauth: { authorizeUrl: '/hub/api/rest/oauth2/auth', tokenUrl: '/hub/api/rest/oauth2/token', scopes: ['YouTrack'] },
     },
-    capabilities: { stateUpdate: true, labels: true, priority: true, filters: { people: true }, projectMapping: true, sessionComments: true },
+    capabilities: { stateUpdate: true, labels: true, priority: true, filters: { people: true, saved: true }, projectMapping: true, sessionComments: true },
     stateFilters: ['open', 'all', 'todo', 'in-progress', 'done', 'inReview'],
     identifier: 'key-number',
     urls: { item: ['/issue/{id}', '/{segments+}/issue/{id}', '/agiles/{segment}/current?issue={id}'] },
@@ -1887,7 +1887,7 @@ describe('contributes.tracker', () => {
     // Capabilities left out are off; filters default together.
     expect(parsed.capabilities).toEqual({
       multipleAccounts: false, stateUpdate: true, children: false, labels: true, priority: true,
-      filters: { people: true, priority: false }, projectMapping: true, sessionComments: true,
+      filters: { people: true, priority: false, saved: true }, projectMapping: true, sessionComments: true,
     });
     expect(toPublicTracker(parsed)).toEqual({
       label: 'YouTrack',
@@ -1952,6 +1952,8 @@ describe('contributes.tracker', () => {
     expect(withTracker({ stateFilters: ['open', 'all', 'In Review'] })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withTracker({ identifier: 'uuid' })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.tracker.identifier') });
     expect(withTracker({ capabilities: { hostAccess: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ capabilities: { filters: { saved: 'yes' } } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ capabilities: { filters: { saved: true } } })).toMatchObject({ ok: true, manifest: { contributes: { tracker: { capabilities: { filters: { people: false, priority: false, saved: true } } } } } });
     expect(withTracker({ label: '' })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withTracker({ extra: 1 })).toMatchObject({ ok: false, code: 'invalid-service' });
   });

@@ -792,8 +792,7 @@ export type {
   TrackerProviderRequest,
   TrackerProviderResult,
   TrackerProviderSession,
-  TrackerProviderStateCategory,
-  TrackerProviderStatesData,
+  TrackerProviderStateCategory, TrackerProviderStatesData,
   TrackerProviderWorkflowState,
   QuotaProviderCredential,
   QuotaProviderDataByMethod,
@@ -807,6 +806,7 @@ export type {
   QuotaProviderWindow,
   QuotaProviderWindowValue,
 } from './service-providers.ts';
+export type { TrackerProviderSavedFilter, TrackerProviderSavedFiltersData } from './tracker-provider-types.ts';
 export {
   SURFACE_AGENT_ACTIVE_HEADER,
   SURFACE_AGENT_HOLD_MS,

@@ -41,7 +41,7 @@ describe('buildExtensionTrackerDescriptor', () => {
       id: 'ext-youtrack',
       name: 'YouTrack',
       authMethods: ['oauth', 'token'],
-      capabilities: { stateUpdate: true, labels: true, projectMapping: true, sessionComments: true, hostAccess: false, multipleAccounts: false, filters: { people: true, priority: false } },
+      capabilities: { stateUpdate: true, labels: true, projectMapping: true, sessionComments: true, hostAccess: false, multipleAccounts: false, filters: { people: true, priority: false, saved: false } },
       stateFilters: contribution.stateFilters,
       identifierPattern: identifierPatternOf('key-number'),
     });
@@ -52,6 +52,11 @@ describe('buildExtensionTrackerDescriptor', () => {
     ]);
     expect(Object.isFrozen(descriptor) && Object.isFrozen(descriptor.urlPatterns)).toBe(true);
     expect(JSON.parse(JSON.stringify(descriptor))).toEqual(descriptor);
+  });
+
+  it('turns the saved-filter capability on only when the contribution declares it', () => {
+    const saved = buildExtensionTrackerDescriptor({ guestId: 'jira', contribution: { ...contribution, capabilities: { ...contribution.capabilities, filters: { people: false, priority: false, saved: true } } }, instance: null });
+    expect(saved.capabilities.filters).toEqual({ people: false, priority: false, saved: true });
   });
 
   it('carries no link pattern while a user-typed server is not connected, and uses a fixed origin as is', () => {
@@ -65,8 +70,7 @@ describe('buildExtensionTrackerDescriptor', () => {
   });
 
   it('refuses a contribution the host cannot serve', () => {
-    expect(() => buildExtensionTrackerDescriptor({ guestId: 'a'.repeat(29), contribution, instance: null })).toThrow(/cannot name a provider/);
-    expect(() => buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution: { ...contribution, wire: 2 }, instance: null })).toThrow(/wire/);
+    expect(() => buildExtensionTrackerDescriptor({ guestId: 'a'.repeat(29), contribution, instance: null })).toThrow(/cannot name a provider/);    expect(() => buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution: { ...contribution, wire: 2 }, instance: null })).toThrow(/wire/);
     expect(() => buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution: { ...contribution, auth: {} }, instance: null })).toThrow(/sign in/);
     expect(() => buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution: { ...contribution, urls: { item: [] } }, instance: null })).toThrow(/link templates/);
     expect(() => buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution: { ...contribution, urls: { item: ['/browse/(.*)'] } }, instance: null })).toThrow(/Tracker contribution of youtrack is invalid: link template/);

@@ -209,6 +209,7 @@ var TRACKER_PROVIDER_METHODS = [
   "items.liveSummaries",
   "states.list",
   "containers.list",
+  "filters.list",
   "comments.create"
 ];
 var TRACKER_PROVIDER_ERROR_MESSAGE_MAX = 2000;
@@ -415,6 +416,7 @@ var handlers = {
     const { projects } = await api(call, "GET", "/api/projects");
     return { containers: projects.map(toContainer) };
   },
+  "filters.list": async () => ({ filters: [] }),
   "comments.create": async (call, input) => {
     const comment = await orNull(api(call, "POST", `/api/items/${seg(input.identifier)}/comments`, { body: { body: input.body } }));
     return { comment: comment ? { id: comment.id } : null };

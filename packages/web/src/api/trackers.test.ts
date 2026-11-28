@@ -130,8 +130,8 @@ describe('web trackers: the neutral routes', () => {
   it('names the tracker in every path and sends the list filters as asked', async () => {
     trackerServer(() => Response.json({ connected: true, items: [neutralItem, { id: 'broken' }], cursor: 'c2', hasMore: true }));
     const api = createWebTrackerAPI({ fetch: fetchMock });
-    const result = await api.list('linear', { query: ' login ', state: 'in-progress', people: 'me', priority: 'high', containerId: 'team-eng' });
-    expect(lastPath()).toBe('/api/tracker/linear/items/list?query=login&state=in-progress&people=me&priority=high&containerId=team-eng');
+    const result = await api.list('linear', { query: ' login ', state: 'in-progress', people: 'me', priority: 'high', containerId: 'team-eng', savedFilter: 'f-1' });
+    expect(lastPath()).toBe('/api/tracker/linear/items/list?query=login&state=in-progress&people=me&priority=high&containerId=team-eng&savedFilter=f-1');
     // One malformed item is dropped, never the list; label colours read as `#rrggbb`.
     expect(result).toEqual({
       connected: true,
@@ -165,9 +165,20 @@ describe('web trackers: the neutral routes', () => {
     const api = createWebTrackerAPI({ fetch: fetchMock });
     await expect(api.states('linear', 'team-eng')).resolves.toEqual({ connected: false });
     expect(lastPath()).toBe('/api/tracker/linear/states?containerId=team-eng');
+    await expect(api.savedFilters('linear')).resolves.toEqual({ connected: false });
+    expect(lastPath()).toBe('/api/tracker/linear/filters');
 
     fetchMock.mockResolvedValueOnce(Response.json({ error: 'This tracker does not support this action', code: 'UNSUPPORTED' }, { status: 404 }));
     await expect(api.mappingGet('linear')).rejects.toThrow('does not support');
+  });
+
+  it('reads the saved filters the provider lists, dropping the malformed ones', async () => {
+    trackerServer(() => Response.json({ connected: true, filters: [{ id: 'f-1', name: 'My queue' }, { id: 'f-2', name: '  ' }, { id: '', name: 'No id' }] }));
+    await expect(createWebTrackerAPI({ fetch: fetchMock }).savedFilters('linear')).resolves.toEqual({
+      connected: true,
+      filters: [{ id: 'f-1', name: 'My queue' }],
+    });
+    expect(lastPath()).toBe('/api/tracker/linear/filters');
   });
 
   it('sends writes with their neutral bodies', async () => {

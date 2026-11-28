@@ -203,6 +203,8 @@ const handlers: Handlers = {
     return { containers: projects.map(toContainer) };
   },
 
+  'filters.list': async () => ({ filters: [] }),
+
   'comments.create': async (call, input) => {
     const comment = await orNull(api<TeaboardComment>(call, 'POST', `/api/items/${seg(input.identifier)}/comments`, { body: { body: input.body } }));
     return { comment: comment ? { id: comment.id } : null };

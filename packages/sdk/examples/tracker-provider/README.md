@@ -53,6 +53,7 @@ adds the token and keeps the request on the account's server.
 | `items.liveSummaries` | `GET /api/summaries?identifiers=A,B` | title and state per identifier the server knows |
 | `states.list` | `GET /api/projects/{containerId}/states` | the project's workflow states in order |
 | `containers.list` | `GET /api/projects` | the projects |
+| `filters.list` | nothing: this example declares no saved filters | an empty list |
 | `comments.create` | `POST /api/items/{identifier}/comments` with `{ "body" }` | the comment's id; `comment: null` on 404 |
 
 The service translates between Teaboard's words and OpenChamber's: state kinds

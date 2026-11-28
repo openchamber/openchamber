@@ -14,6 +14,7 @@ import type {
     TrackerAPI,
     TrackerItem,
     TrackerItemSummary,
+    TrackerSavedFilter,
     SourceControlIdentity,
     SourceControlProvider,
     SourceControlReadContext,
@@ -60,6 +61,7 @@ const repositoryLists = createListCache<RepositoryReference>((reference) => refe
 const repositoryAcrossLists = createListCache<AcrossReference>((reference) => `${reference.directory}\n${reference.url}`);
 const trackerLists = createListCache<TrackerItemSummary>((item) => item.id);
 const trackerDetails = createValueCache<TrackerItem>();
+const trackerSavedFilterLists = createValueCache<TrackerSavedFilter[]>();
 const repositoryDetails = createValueCache<RepositoryReferenceDetail>();
 
 export type ReferenceSourceStatus = 'ready' | 'disconnected' | 'unsupported';
@@ -337,6 +339,30 @@ export function useRepositoryAcrossProvider(directories: readonly string[] | nul
     return useRepositoryReadContexts(directories ?? NO_DIRECTORIES).provider;
 }
 
+const NO_SAVED_FILTERS: TrackerSavedFilter[] = [];
+const UNREAD_SAVED_FILTERS: TrackerSavedFilterRead = { filters: NO_SAVED_FILTERS, settled: false };
+
+export type TrackerSavedFilterRead = {
+    filters: readonly TrackerSavedFilter[];
+    settled: boolean;
+};
+
+export function useTrackerSavedFilters(options: { enabled: boolean; provider: string | null }): TrackerSavedFilterRead {
+    const { trackers } = useRuntimeAPIs();
+    const { enabled, provider } = options;
+    const account = useTrackerAccount(provider);
+    const key = enabled && trackers && provider ? JSON.stringify([getRuntimeKey(), provider, account]) : null;
+    const fetch = React.useCallback(async (): Promise<TrackerSavedFilter[]> => {
+        if (!trackers || !provider) return [];
+        const result = await trackers.savedFilters(provider);
+        return result.connected === false ? [] : result.filters;
+    }, [provider, trackers]);
+    const cached = useCachedValue(trackerSavedFilterLists, key, fetch);
+    const settled = cached.status === 'ready';
+    const filters = settled ? cached.value : NO_SAVED_FILTERS;
+    return React.useMemo(() => (settled ? { filters, settled } : UNREAD_SAVED_FILTERS), [filters, settled]);
+}
+
 export function useTrackerReferenceList(options: {
     enabled: boolean;
     provider: string | null;
@@ -349,9 +375,9 @@ export function useTrackerReferenceList(options: {
     const account = useTrackerAccount(provider);
     const containerId = options.containerId ?? null;
     const text = query.trim();
-    const { state, people, priority } = filter;
+    const { state, people, priority, saved } = filter;
     const key = enabled && trackers && provider
-        ? JSON.stringify([getRuntimeKey(), provider, account, state, people, priority, text, containerId])
+        ? JSON.stringify([getRuntimeKey(), provider, account, state, people, priority, saved, text, containerId])
         : null;
     const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<TrackerItemSummary>> => {
         if (!trackers || !provider) return { kind: 'unavailable', reason: 'disconnected' };
@@ -362,10 +388,11 @@ export function useTrackerReferenceList(options: {
             people: people === 'any' ? undefined : people,
             priority: priority === 'all' ? undefined : priority,
             containerId,
+            savedFilter: saved || undefined,
         });
         if (result.connected === false) return { kind: 'unavailable', reason: 'disconnected' };
         return { kind: 'page', items: result.items, cursor: result.cursor, hasMore: result.hasMore };
-    }, [containerId, people, priority, provider, state, text, trackers]);
+    }, [containerId, people, priority, provider, saved, state, text, trackers]);
     const list = useCachedList(trackerLists, key, fetchPage);
     const live = useLiveTrackerItems(list.items, list.pageReads);
     return { ...list, items: live.items, followed: live.followed };

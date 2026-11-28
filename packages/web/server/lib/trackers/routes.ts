@@ -16,6 +16,7 @@ type TokenTracker = RegisteredTrackerImplementation & { auth: { connectToken: No
 type OAuthTracker = RegisteredTrackerImplementation & { auth: { setOAuthClient: NonNullable<RegisteredTrackerImplementation['auth']['setOAuthClient']> } };
 type MappingTracker = RegisteredTrackerImplementation & { mapping: NonNullable<RegisteredTrackerImplementation['mapping']> };
 type PreferencesTracker = RegisteredTrackerImplementation & { preferences: NonNullable<RegisteredTrackerImplementation['preferences']> };
+type FiltersTracker = RegisteredTrackerImplementation & { filters: NonNullable<RegisteredTrackerImplementation['filters']> };
 type SessionStatusTracker = RegisteredTrackerImplementation & { sessionStatus: NonNullable<RegisteredTrackerImplementation['sessionStatus']> };
 
 const JSON_LIMIT = '16kb';
@@ -27,7 +28,7 @@ const isPriorityFilter = (value: string): value is TrackerPriorityFilter => PRIO
 const isSessionStatusKind = (value: string): value is TrackerSessionStatusKind => SESSION_STATUS_KINDS.has(value);
 
 const invalid = (message: string) => new TrackerRouteError(400, 'INVALID', message);
-const BOUNDS = Object.freeze({ token: 4_096, username: 256, instance: 2_048, clientId: 512, clientSecret: 4_096, projectPath: 4_096, containerId: 256 });
+const BOUNDS = Object.freeze({ token: 4_096, username: 256, instance: 2_048, clientId: 512, clientSecret: 4_096, projectPath: 4_096, containerId: 256, savedFilter: 1_024 });
 const hasStringLength = (value: unknown): value is { length?: unknown } => isString(value);
 const bounded = <T>(value: T, max: number, name: string) => {
   if (hasStringLength(value) && Number(value.length) > max) throw invalid(`${name} is too long`);
@@ -55,6 +56,9 @@ function readListOptions(req: Request, descriptor: TrackerDescriptor) {
   const priority = queryValue(req, 'priority') || 'all';
   if (!isPriorityFilter(priority)) throw invalid(`Unknown priority filter: ${priority}`);
   if (priority !== 'all' && !descriptor.capabilities.filters.priority) throw invalid('This tracker has no priority filter');
+  const savedFilter = queryValue(req, 'savedFilter') || null;
+  if (savedFilter !== null && savedFilter.length > BOUNDS.savedFilter) throw invalid('saved filter id is too long');
+  if (savedFilter !== null && !descriptor.capabilities.filters.saved) throw invalid('This tracker has no saved filters');
   return {
     query: queryValue(req, 'query') || undefined,
     cursor: queryValue(req, 'cursor') || undefined,
@@ -62,6 +66,7 @@ function readListOptions(req: Request, descriptor: TrackerDescriptor) {
     people,
     priority,
     containerId: queryValue(req, 'containerId') || null,
+    savedFilter,
   };
 }
 
@@ -190,6 +195,9 @@ export function registerTrackerRoutes(app: Application, { registry }: { registry
     if (!containerId) throw invalid('containerId is required');
     return tracker.states(containerId);
   }, (descriptor) => descriptor.capabilities.stateUpdate));
+
+  const hasFilters = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is FiltersTracker => descriptor.capabilities.filters.saved && Boolean(tracker.filters);
+  app.get('/api/tracker/:provider/filters', handle('load saved filters', ({ tracker }) => tracker.filters(), hasFilters));
 
   const hasMapping = (descriptor: TrackerDescriptor, tracker: RegisteredTrackerImplementation): tracker is MappingTracker => descriptor.capabilities.projectMapping && Boolean(tracker.mapping);
   app.get('/api/tracker/:provider/mapping', handle('load project mapping', ({ tracker }) => tracker.mapping.get(), hasMapping));

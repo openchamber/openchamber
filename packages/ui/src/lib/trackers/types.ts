@@ -42,6 +42,8 @@ export type TrackerLiveSummary = { identifier: string; title: string; state: { n
 
 export type TrackerWorkflowState = { id: string; name: string; category: TrackerStateCategory | null; position: number };
 
+export type TrackerSavedFilter = { id: string; name: string };
+
 export type TrackerPeopleFilter = 'any' | 'me' | 'created';
 export type TrackerPriorityFilter = 'all' | TrackerPriority;
 
@@ -52,6 +54,7 @@ export type TrackerListOptions = {
   people?: TrackerPeopleFilter;
   priority?: TrackerPriorityFilter;
   containerId?: string | null;
+  savedFilter?: string | null;
 };
 
 export type TrackerAccount = {
@@ -104,6 +107,7 @@ type Connected<T> = { connected: false } | ({ connected: true } & T);
 export type TrackerListResult = Connected<{ items: TrackerItemSummary[]; cursor: string | null; hasMore: boolean }>;
 export type TrackerItemResult = Connected<{ item: TrackerItem | null }>;
 export type TrackerStatesResult = Connected<{ states: TrackerWorkflowState[] }>;
+export type TrackerSavedFiltersResult = Connected<{ filters: TrackerSavedFilter[] }>;
 export type TrackerStateUpdateInput = { id: string; stateId: string };
 
 export type TrackerAuthMethod = 'oauth' | 'token';
@@ -118,7 +122,7 @@ export type TrackerDescriptor = {
     children: boolean;
     labels: boolean;
     priority: boolean;
-    filters: { people: boolean; priority: boolean };
+    filters: { people: boolean; priority: boolean; saved: boolean };
     projectMapping: boolean;
     sessionComments: boolean;
     hostAccess: boolean;
@@ -167,6 +171,7 @@ export interface TrackerAPI {
   refreshItemReads(provider: TrackerProviderId, identifier: string): Promise<void>;
   get(provider: TrackerProviderId, id: string): Promise<TrackerItemResult>;
   states(provider: TrackerProviderId, containerId: string): Promise<TrackerStatesResult>;
+  savedFilters(provider: TrackerProviderId): Promise<TrackerSavedFiltersResult>;
   updateState(provider: TrackerProviderId, input: TrackerStateUpdateInput): Promise<TrackerItemResult>;
   mappingGet(provider: TrackerProviderId): Promise<TrackerMappingResult>;
   mappingSet(provider: TrackerProviderId, mapping: TrackerMappingWrite): Promise<TrackerMappingResult>;

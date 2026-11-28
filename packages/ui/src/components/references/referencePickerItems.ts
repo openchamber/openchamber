@@ -11,10 +11,12 @@ import type {
     RepositoryReferencePeople,
     RepositoryReferenceState,
     RepositoryReferenceKind,
+    TrackerDescriptor,
     TrackerItemSummary,
     TrackerPeopleFilter,
     TrackerPriority,
     TrackerPriorityFilter,
+    TrackerSavedFilter,
 } from '@/lib/api/types';
 import type { I18nKey } from '@/lib/i18n';
 import { prVisualStateOf } from '@/lib/source-control/prVisualState';
@@ -47,9 +49,33 @@ export type TrackerReferenceFilter = {
     state: string;
     people: TrackerPeopleFilter;
     priority: TrackerPriorityFilter;
+    saved: string;
 };
 
-export const DEFAULT_TRACKER_FILTER: TrackerReferenceFilter = { state: 'open', people: 'any', priority: 'all' };
+export const DEFAULT_TRACKER_FILTER: TrackerReferenceFilter = { state: 'open', people: 'any', priority: 'all', saved: '' };
+
+export const normalizedTrackerFilter = (
+    filter: TrackerReferenceFilter,
+    descriptor: TrackerDescriptor,
+    savedFilters: readonly TrackerSavedFilter[],
+    savedFiltersSettled = true,
+): TrackerReferenceFilter => ({
+    state: descriptor.stateFilters.includes(filter.state) ? filter.state : DEFAULT_TRACKER_FILTER.state,
+    people: descriptor.capabilities.filters.people ? filter.people : DEFAULT_TRACKER_FILTER.people,
+    priority: descriptor.capabilities.filters.priority ? filter.priority : DEFAULT_TRACKER_FILTER.priority,
+    saved: descriptor.capabilities.filters.saved
+        && (!savedFiltersSettled || savedFilters.some((entry) => entry.id === filter.saved))
+        ? filter.saved
+        : DEFAULT_TRACKER_FILTER.saved,
+});
+
+export const trackerSavedFilterOptions = (
+    filters: readonly TrackerSavedFilter[],
+    allLabel: string,
+): { value: string; label: string }[] => [
+    { value: '', label: allLabel },
+    ...filters.map((filter) => ({ value: filter.id, label: filter.name })),
+];
 
 export const referenceNumberLabel = (reference: RepositoryReference, descriptor: SourceControlProviderDescriptor): string => (
     reference.kind === 'pull'

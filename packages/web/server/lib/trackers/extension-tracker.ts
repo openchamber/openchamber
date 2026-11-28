@@ -524,7 +524,7 @@ export function createExtensionTracker({
       completeAuthorization,
     }),
 
-    list: async ({ query, cursor, state, people, priority, containerId }: TrackerListOptions = {}) => {
+    list: async ({ query, cursor, state, people, priority, containerId, savedFilter }: TrackerListOptions = {}) => {
       const direct = directIdentifierOf(query);
       if (direct) {
         const data = await forwardAs('items.get', { id: direct.identifier });
@@ -532,7 +532,7 @@ export function createExtensionTracker({
         if (data.item) return connected({ items: [withProvider(summaryOf(data.item))], cursor: null, hasMore: false });
         if (direct.linked) return connected({ items: [], cursor: null, hasMore: false });
       }
-      const data = await forwardAs('items.list', json({ query, cursor, state: state ?? 'open', people: people ?? 'any', priority: priority ?? 'all', containerId: containerId ?? null }));
+      const data = await forwardAs('items.list', json({ query, cursor, state: state ?? 'open', people: people ?? 'any', priority: priority ?? 'all', containerId: containerId ?? null, savedFilter: savedFilter ?? null }));
       return connected(data && { items: data.items.map((item) => withProvider(item)), cursor: data.cursor, hasMore: data.hasMore });
     },
     get: async (itemId: string) => {
@@ -540,6 +540,7 @@ export function createExtensionTracker({
       return connected(data && { item: withProvider(data.item) });
     },
     states: async (containerId: string) => connected(await forwardAs('states.list', { containerId })),
+    filters: async () => connected(await forwardAs('filters.list', {})),
     updateState: async ({ id: itemId, stateId }: { id: string; stateId: string }) => {
       const data = await forwardAs('items.updateState', { id: itemId, stateId });
       return connected(data && { item: withProvider(data.item) });

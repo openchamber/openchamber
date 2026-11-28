@@ -1,3 +1,5 @@
+import type { TrackerProviderRequest } from './tracker-provider-types.ts';
+
 export type { SourceControlReviewState, SourceControlReviewSummary } from './source-control-reviews.ts';
 
 export const BROWSER_PROVIDER_PATH = '/browser-control';
@@ -673,6 +675,7 @@ export const TRACKER_PROVIDER_METHODS = [
   'items.liveSummaries',
   'states.list',
   'containers.list',
+  'filters.list',
   'comments.create',
 ] as const;
 export type TrackerProviderMethod = (typeof TRACKER_PROVIDER_METHODS)[number];
@@ -687,6 +690,7 @@ export const TRACKER_PROVIDER_IDLE_MS = 10 * 60_000;
 export const TRACKER_PROVIDER_LIST_MAX = 100;
 export const TRACKER_PROVIDER_LIVE_SUMMARIES_MAX = 50;
 export const TRACKER_PROVIDER_CONTAINERS_MAX = 500;
+export const TRACKER_PROVIDER_SAVED_FILTERS_MAX = 100;
 export const TRACKER_OUTBOUND_PATH = '/tracker/outbound';
 export const TRACKER_OUTBOUND_TIMEOUT_MS = 20_000;
 
@@ -701,102 +705,8 @@ export const trackerProviderTimeoutMs = (method: TrackerProviderMethod): number 
 };
 
 
-export type TrackerProviderStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
-export type TrackerProviderPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
-export type TrackerProviderPerson = { name: string | null; avatarUrl: string | null };
-export type TrackerProviderItemState = { id: string | null; name: string; category: TrackerProviderStateCategory | null };
-export type TrackerProviderContainer = { id: string; key: string | null; name: string };
-export type TrackerProviderLabel = { id: string; name: string; color: string | null };
-export type TrackerProviderProgress = { total: number; done: number; more: boolean };
+export type * from './tracker-provider-types.ts';
 
-export type TrackerProviderItemSummary = {
-  id: string;
-  identifier: string;
-  title: string;
-  url: string;
-  state: TrackerProviderItemState | null;
-  priority?: TrackerProviderPriority | null;
-  labels?: TrackerProviderLabel[];
-  assignee?: TrackerProviderPerson | null;
-  container?: TrackerProviderContainer | null;
-  parent?: TrackerProviderItemSummary | null;
-  progress?: TrackerProviderProgress | null;
-  updatedAt?: string | null;
-};
-
-export type TrackerProviderComment = { id: string; body: string; createdAt: string | null; author: TrackerProviderPerson | null };
-
-export type TrackerProviderItem = TrackerProviderItemSummary & {
-  description?: string | null;
-  comments?: TrackerProviderComment[];
-  children?: TrackerProviderItemSummary[];
-  childrenMore?: boolean;
-};
-
-export type TrackerProviderWorkflowState = { id: string; name: string; category: TrackerProviderStateCategory | null; position: number };
-export type TrackerProviderLiveSummary = { identifier: string; title: string; state: { name: string; category: TrackerProviderStateCategory } };
-
-export type TrackerProviderAccount = { id: string; login: string | null };
-
-export type TrackerProviderSession = {
-  instance: string;
-  handle: string;
-  account: TrackerProviderAccount | null;
-};
-
-export type TrackerProviderInputs = {
-  'auth.probe': Record<string, never>;
-  'auth.verify': Record<string, never>;
-  'items.list': {
-    query?: string;
-    cursor?: string;
-    state: string;
-    people: 'any' | 'me' | 'created';
-    priority: 'all' | TrackerProviderPriority;
-    containerId: string | null;
-  };
-  'items.get': { id: string };
-  'items.updateState': { id: string; stateId: string };
-  'items.liveSummaries': { identifiers: string[] };
-  'states.list': { containerId: string };
-  'containers.list': Record<string, never>;
-  'comments.create': { identifier: string; body: string };
-};
-
-export type TrackerProviderRequest = {
-  v: typeof TRACKER_PROVIDER_WIRE_VERSION;
-  requestId: string;
-  method: TrackerProviderMethod;
-  provider: string;
-  session: TrackerProviderSession;
-  input: SourceControlJsonObject;
-};
-
-export type TrackerProviderAccountData = { account: { id: string; login: string | null; name?: string; avatarUrl?: string } };
-export type TrackerProviderProbeData = { supported: boolean; message?: string };
-export type TrackerProviderListData = { items: TrackerProviderItemSummary[]; cursor: string | null; hasMore: boolean };
-export type TrackerProviderItemData = { item: TrackerProviderItem | null };
-export type TrackerProviderStatesData = { states: TrackerProviderWorkflowState[] };
-export type TrackerProviderLiveSummariesData = { items: TrackerProviderLiveSummary[] };
-export type TrackerProviderContainersData = { containers: TrackerProviderContainer[] };
-export type TrackerProviderCommentData = { comment: { id: string } | null };
-
-export type TrackerProviderDataByMethod = {
-  'auth.probe': TrackerProviderProbeData;
-  'auth.verify': TrackerProviderAccountData;
-  'items.list': TrackerProviderListData;
-  'items.get': TrackerProviderItemData;
-  'items.updateState': TrackerProviderItemData;
-  'items.liveSummaries': TrackerProviderLiveSummariesData;
-  'states.list': TrackerProviderStatesData;
-  'containers.list': TrackerProviderContainersData;
-  'comments.create': TrackerProviderCommentData;
-};
-
-export type TrackerProviderError = SourceControlProviderError;
-export type TrackerProviderResult =
-  | { ok: true; data: SourceControlJson }
-  | { ok: false; error: TrackerProviderError };
 
 export const isTrackerProviderMethod = (value: string): value is TrackerProviderMethod => (
   TRACKER_PROVIDER_METHODS.some((method) => method === value)

@@ -434,9 +434,9 @@ describe('tracker provider contract', () => {
     expect(readTrackerProviderRequest(call({ input: [] }))).toBeNull();
   });
 
-  test('the nine methods, the two writes and their deadlines', () => {
+  test('the ten methods, the two writes and their deadlines', () => {
     expect(TRACKER_PROVIDER_METHODS).toEqual([
-      'auth.probe', 'auth.verify', 'items.list', 'items.get', 'items.updateState', 'items.liveSummaries', 'states.list', 'containers.list', 'comments.create',
+      'auth.probe', 'auth.verify', 'items.list', 'items.get', 'items.updateState', 'items.liveSummaries', 'states.list', 'containers.list', 'filters.list', 'comments.create',
     ]);
     expect(TRACKER_PROVIDER_WRITE_METHODS).toEqual(['items.updateState', 'comments.create']);
     expect(isTrackerProviderMethod('items.list')).toBe(true);
@@ -503,6 +503,11 @@ describe('tracker provider contract', () => {
     expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: 'done' } }] }).success).toBe(true);
     expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: null } }] }).success).toBe(false);
     expect(schemas.data['containers.list'].safeParse({ containers: [{ id: 'p-1', key: 'PROJ', name: 'Project' }] }).success).toBe(true);
+    expect(schemas.data['filters.list'].safeParse({ filters: [{ id: 'f-1', name: 'My queue' }] }).success).toBe(true);
+    expect(schemas.data['filters.list'].safeParse({ filters: [] }).success).toBe(true);
+    expect(schemas.data['filters.list'].safeParse({ filters: [{ id: 'f-1' }] }).success).toBe(false);
+    expect(schemas.data['filters.list'].safeParse({ filters: [{ id: 'f-1', name: 'My queue', jql: 'project = X' }] }).success).toBe(false);
+    expect(schemas.data['filters.list'].safeParse({ filters: Array.from({ length: 101 }, (_, index) => ({ id: `f-${index}`, name: `Filter ${index}` })) }).success).toBe(false);
     expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9' } }).success).toBe(true);
     expect(schemas.data['comments.create'].safeParse({ comment: null }).success).toBe(true);
     expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9', body: 'echo' } }).success).toBe(false);
