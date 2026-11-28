@@ -1451,6 +1451,59 @@ describe('getStatus', () => {
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'feature', tracking: null, ahead: 0, aheadBase: 'main' });
   });
 
+  it('finds a merge in progress from a subdirectory and in a linked worktree, also with a git older than 2.31', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.mkdirSync(path.join(repo, 'sub'));
+    fs.writeFileSync(path.join(repo, 'sub', 'file.txt'), 'base\n');
+    runGit(repo, ['add', '.']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['branch', 'feature']);
+    const linked = path.join(createTempDir(), 'linked');
+    runGit(repo, ['worktree', 'add', '-q', '-b', 'linked', linked, 'main']);
+    const conflict = (directory, branch) => {
+      fs.writeFileSync(path.join(directory, 'sub', 'file.txt'), `${branch}\n`);
+      runGit(directory, ['commit', '-qam', `Change on ${branch}`]);
+    };
+    runGit(repo, ['checkout', '-q', 'feature']);
+    conflict(repo, 'feature');
+    runGit(repo, ['checkout', '-q', 'main']);
+    conflict(repo, 'main');
+    conflict(linked, 'linked');
+    for (const directory of [repo, linked]) {
+      expect(() => runGit(directory, ['merge', 'feature'])).toThrow();
+    }
+    const featureHead = runGit(repo, ['rev-parse', 'feature']).trim().slice(0, 7);
+    const expected = [
+      [repo, "Merge branch 'feature'"],
+      [path.join(repo, 'sub'), "Merge branch 'feature'"],
+      [linked, "Merge branch 'feature' into linked"],
+      [path.join(linked, 'sub'), "Merge branch 'feature' into linked"],
+    ];
+    const readEach = async () => {
+      for (const [directory, message] of expected) {
+        await expect(getStatus(directory)).resolves.toMatchObject({ unborn: false, mergeInProgress: { head: featureHead, message } });
+      }
+    };
+    await readEach();
+
+    if (process.platform === 'win32') return;
+    // A git without `--path-format` prints relative paths: the status falls back to separate reads.
+    const oldGitDir = createTempDir();
+    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    fs.writeFileSync(path.join(oldGitDir, 'git'), `#!/bin/sh\nfor a; do shift; [ "$a" = --path-format=absolute ] || set -- "$@" "$a"; done\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${oldGitDir}${path.delimiter}${process.env.PATH}`);
+    try {
+      await readEach();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('rejects a non-git folder without using process.cwd()', async () => {
     if (!canRunGit()) return;
 
@@ -1724,13 +1777,31 @@ exec "${realGit}" "$@"
     // `remote get-url` runs because this repository is new to the remote
     // existence cache; later reads within its window skip it.
     const commands = fs.readFileSync(invocations, 'utf8').trim().split('\n').sort();
+    // The probe also answers where the merge and rebase state lives and whether HEAD resolves.
+    const probe = 'rev-parse --git-dir --show-toplevel --path-format=absolute --git-path MERGE_HEAD --git-path MERGE_MSG --git-path rebase-merge --git-path rebase-apply --verify --quiet HEAD';
     expect(commands).toEqual([
       'diff --cached --numstat -z',
       'diff-files -M --numstat -z',
       'remote get-url -- upstream',
-      'rev-parse --git-dir --show-toplevel',
-      'rev-parse --git-path MERGE_HEAD --git-path MERGE_MSG --git-path rebase-merge --git-path rebase-apply',
-      'rev-parse --verify --quiet HEAD',
+      probe,
+      'status --porcelain -b -u --null -unormal',
+    ]);
+
+    // A branch with no commit yet has nothing to count, so no base is looked for.
+    const unborn = createTempDir();
+    runGit(unborn, ['init', '-b', 'main']);
+    fs.rmSync(invocations);
+    vi.stubEnv('PATH', `${wrapperDirectory}${path.delimiter}${process.env.PATH || ''}`);
+    try {
+      await expect(getStatus(unborn)).resolves.toMatchObject({ current: 'main', unborn: true, aheadBase: null });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(fs.readFileSync(invocations, 'utf8').trim().split('\n').sort()).toEqual([
+      'diff --cached --numstat -z',
+      'diff-files -M --numstat -z',
+      'remote get-url -- upstream',
+      probe,
       'status --porcelain -b -u --null -unormal',
     ]);
   });

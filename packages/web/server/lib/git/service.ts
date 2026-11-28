@@ -14,6 +14,7 @@ import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/config-files.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
+import { readStatusLayoutSeparately, runRepositoryProbe } from './status-layout.js';
 import { DIRECTORY_UNREACHABLE, directoryReachability, directoryUnreachableError } from '../directory-reachability/index.js';
 import { GIT_LAUNCH_DIRECTORY, gitArgsIn, launchesFrom } from './git-launch.js';
 import { assertLinkedRepositoryReachable, assertPathReachable, assertRepositoryReachable, directoryExists, execFileAsync, realpathOf } from './reachable-disk.js';
@@ -2253,8 +2254,11 @@ const probeFailureMessage = (result: GitCommandResult) => {
   return result.stderr.trim() || result.message || 'Git could not read this directory.';
 };
 
-const probeRepository = async (directoryPath: string, { strict = false, failOnGitError = strict }: { strict?: boolean; failOnGitError?: boolean } = {}) => {
-  const notRepository = { isRepository: false, repoRoot: null };
+const probeRepository = async (
+  directoryPath: string,
+  { strict = false, failOnGitError = strict, withStatusLayout = false }: { strict?: boolean; failOnGitError?: boolean; withStatusLayout?: boolean } = {},
+) => {
+  const notRepository = { isRepository: false, repoRoot: null, statusLayout: null };
   if (!directoryPath || !await directoryExists(directoryPath)) {
     if (directoryPath) await assertPathReachable(path.resolve(directoryPath));
     if (strict) throw new Error('Project directory does not exist or is inaccessible');
@@ -2264,7 +2268,7 @@ const probeRepository = async (directoryPath: string, { strict = false, failOnGi
   await assertLinkedRepositoryReachable(directoryPath);
   const options: GitCommandOptions = { timeoutMs: GIT_PROBE_TIMEOUT_MS };
   if (failOnGitError) options.env = { ...await buildGitEnv(directoryPath), LC_ALL: 'C' };
-  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir', '--show-toplevel'], options);
+  const { result, statusLayout } = await runRepositoryProbe((args) => runGitCommand(directoryPath, args, options), withStatusLayout);
   const [gitDir = '', topLevel = ''] = result.stdout.split(/\r?\n/).map((line) => line.trim());
   if (!gitDir) await assertRepositoryReachable(directoryPath);
   if (failOnGitError && !result.success) {
@@ -2277,11 +2281,12 @@ const probeRepository = async (directoryPath: string, { strict = false, failOnGi
   }
   if (!gitDir && result.timedOut) throw Object.assign(new Error(probeFailureMessage(result)), { code: 'GIT_REPOSITORY_UNREADABLE' });
   if (!gitDir) return notRepository;
-  if (!result.success) return { isRepository: true, repoRoot: null };
+  if (!result.success) return { isRepository: true, repoRoot: null, statusLayout: null };
 
   const reason = unsupportedRepositoryRootReason(topLevel);
   if (!reason) {
-    return { isRepository: true, repoRoot: topLevel ? toRepositoryRoot(directoryPath, topLevel) : null };
+    const repoRoot = topLevel ? toRepositoryRoot(directoryPath, topLevel) : null;
+    return { isRepository: true, repoRoot, statusLayout: repoRoot ? statusLayout : null };
   }
   if (!warnedUnsupportedRoots.has(topLevel)) {
     warnedUnsupportedRoots.add(topLevel);
@@ -2655,7 +2660,7 @@ export async function isPatchEquivalentOfHead(directory: string, sha: string) {
 
 async function readStatus(normalizedDirectory: string, lightMode: boolean) {
   try {
-    const repository = await probeRepository(normalizedDirectory);
+    const repository = await probeRepository(normalizedDirectory, { withStatusLayout: true });
     if (!repository.isRepository) {
       throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
@@ -2665,9 +2670,9 @@ async function readStatus(normalizedDirectory: string, lightMode: boolean) {
       ? { directoryPath: normalizedDirectory, repoRoot: repository.repoRoot, git: await createGit(repository.repoRoot, gitOptions) }
       : await createRepositoryGitContext(normalizedDirectory, gitOptions);
 
-    const [status, headProbe] = await Promise.all([
+    const [status, { gitPaths, unborn }] = await Promise.all([
       git.status(['-unormal']),
-      runGitCommand(repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD'], { timeoutMs: GIT_PROBE_TIMEOUT_MS }),
+      repository.statusLayout ?? readStatusLayoutSeparately(repoRoot, git, () => runGitCommand(repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD'], { timeoutMs: GIT_PROBE_TIMEOUT_MS })),
     ]);
     status.files = await expandUntrackedDirectories(repoRoot, status.files);
 
@@ -2824,7 +2829,7 @@ async function readStatus(normalizedDirectory: string, lightMode: boolean) {
     let aheadBase = null;
     let upstreamComparison;
 
-    if (!lightMode && !tracking && status.current) {
+    if (!lightMode && !tracking && status.current && !unborn) {
       const baseRef = await selectBaseRefForUnpublished();
       if (baseRef) {
         const countRaw = await git
@@ -2851,12 +2856,7 @@ async function readStatus(normalizedDirectory: string, lightMode: boolean) {
 
     let mergeInProgress = null;
     let rebaseInProgress = null;
-    const [mergeHeadPath = '', mergeMsgPath = '', rebaseMergePath = '', rebaseApplyPath = ''] = await git
-      .raw(['rev-parse', '--git-path', 'MERGE_HEAD', '--git-path', 'MERGE_MSG', '--git-path', 'rebase-merge', '--git-path', 'rebase-apply'])
-      .then((value) => String(value || '').split(/\r?\n/).slice(0, 4).map((line) => (
-        line.trim() ? path.resolve(repoRoot, normalizeGitOutputPath(line.trim())) : ''
-      )))
-      .catch(() => []);
+    const [mergeHeadPath = '', mergeMsgPath = '', rebaseMergePath = '', rebaseApplyPath = ''] = gitPaths;
     const pathExists = (target: string) => (target ? fsp.stat(target).then(() => true).catch(() => false) : false);
 
     try {
@@ -2901,7 +2901,7 @@ async function readStatus(normalizedDirectory: string, lightMode: boolean) {
     return {
       current: status.current,
       tracking,
-      unborn: headProbe.exitCode === 1,
+      unborn,
       ahead,
       behind,
       aheadBase,
