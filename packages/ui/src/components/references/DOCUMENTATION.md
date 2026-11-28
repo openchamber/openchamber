@@ -703,4 +703,6 @@ read has settled: while it is loading or has failed, `normalizedTrackerFilter`
 keeps the remembered id instead of reading the empty list as "no such filter".
 The first `items.list` already carries the id, so a remembered choice never
 starts with an unfiltered read after an account or runtime switch, and only a
-settled list drops an id the provider no longer offers.
+settled list drops an id the provider no longer offers. Until the name is read,
+the trigger and the menu group fall back to the group label, so an applied
+scope is never drawn as no filter at all.

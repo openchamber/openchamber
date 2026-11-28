@@ -83,7 +83,10 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
     const peopleText = peopleFromSearch ? peopleQualifier : source === 'repository'
         ? (repository.people === 'any' ? null : t(REPOSITORY_PEOPLE_LABEL_KEYS[repository.people]))
         : (people === 'any' ? null : t(TRACKER_PEOPLE_LABEL_KEYS[people]));
-    const savedName = saved ? browser.savedFilters.find((filter) => filter.id === saved)?.name ?? null : null;
+    const savedName = saved
+        ? browser.savedFilters.find((filter) => filter.id === saved)?.name
+            ?? (browser.savedFiltersSettled ? null : t('references.picker.filter.group.saved'))
+        : null;
     const summary = [savedName, statusText, peopleText, source === 'repository' ? labelSummary : priority === 'all' ? null : t(TRACKER_PRIORITY_LABEL_KEYS[priority])]
         .filter(Boolean)
         .join(' · ');
@@ -113,7 +116,7 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
             group(t('references.picker.filter.group.people'), repository.people, REPOSITORY_PEOPLE[browser.repositoryKind], (option) => t(REPOSITORY_PEOPLE_LABEL_KEYS[option]), (option) => browser.selectRepositoryFilter({ people: option }), peopleQualifier),
         ]
         : [
-            ...(filters.saved && browser.savedFilters.length > 0 ? [{
+            ...(filters.saved && (browser.savedFilters.length > 0 || (saved !== '' && !browser.savedFiltersSettled)) ? [{
                 label: t('references.picker.filter.group.saved'),
                 value: saved,
                 options: trackerSavedFilterOptions(browser.savedFilters, t('references.picker.filter.state.all')),

@@ -51,8 +51,9 @@ const show = async (
   savedFilters: SavedFilterFetch = readySavedFilters,
   account = 'u-1',
 ) => {
-  const [{ useReferenceBrowser }, { I18nProvider }, { RuntimeAPIContext }, { createWebAPIs }, { useTrackerRegistry }, { useTrackerAuthStore }, { linearLikeTrackerDescriptor }] = await Promise.all([
+  const [{ useReferenceBrowser }, { ReferenceBrowserSearch }, { I18nProvider }, { RuntimeAPIContext }, { createWebAPIs }, { useTrackerRegistry }, { useTrackerAuthStore }, { linearLikeTrackerDescriptor }] = await Promise.all([
     import('./useReferenceBrowser'),
+    import('./ReferenceBrowser'),
     import('@/lib/i18n'),
     import('@/contexts/runtimeAPIContext'),
     import('../../../../web/src/api/index'),
@@ -92,8 +93,9 @@ const show = async (
   };
 
   const Harness: React.FC = () => {
-    renders.push(useReferenceBrowser({ source: `tracker:${PROVIDER}`, directory: null, isMobile: false }));
-    return null;
+    const referenceBrowser = useReferenceBrowser({ source: `tracker:${PROVIDER}`, directory: null, isMobile: false });
+    renders.push(referenceBrowser);
+    return <ReferenceBrowserSearch browser={referenceBrowser} onKeyDown={() => undefined} />;
   };
 
   renders.length = 0;
@@ -119,6 +121,7 @@ describe('tracker saved filters', () => {
     await flush();
     expect(current()?.trackerFilter.saved).toBe('f-1');
     expect(reads.at(-1)?.savedFilter).toBe('f-1');
+    expect(document.body.textContent).toContain('My queue');
 
     await act(async () => root.unmount());
     root = createRoot(host);
@@ -148,11 +151,13 @@ describe('tracker saved filters', () => {
     expect(current()?.savedFilters).toEqual([]);
     expect(current()?.trackerFilter.saved).toBe('f-1');
     expect(reads.at(-1)?.savedFilter).toBe('f-1');
+    expect(document.body.textContent).toContain('Saved filters');
 
     await act(async () => { answer({ connected: true, filters: SAVED }); });
     await flush();
     expect(current()?.trackerFilter.saved).toBe('f-1');
     expect(reads.filter((options) => options.savedFilter === undefined)).toEqual([]);
+    expect(document.body.textContent).toContain('My queue');
   });
 
   test('after an account switch, a failed saved-filters read keeps the remembered scope instead of clearing it', async () => {

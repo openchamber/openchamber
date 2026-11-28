@@ -337,6 +337,7 @@ export function useReferenceBrowser({
         trackerDescriptor,
         trackerFilter,
         savedFilters: trackerSavedFilters,
+        savedFiltersSettled,
         query,
         debouncedQuery,
         setQuery,
