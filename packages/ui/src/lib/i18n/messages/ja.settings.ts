@@ -1433,6 +1433,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': '権限を常に許可',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': '権限を拒否',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': '次の変更ファイル',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': '確認済みにして次のファイルに移動',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': '前の変更ファイル',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': '選択したセッションをアーカイブまたは削除',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': 'すべてのセッションを選択',

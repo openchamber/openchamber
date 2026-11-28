@@ -19,6 +19,7 @@ import { Icon } from '@/components/icon/Icon';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { ReviewFileMark } from '@/components/review/ReviewFileMark';
 import { FileReviewedButton } from '../FileReviewedButton';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
@@ -33,17 +34,13 @@ import { NestedRepositoryChanges } from './NestedRepositoryChanges';
 import { LARGE_DIFF_CHANGED_LINES, FULL_CONTEXT_DIFF_LINES, DEFAULT_CONTEXT_DIFF_LINES } from './diffContextLines';
 
 const DIFF_REQUEST_TIMEOUT_MS = 15000;
-const FILE_ACTIONS_MASK = '[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))] rtl:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]';
-const FILE_ACTIONS_MASK_CLASS = `${FILE_ACTIONS_MASK} [@media(hover:none)]:![mask-image:none]`;
+const FILE_ACTIONS_MASK = '[--file-actions-mask:linear-gradient(var(--oc-to-inline-end),#000_calc(100%_-_var(--file-actions-w)_-_0.75rem),transparent_calc(100%_-_var(--file-actions-w)_+_var(--file-actions-end-padding,0.75rem)))]';
 const FILE_ACTIONS_MASK_ON_REVEAL_CLASS = [
-    'group-hover/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'group-has-[:focus-visible]/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'rtl:group-hover/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'rtl:group-has-[:focus-visible]/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'group-focus-visible/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    'rtl:group-focus-visible/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
-    '[@media(hover:none)]:![mask-image:none]',
+    'group-hover/header:[mask-image:var(--file-actions-mask)]',
+    'group-has-[:focus-visible]/header:[mask-image:var(--file-actions-mask)]',
+    'group-focus-visible/header:[mask-image:var(--file-actions-mask)]',
 ].join(' ');
+const FILE_ACTIONS_REVEAL_CLASS = 'pointer-events-none opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-has-[:focus-visible]/header:pointer-events-auto group-has-[:focus-visible]/header:opacity-100 group-focus-visible/header:pointer-events-auto group-focus-visible/header:opacity-100';
 interface MultiFileDiffEntryProps {
     visible?: boolean;
     directory: string;
@@ -81,6 +78,7 @@ interface MultiFileDiffEntryProps {
     extraFileActions?: React.ReactNode;
     hideExpandChevron?: boolean;
     isReviewed?: boolean;
+    reviewButtonAtEnd?: boolean;
     onToggleReviewed?: (path: string, diffData: DiffData | null) => void;
 }
 
@@ -121,6 +119,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     extraFileActions,
     hideExpandChevron = false,
     isReviewed = false,
+    reviewButtonAtEnd = false,
     onToggleReviewed,
 }) => {
     const { t } = useI18n();
@@ -439,6 +438,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
     const actionsPinned = wholeFileComment.isOpen || isOpeningInEditor;
+    const reviewAtEnd = reviewButtonAtEnd && Boolean(onToggleReviewed);
+    const reviewShortcut = useUIStore((state) => onToggleReviewed
+        ? getEffectiveShortcutCombo('diff_review_next_file', state.shortcutOverrides)
+        : undefined);
     const { hasTouchOnlyPointer } = useDeviceInfo();
     const [actionsArmed, setActionsArmed] = React.useState(false);
     const armActions = React.useCallback(() => setActionsArmed(true), []);
@@ -455,6 +458,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         observer.observe(fileActionsElement);
         return () => observer.disconnect();
     }, [fileActionsElement]);
+    const reviewButton = onToggleReviewed ? (
+        <FileReviewedButton
+            reviewed={isReviewed}
+            onToggle={() => onToggleReviewed(file.path, diffData)}
+            compact
+            shortcut={reviewShortcut ? formatShortcutForDisplay(reviewShortcut, '') : undefined}
+        />
+    ) : null;
     const fileActions = (
         <>
             {showOpenInEditorAction && onOpenInEditor ? (
@@ -481,19 +492,18 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     setDiffFileLayout(file.path, nextLayout);
                 }}
             />
-            {onToggleReviewed ? (
-                <FileReviewedButton
-                    reviewed={isReviewed}
-                    onToggle={() => onToggleReviewed(file.path, diffData)}
-                    compact
-                />
-            ) : null}
+            {!reviewAtEnd && reviewButton}
             {extraFileActions}
         </>
     );
 
     return (
-        <div ref={setSectionRef} className="scroll-mt-9">
+        <div
+            ref={setSectionRef}
+            className="scroll-mt-9"
+            data-review-file-path={onToggleReviewed ? file.path : undefined}
+            data-review-file-staged={onToggleReviewed && staged ? '' : undefined}
+        >
             <div className={cn(
                 isExpanded
                     ? 'sticky top-0 z-30 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80'
@@ -506,6 +516,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     aria-expanded={isExpanded}
                     onClick={handleToggle}
                     onPointerEnter={armActions}
+                    onPointerMove={actionsArmed ? undefined : armActions}
                     onFocus={armActions}
                     onKeyDown={(event) => {
                         if (event.target !== event.currentTarget) return;
@@ -525,7 +536,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     <div className="absolute inset-0 -z-10 pointer-events-none group-hover/header:bg-[var(--interactive-hover)]/50" />
                     <div className={cn(
                         'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2',
-                        actionsPinned ? FILE_ACTIONS_MASK_CLASS : FILE_ACTIONS_MASK_ON_REVEAL_CLASS,
+                        FILE_ACTIONS_MASK,
+                        reviewAtEnd && '[--file-actions-end-padding:0rem]',
+                        actionsPinned ? '[mask-image:var(--file-actions-mask)]' : FILE_ACTIONS_MASK_ON_REVEAL_CLASS,
+                        '[@media(hover:none)]:![mask-image:none]',
                     )}>
                     <div className="relative flex min-w-0 flex-1 items-center gap-2">
                         {leadingAction}
@@ -560,7 +574,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         </span>
                     </div>
                     <div className="flex shrink-0 items-center justify-self-end gap-2">
-                        {isReviewed && onToggleReviewed ? (
+                        {!reviewAtEnd && isReviewed && onToggleReviewed ? (
                             <FileReviewedButton
                                 reviewed
                                 onToggle={() => onToggleReviewed(file.path, diffData)}
@@ -576,14 +590,21 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     <span
                         ref={setFileActionsElement}
                         className={cn(
-                            'absolute inset-y-0 end-0 z-10 flex items-center gap-2 pe-3 transition-opacity [@media(hover:none)]:hidden',
-                            actionsPinned
-                                ? 'opacity-100'
-                                : 'pointer-events-none opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-has-[:focus-visible]/header:pointer-events-auto group-has-[:focus-visible]/header:opacity-100 group-focus-visible/header:pointer-events-auto group-focus-visible/header:opacity-100',
+                            'absolute inset-y-0 z-10 flex items-center gap-2 transition-opacity [@media(hover:none)]:hidden',
+                            reviewAtEnd ? 'end-11' : 'end-0 pe-3',
+                            !actionsPinned && FILE_ACTIONS_REVEAL_CLASS,
                         )}
                     >
                         {actionsArmed || actionsPinned ? fileActions : null}
                     </span>
+                    {reviewAtEnd && (
+                        <span className={cn(
+                            'ms-2 flex w-6 shrink-0 items-center',
+                            !isReviewed && !actionsPinned && !hasTouchOnlyPointer && FILE_ACTIONS_REVEAL_CLASS,
+                        )}>
+                            {isReviewed || actionsArmed || actionsPinned || hasTouchOnlyPointer ? reviewButton : null}
+                        </span>
+                    )}
                 </div>
                 {wholeFileComment.editor}
             </div>

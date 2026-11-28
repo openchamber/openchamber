@@ -40,6 +40,7 @@ import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { cn } from '@/lib/utils';
 import { DiffFindBar } from '@/components/views/diffFind/DiffFindBar';
 import { useWalkthroughFind } from './useWalkthroughFind';
+import { UnreviewedFilesToggle } from '../UnreviewedFilesToggle';
 import { WalkthroughBlocker } from './WalkthroughBlocker';
 import { WalkthroughStages } from './WalkthroughStages';
 import { WalkthroughStream } from './WalkthroughStream';
@@ -273,6 +274,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     revision: JSON.stringify([sourceRevision, prPushRevision]),
   });
   const { view } = review;
+  const [unreviewedOnly, setUnreviewedOnly] = useState(false);
   const walkthroughState = useWalkthroughReviewedFiles({
     directory,
     source,
@@ -282,6 +284,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
 
   const findInWalkthrough = useWalkthroughFind({
     view,
+    hiddenPaths: unreviewedOnly ? walkthroughState.reviewedPaths : undefined,
     renderSideBySide,
     visible,
     rootRef,
@@ -554,6 +557,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               labelClassName="walkthrough-header__label"
             />
           )}
+          {view && <UnreviewedFilesToggle compact enabled={unreviewedOnly} onChange={setUnreviewedOnly} />}
           <Popover.Root open={moreOpen} onOpenChange={setMoreOpen}>
             <Tooltip disabled={moreOpen}>
               <TooltipTrigger asChild>
@@ -682,6 +686,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               )}
               <WalkthroughStream
                 view={view}
+                unreviewedOnly={unreviewedOnly}
+                allFilesReviewed={walkthroughState.totalFileCount > 0 && walkthroughState.reviewedPaths.size === walkthroughState.totalFileCount}
                 activeStopId={review.activeStopId}
                 scrollToStopId={review.scrollToStopId}
                 onActiveStopChange={review.handleActiveStopChange}

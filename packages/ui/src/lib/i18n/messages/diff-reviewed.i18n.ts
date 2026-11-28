@@ -1,6 +1,8 @@
 /** Reviewed-file markers and walkthrough step folding. Merged into each locale's main dictionary. */
 export const diffReviewedI18n = {
   en: {
+    'diffView.reviewed.unreviewedOnly': 'Unreviewed files only',
+    'diffView.reviewed.allReviewed': 'All files reviewed',
     'diffView.actions.markReviewed': 'Mark as reviewed',
     'diffView.actions.unmarkReviewed': 'Unmark as reviewed',
     'diffView.reviewed.label': 'Reviewed',
@@ -11,6 +13,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Expand all steps',
   },
   de: {
+    'diffView.reviewed.unreviewedOnly': 'Nur ungeprüfte Dateien',
+    'diffView.reviewed.allReviewed': 'Alle Dateien geprüft',
     'diffView.actions.markReviewed': 'Als geprüft markieren',
     'diffView.actions.unmarkReviewed': 'Markierung als geprüft entfernen',
     'diffView.reviewed.label': 'Geprüft',
@@ -21,6 +25,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Alle Schritte ausklappen',
   },
   fr: {
+    'diffView.reviewed.unreviewedOnly': 'Fichiers non vérifiés uniquement',
+    'diffView.reviewed.allReviewed': 'Tous les fichiers ont été vérifiés',
     'diffView.actions.markReviewed': 'Marquer comme vérifié',
     'diffView.actions.unmarkReviewed': 'Ne plus marquer comme vérifié',
     'diffView.reviewed.label': 'Vérifié',
@@ -31,6 +37,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Déplier toutes les étapes',
   },
   nl: {
+    'diffView.reviewed.unreviewedOnly': 'Alleen niet-bekeken bestanden',
+    'diffView.reviewed.allReviewed': 'Alle bestanden bekeken',
     'diffView.actions.markReviewed': 'Markeren als bekeken',
     'diffView.actions.unmarkReviewed': 'Markering als bekeken verwijderen',
     'diffView.reviewed.label': 'Bekeken',
@@ -41,6 +49,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Alle stappen uitklappen',
   },
   es: {
+    'diffView.reviewed.unreviewedOnly': 'Solo archivos sin revisar',
+    'diffView.reviewed.allReviewed': 'Todos los archivos están revisados',
     'diffView.actions.markReviewed': 'Marcar como revisado',
     'diffView.actions.unmarkReviewed': 'Quitar marca de revisado',
     'diffView.reviewed.label': 'Revisado',
@@ -51,6 +61,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Expandir todos los pasos',
   },
   ja: {
+    'diffView.reviewed.unreviewedOnly': '未確認のファイルのみ',
+    'diffView.reviewed.allReviewed': 'すべてのファイルを確認済み',
     'diffView.actions.markReviewed': '確認済みにする',
     'diffView.actions.unmarkReviewed': '確認済みを解除',
     'diffView.reviewed.label': '確認済み',
@@ -61,6 +73,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'すべてのステップを展開',
   },
   'pt-BR': {
+    'diffView.reviewed.unreviewedOnly': 'Apenas arquivos não revisados',
+    'diffView.reviewed.allReviewed': 'Todos os arquivos foram revisados',
     'diffView.actions.markReviewed': 'Marcar como revisado',
     'diffView.actions.unmarkReviewed': 'Desmarcar como revisado',
     'diffView.reviewed.label': 'Revisado',
@@ -71,6 +85,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Expandir todas as etapas',
   },
   uk: {
+    'diffView.reviewed.unreviewedOnly': 'Лише непереглянуті файли',
+    'diffView.reviewed.allReviewed': 'Усі файли переглянуто',
     'diffView.actions.markReviewed': 'Позначити як переглянуте',
     'diffView.actions.unmarkReviewed': 'Зняти позначку переглянутого',
     'diffView.reviewed.label': 'Переглянуто',
@@ -81,6 +97,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Розгорнути всі кроки',
   },
   ko: {
+    'diffView.reviewed.unreviewedOnly': '검토하지 않은 파일만',
+    'diffView.reviewed.allReviewed': '모든 파일 검토 완료',
     'diffView.actions.markReviewed': '검토 완료로 표시',
     'diffView.actions.unmarkReviewed': '검토 완료 표시 해제',
     'diffView.reviewed.label': '검토 완료',
@@ -91,6 +109,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': '모든 단계 펼치기',
   },
   pl: {
+    'diffView.reviewed.unreviewedOnly': 'Tylko niesprawdzone pliki',
+    'diffView.reviewed.allReviewed': 'Wszystkie pliki sprawdzone',
     'diffView.actions.markReviewed': 'Oznacz jako sprawdzone',
     'diffView.actions.unmarkReviewed': 'Cofnij oznaczenie jako sprawdzone',
     'diffView.reviewed.label': 'Sprawdzone',
@@ -101,6 +121,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Rozwiń wszystkie kroki',
   },
   'zh-CN': {
+    'diffView.reviewed.unreviewedOnly': '仅显示未查看的文件',
+    'diffView.reviewed.allReviewed': '所有文件均已查看',
     'diffView.actions.markReviewed': '标记为已查看',
     'diffView.actions.unmarkReviewed': '取消已查看标记',
     'diffView.reviewed.label': '已查看',
@@ -111,6 +133,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': '展开所有步骤',
   },
   'zh-TW': {
+    'diffView.reviewed.unreviewedOnly': '只顯示未檢視的檔案',
+    'diffView.reviewed.allReviewed': '所有檔案皆已檢視',
     'diffView.actions.markReviewed': '標記為已檢視',
     'diffView.actions.unmarkReviewed': '取消已檢視標記',
     'diffView.reviewed.label': '已檢視',
@@ -121,6 +145,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': '展開所有步驟',
   },
   tr: {
+    'diffView.reviewed.unreviewedOnly': 'Yalnızca incelenmemiş dosyalar',
+    'diffView.reviewed.allReviewed': 'Tüm dosyalar incelendi',
     'diffView.actions.markReviewed': 'İncelendi olarak işaretle',
     'diffView.actions.unmarkReviewed': 'İncelendi işaretini kaldır',
     'diffView.reviewed.label': 'İncelendi',
@@ -131,6 +157,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'Tüm adımları genişlet',
   },
   ar: {
+    'diffView.reviewed.unreviewedOnly': 'الملفات التي لم تُراجع فقط',
+    'diffView.reviewed.allReviewed': 'تمت مراجعة جميع الملفات',
     'diffView.actions.markReviewed': 'تحديد كمراجع',
     'diffView.actions.unmarkReviewed': 'إزالة علامة المراجعة',
     'diffView.reviewed.label': 'تمت المراجعة',
@@ -141,6 +169,8 @@ export const diffReviewedI18n = {
     'walkthrough.action.expandAllSteps': 'توسيع جميع الخطوات',
   },
   he: {
+    'diffView.reviewed.unreviewedOnly': 'רק קבצים שלא נבדקו',
+    'diffView.reviewed.allReviewed': 'כל הקבצים נבדקו',
     'diffView.actions.markReviewed': 'סמן כנבדק',
     'diffView.actions.unmarkReviewed': 'הסר סימון נבדק',
     'diffView.reviewed.label': 'נבדק',

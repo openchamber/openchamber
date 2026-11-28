@@ -1395,6 +1395,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': 'İzne her zaman onay ver',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': 'İzni reddet',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': 'Sonraki değişen dosya',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': 'İncelendi olarak işaretle ve sonraki dosyaya geç',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': 'Önceki değişen dosya',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': 'Seçili oturumları arşivle veya sil',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': 'Tüm oturumları seç',

@@ -1433,6 +1433,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': 'Toestemming altijd geven',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': 'Toestemming weigeren',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': 'Volgend gewijzigd bestand',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': 'Markeren als bekeken en naar het volgende bestand gaan',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': 'Vorig gewijzigd bestand',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': 'Geselecteerde sessies archiveren of verwijderen',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': 'Alle sessies selecteren',

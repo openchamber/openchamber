@@ -1432,6 +1432,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': 'السماح بالإذن دائمًا',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': 'رفض الإذن',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': 'الملف المعدّل التالي',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': 'وضع علامة تمت المراجعة والانتقال إلى الملف التالي',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': 'الملف المعدّل السابق',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': 'أرشفة الجلسات المحددة أو حذفها',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': 'تحديد كل الجلسات',

@@ -20,6 +20,8 @@ export function useReviewScopeDiffNavigation(options: {
   scope: DiffScope;
   changedFiles: FileEntry[];
   currentPath: string | null;
+  reviewedPaths: ReadonlySet<string>;
+  toggleReviewed: (path: string, diff: DiffData | null) => void;
   reveal: (path: string) => void;
   revealStep: (path: string) => void;
   getLayoutForFile: (path: string) => 'inline' | 'side-by-side';
@@ -36,7 +38,7 @@ export function useReviewScopeDiffNavigation(options: {
   const {
     directory, git, visible: panelVisible, filesShown, isWide, scope, changedFiles, currentPath, reveal, getLayoutForFile,
     diffHideWhitespace, lastTurnDiffData, comparisonDiffData, comparisonRangeKey, comparisonPathRevisions, loadFullComparisonDiff,
-    fetchComparisonDiffEntry, comparisonKey, cancelScrollHold, revealStep,
+    fetchComparisonDiffEntry, comparisonKey, cancelScrollHold, revealStep, reviewedPaths, toggleReviewed,
   } = options;
   const visible = panelVisible && filesShown;
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -80,11 +82,17 @@ export function useReviewScopeDiffNavigation(options: {
   const stepFiles = React.useMemo(() => (isWide
     ? buildDiffTreeRows(changedFiles, new Set()).flatMap((row) => (row.kind === 'file' ? [row.file] : []))
     : changedFiles), [changedFiles, isWide]);
-  useChangedFileStepping({
+  const toggleAndAdvance = useChangedFileStepping({
     visible,
+    rootRef,
     files: stepFiles,
     currentIndex: currentPath ? stepFiles.findIndex((file) => file.path === currentPath) : -1,
     onStep: (file) => revealStep(file.path),
+    review: {
+      path: (file) => file.path,
+      isReviewed: (file) => reviewedPaths.has(file.path),
+      toggle: (file, diff) => toggleReviewed(file.path, diff),
+    },
   });
 
   const findPropsFor = (path: string) => ({
@@ -94,5 +102,10 @@ export function useReviewScopeDiffNavigation(options: {
     findReveal: findReveal && isFindRevealFor(path, findReveal.key) ? findReveal : null,
   });
 
-  return { rootRef, diffFind, findReveal, findFocusNonce, findPropsFor, scrollToLocation };
+  return { rootRef, diffFind, findReveal, findFocusNonce, findPropsFor, scrollToLocation,
+    toggleReviewedAndAdvance: (path: string, diff: DiffData | null) => {
+      const file = stepFiles.find((entry) => entry.path === path);
+      if (file) toggleAndAdvance(file, diff);
+    },
+  };
 }

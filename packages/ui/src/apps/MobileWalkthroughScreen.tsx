@@ -13,6 +13,7 @@ import { WalkthroughBlocker } from '@/components/views/walkthrough/WalkthroughBl
 import { WalkthroughStages } from '@/components/views/walkthrough/WalkthroughStages';
 import { WalkthroughStream } from '@/components/views/walkthrough/WalkthroughStream';
 import { WalkthroughToc } from '@/components/views/walkthrough/WalkthroughToc';
+import { UnreviewedFilesToggle } from '@/components/views/UnreviewedFilesToggle';
 import { useWalkthroughReview } from '@/components/views/walkthrough/useWalkthroughReview';
 import { useWalkthroughReviewedFiles } from '@/components/views/walkthrough/useWalkthroughReviewedFiles';
 import { useI18n } from '@/lib/i18n';
@@ -39,6 +40,7 @@ export const MobileWalkthroughScreen: React.FC<{
   });
   const commentOrigin = React.useMemo(() => diffCommentOriginFromTarget(target), [target]);
   const [optionsOpen, setOptionsOpen] = React.useState(false);
+  const [unreviewedOnly, setUnreviewedOnly] = React.useState(false);
   const generatedAt = review.entry.result?.generatedAt ?? null;
   const [readingAt, setReadingAt] = React.useState<string | null>(null);
   const reading = view !== null && readingAt !== null && readingAt === generatedAt;
@@ -62,6 +64,7 @@ export const MobileWalkthroughScreen: React.FC<{
           <h2 className={cn('truncate', MOBILE_HEADER_TITLE_CLASS)}>{t('contextPanel.mode.walkthrough')}</h2>
           <p className="truncate typography-meta text-muted-foreground">{subtitle}</p>
         </div>
+        {view && <UnreviewedFilesToggle compact enabled={unreviewedOnly} onChange={setUnreviewedOnly} />}
         {reading && view ? (
           <>
             <button type="button" className={MOBILE_HEADER_BUTTON_CLASS} aria-label={t('walkthrough.action.previous')} onClick={() => review.step(-1)}>
@@ -104,6 +107,8 @@ export const MobileWalkthroughScreen: React.FC<{
         ) : view && reading ? (
           <WalkthroughStream
             view={view}
+            unreviewedOnly={unreviewedOnly}
+            allFilesReviewed={walkthroughState.totalFileCount > 0 && walkthroughState.reviewedPaths.size === walkthroughState.totalFileCount}
             activeStopId={review.activeStopId}
             scrollToStopId={review.scrollToStopId}
             onActiveStopChange={review.handleActiveStopChange}

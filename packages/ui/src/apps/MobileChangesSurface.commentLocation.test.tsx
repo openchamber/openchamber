@@ -112,7 +112,7 @@ test("the phone's composer label opens the comparison a comment was written on, 
         branch: url.searchParams.get('branch') ?? '', changeRequest: PUBLISHED_PR } satisfies ChangeRequestStatus);
       case '/api/source-control/github/pulls/list':
         return Response.json({ items: [PUBLISHED_PR], page: 1, hasMore: false } satisfies PageResult<ChangeRequest>);
-      case '/api/walkthrough/pr-diff': return new Response(PATCH, { headers: { 'content-type': 'text/plain' } });
+      case '/api/walkthrough/pr-diff': return new Response(`${PATCH}${PATCH.replaceAll('src/app.ts', 'src/next.ts')}`, { headers: { 'content-type': 'text/plain' } });
       // The whole file stays unanswered: the commented line is in the patch already.
       case '/api/walkthrough/pr-file': return new Promise<Response>(() => {});
       default: return Response.json({});
@@ -206,6 +206,23 @@ test("the phone's composer label opens the comparison a comment was written on, 
       kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' },
     });
     expect(scrolledTo.some((row) => row.line === '3' && row.type === 'change-addition')).toBe(true);
+
+    const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+    expect(button('Mark as reviewed')).not.toBeNull();
+    await act(async () => button('Mark as reviewed')?.click());
+    expect(container.querySelector('h2')?.textContent).toBe('next.ts');
+    await act(async () => button('Back')?.click());
+    const fileRow = (name: string) => [...container.querySelectorAll<HTMLButtonElement>('ul[aria-label="Changed files"] button')]
+      .find((item) => item.textContent?.includes(name));
+    expect(fileRow('app.ts')).toBeDefined();
+    await act(async () => button('Unreviewed files only')?.click());
+    expect(fileRow('app.ts')).toBeUndefined();
+    const nextFile = fileRow('next.ts');
+    expect(nextFile).toBeDefined();
+    await act(async () => nextFile?.click());
+    expect(button('Mark as reviewed')).not.toBeNull();
+    await act(async () => button('Mark as reviewed')?.click());
+    expect(container.textContent).toContain('All files reviewed');
   } finally {
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;

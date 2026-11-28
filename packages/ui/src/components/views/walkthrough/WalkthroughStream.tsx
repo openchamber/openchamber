@@ -31,6 +31,8 @@ interface WalkthroughStreamProps {
   summary?: string;
   revealRequest?: WalkthroughFindRevealRequest | null;
   reviewedPaths?: ReadonlySet<string>;
+  unreviewedOnly?: boolean;
+  allFilesReviewed?: boolean;
   onToggleFileReviewed?: (path: string) => void;
   collapsedStopIds?: ReadonlySet<string>;
   onToggleStopCollapsed?: (stopId: string) => void;
@@ -252,6 +254,7 @@ const HunkRuns = ({
   wrapLines,
   commentOrigin,
   reviewedPaths,
+  unreviewedOnly,
   fileExpansionOverrides,
   onToggleFileExpanded,
   onToggleFileReviewed,
@@ -264,6 +267,7 @@ const HunkRuns = ({
   wrapLines: boolean;
   commentOrigin?: DiffCommentOrigin;
   reviewedPaths?: ReadonlySet<string>;
+  unreviewedOnly: boolean;
   fileExpansionOverrides: ReadonlyMap<string, FileExpansionOverride>;
   onToggleFileExpanded: (runKey: string, path: string, nextExpanded: boolean) => void;
   onToggleFileReviewed?: (path: string) => void;
@@ -277,6 +281,7 @@ const HunkRuns = ({
       {runs.map((run, index) => {
         const runKey = findRunKey(stopId, index, run.hunks);
         const isReviewed = reviewedPaths?.has(run.path) ?? false;
+        if (unreviewedOnly && isReviewed) return null;
         const isExpanded = fileExpansionOverrides.get(runKey)?.expanded ?? !isReviewed;
         return (
           <div key={`${run.path}-${index}`}>
@@ -319,6 +324,8 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   summary,
   revealRequest,
   reviewedPaths,
+  unreviewedOnly = false,
+  allFilesReviewed = false,
   onToggleFileReviewed,
   collapsedStopIds: controlledCollapsedStopIds,
   onToggleStopCollapsed,
@@ -498,6 +505,9 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   }, [handleIntersection, view.stops]);
 
   const uncoveredRuns = useMemo(() => groupHunksByFile(view.uncoveredHunks), [view.uncoveredHunks]);
+  const uncoveredHunkCount = unreviewedOnly
+    ? uncoveredRuns.reduce((count, run) => reviewedPaths?.has(run.path) ? count : count + run.hunks.length, 0)
+    : view.uncoveredHunks.length;
   const routineNotes = useMemo(
     () => new Map((view.walkthrough.routine ?? []).map((entry) => [entry.path, entry.note])),
     [view.walkthrough.routine],
@@ -513,6 +523,9 @@ export const WalkthroughStream = memo(function WalkthroughStream({
     >
       {summary && (
         <p className="typography-ui-label px-4 pt-4 text-muted-foreground">{summary}</p>
+      )}
+      {unreviewedOnly && allFilesReviewed && (
+        <p className="typography-meta px-4 py-3 text-muted-foreground">{t('diffView.reviewed.allReviewed')}</p>
       )}
       {view.stops.map((stopView) => {
         const isCollapsed = collapsedStopIds.has(stopView.stop.id);
@@ -546,6 +559,7 @@ export const WalkthroughStream = memo(function WalkthroughStream({
                   wrapLines={wrapLines}
                   commentOrigin={commentOrigin}
                   reviewedPaths={reviewedPaths}
+                  unreviewedOnly={unreviewedOnly}
                   fileExpansionOverrides={fileExpansionOverrides}
                   onToggleFileExpanded={handleToggleFileExpanded}
                   onToggleFileReviewed={onToggleFileReviewed ? handleToggleFileReviewed : undefined}
@@ -562,7 +576,7 @@ export const WalkthroughStream = memo(function WalkthroughStream({
         );
       })}
 
-      {view.uncoveredHunks.length > 0 && (
+      {uncoveredHunkCount > 0 && (
         <section className="border-b border-edge">
           <Button
             type="button"
@@ -573,7 +587,7 @@ export const WalkthroughStream = memo(function WalkthroughStream({
           >
             <Icon name={uncoveredOpen ? 'arrow-down-s' : 'arrow-right-s'} className="size-4 shrink-0" />
             <span className="typography-ui-label text-muted-foreground">
-              {t('walkthrough.uncovered.title', { count: view.uncoveredHunks.length })}
+              {t('walkthrough.uncovered.title', { count: uncoveredHunkCount })}
             </span>
           </Button>
           {!uncoveredOpen && (
@@ -585,6 +599,7 @@ export const WalkthroughStream = memo(function WalkthroughStream({
             && uncoveredRuns.map((run, index) => {
               const runKey = findRunKey(UNCOVERED_STOP_ID, index, run.hunks);
               const isReviewed = reviewedPaths?.has(run.path) ?? false;
+              if (unreviewedOnly && isReviewed) return null;
               const isExpanded = fileExpansionOverrides.get(runKey)?.expanded ?? !isReviewed;
               return (
                 <div key={`${run.path}-${index}`}>

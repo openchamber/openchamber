@@ -8,7 +8,9 @@ import { MultiFileDiffEntry } from '../diffView/MultiFileDiffEntry';
 import { useDiffReviewedFiles } from '../diffView/useDiffReviewedFiles';
 import { GitDiffFindBar } from './GitDiffFindBar';
 import { useWorkingFocus } from './useWorkingFocus';
-import { toFileEntry, useWorkingDiffNavigation } from './useWorkingDiffNavigation';
+import { useWorkingDiffNavigation } from './useWorkingDiffNavigation';
+import { toWorkingFileEntry } from '../diffView/diffData';
+import { changesTreeFileOrder } from './changesTree';
 import type { WorkingFocusRequest } from './useUnifiedGitPanel';
 import type { DiffData } from '../diffView/types';
 import type { GitStatus } from '@/lib/api/types';
@@ -74,6 +76,8 @@ interface UnifiedWorkingChangesBodyProps {
   openingEditorFilePath: string | null;
   onOpenInEditor: (filePath: string, diffData: DiffData | null, staged: boolean) => void;
   commitSlot: React.ReactNode;
+  unreviewedOnly?: boolean;
+  onChangeUnreviewedOnly?: (enabled: boolean) => void;
 }
 
 const makeEntryKey = (groupId: string, path: string): string => `${groupId}:${path}`;
@@ -102,30 +106,22 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
   openingEditorFilePath,
   onOpenInEditor,
   commitSlot,
+  unreviewedOnly = false,
+  onChangeUnreviewedOnly,
 }) => {
   const { t } = useI18n();
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set());
   const confirmDialog = useConfirmDialog();
 
-  const sidebarGroups = React.useMemo(() => groups.map((group) => ({
-    ...group,
-    onViewDiff: (path: string) => onSelectEntry({ groupId: group.id as WorkingEntrySelection['groupId'], path }),
-  })), [groups, onSelectEntry]);
-
-  const visibleGroups = React.useMemo(
-    () => groups.filter((group) => group.entries.length > 0),
-    [groups],
-  );
-
   const runtimeKey = getRuntimeKey();
   const stagedFiles = React.useMemo(
-    () => (groups.find((g) => g.id === 'staged')?.entries ?? []).map((file) => toFileEntry(file, 'staged', diffStats)),
+    () => (groups.find((g) => g.id === 'staged')?.entries ?? []).map((file) => toWorkingFileEntry(file, 'staged', diffStats)),
     [diffStats, groups],
   );
   const workingFiles = React.useMemo(
     () => groups
       .filter((g) => g.id !== 'staged')
-      .flatMap((g) => g.entries.map((file) => toFileEntry(file, g.statsScope, diffStats))),
+      .flatMap((g) => g.entries.map((file) => toWorkingFileEntry(file, g.statsScope, diffStats))),
     [diffStats, groups],
   );
   const stagedReviewed = useDiffReviewedFiles({
@@ -155,11 +151,24 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     },
   });
 
+  const visibleGroups = React.useMemo(() => groups.map((group) => {
+    const paths = group.id === 'staged' ? stagedReviewed.reviewedPaths : workingReviewed.reviewedPaths;
+    const entries = unreviewedOnly ? group.entries.filter((entry) => !paths.has(entry.path)) : group.entries;
+    return { ...group, entries: isWide ? changesTreeFileOrder(entries) : entries };
+  }).filter((group) => group.entries.length > 0), [groups, isWide, stagedReviewed.reviewedPaths, unreviewedOnly, workingReviewed.reviewedPaths]);
+  const sidebarGroups = React.useMemo(() => visibleGroups.map((group) => ({
+    ...group,
+    onViewDiff: (path: string) => onSelectEntry({ groupId: group.id as WorkingEntrySelection['groupId'], path }),
+  })), [onSelectEntry, visibleGroups]);
+
   const resolvedSelection = React.useMemo<WorkingEntrySelection | null>(() => {
     if (selectedEntry) {
       const group = visibleGroups.find((g) => g.id === selectedEntry.groupId);
       if (group?.entries.some((f) => f.path === selectedEntry.path)) {
         return selectedEntry;
+      }
+      if (unreviewedOnly && groups.some((g) => g.id === selectedEntry.groupId && g.entries.some((f) => f.path === selectedEntry.path))) {
+        return null;
       }
       const otherGroup = visibleGroups.find((g) => g.entries.some((f) => f.path === selectedEntry.path));
       if (otherGroup) {
@@ -170,7 +179,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     const firstFile = firstGroup?.entries[0];
     if (!firstGroup || !firstFile) return null;
     return { groupId: firstGroup.id as 'staged' | 'unstaged', path: firstFile.path };
-  }, [selectedEntry, visibleGroups]);
+  }, [groups, selectedEntry, unreviewedOnly, visibleGroups]);
 
   const toggleGroup = React.useCallback((groupId: string) => {
     setCollapsedGroups((prev) => {
@@ -214,19 +223,24 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     });
   }, []);
   const expandKey = React.useCallback((key: string) => onToggleExpandedKey(key, true), [onToggleExpandedKey]);
+  const selectRevealedEntry = React.useCallback((entry: WorkingEntrySelection) => {
+    const paths = entry.groupId === 'staged' ? stagedReviewed.reviewedPaths : workingReviewed.reviewedPaths;
+    if (unreviewedOnly && paths.has(entry.path)) onChangeUnreviewedOnly?.(false);
+    onSelectEntry(entry);
+  }, [onChangeUnreviewedOnly, onSelectEntry, stagedReviewed.reviewedPaths, unreviewedOnly, workingReviewed.reviewedPaths]);
   const { registerSectionRef, focus, revealEntry, cancel } = useWorkingFocus({
     focusRequest,
-    groups: visibleGroups,
+    groups,
     directory,
     revealGroup,
     expand: expandKey,
-    select: onSelectEntry,
+    select: selectRevealedEntry,
   });
   const contentRevisionOf = (path: string) => workingTreeRevision + (fileRefreshNonce.get(path) ?? 0);
   const noopRegisterRef = React.useCallback(() => {}, []);
 
   const findRootRef = React.useRef<HTMLDivElement | null>(null);
-  const { diffFind, findFocusNonce, findPropsFor } = useWorkingDiffNavigation({
+  const { diffFind, findFocusNonce, findPropsFor, toggleAndAdvance } = useWorkingDiffNavigation({
     directory,
     visible,
     groups: visibleGroups,
@@ -236,6 +250,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     workingTreeRevision,
     fileRefreshNonce,
     currentEntry: isWide ? resolvedSelection : selectedEntry,
+    reviewFor: (entry) => entry.groupId === 'staged' ? stagedReviewed : workingReviewed,
     focus,
     expandEntry: revealEntry,
     cancelScrollHold: cancel,
@@ -275,7 +290,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
 
   const renderRevertAllButton = () => {
     const hasUnstaged = visibleGroups.some((g) => g.showRevertActions !== false && g.entries.length > 0);
-    if (!hasUnstaged) return null;
+    if (unreviewedOnly || !hasUnstaged) return null;
     return (
       <div className="flex justify-end px-3 pt-2 pb-1">
         <Button
@@ -300,9 +315,14 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
     ? activeGroup.entries.find((f) => f.path === resolvedSelection.path) ?? null
     : null;
   const activeFileEntry = activeGroup && activeRawFile
-    ? toFileEntry(activeRawFile, activeGroup.statsScope, diffStats)
+    ? toWorkingFileEntry(activeRawFile, activeGroup.statsScope, diffStats)
     : null;
   const activeIsStaged = activeGroup?.statsScope === 'staged';
+  const reviewedEmptyState = unreviewedOnly && visibleGroups.length === 0 ? (
+    <div className="flex flex-1 items-center justify-center px-6 text-center typography-meta text-muted-foreground">
+      {t('diffView.reviewed.allReviewed')}
+    </div>
+  ) : null;
 
   const wideBody = (
     <div className="flex min-h-0 flex-1 overflow-hidden" aria-busy={hasPendingIndexMutation || undefined}>
@@ -313,7 +333,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
             diffStats={diffStats}
             revertingPaths={revertingPaths}
             isRevertingAll={isRevertingAll}
-            onRevertAll={onRevertAll}
+            onRevertAll={unreviewedOnly ? undefined : onRevertAll}
             onRevertDirectory={onRevertDirectory}
             memoryKey={`changes:${getRuntimeKey()}:${directory}`}
             memoryReady
@@ -356,7 +376,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
               hunkActionsEnabled
               contentRevision={contentRevisionOf(activeFileEntry.path)}
               isReviewed={(activeIsStaged ? stagedReviewed.reviewedPaths : workingReviewed.reviewedPaths).has(activeFileEntry.path)}
-              onToggleReviewed={activeIsStaged ? stagedReviewed.toggleReviewed : workingReviewed.toggleReviewed}
+              onToggleReviewed={(path, diff) => toggleAndAdvance({ groupId: activeIsStaged ? 'staged' : 'unstaged', path }, diff)}
               {...findPropsFor(activeGroup.id as WorkingEntrySelection['groupId'], activeFileEntry.path)}
               leadingAction={
                 <StageActionButton
@@ -393,7 +413,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
             />
             </div>
           </ScrollableOverlay>
-        ) : null}
+        ) : reviewedEmptyState}
       </div>
     </div>
   );
@@ -411,7 +431,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
   const narrowBody = (
     <div ref={narrowListRef} className="flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={hasPendingIndexMutation || undefined}>
       <DelegatedTooltip containerRef={narrowListRef} sideOffset={6} />
-      <ScrollableOverlay
+      {reviewedEmptyState ?? <ScrollableOverlay
         outerClassName="flex-1 min-h-0"
         className="pb-3"
         disableHorizontal
@@ -436,7 +456,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
                 <div className="flex flex-col">
                   {shownEntries.map((file) => {
                     const entryKey = makeEntryKey(group.id, file.path);
-                    const fileEntry = toFileEntry(file, group.statsScope, diffStats);
+                    const fileEntry = toWorkingFileEntry(file, group.statsScope, diffStats);
                     const isExpanded = expandedKeys.has(entryKey);
                     const isReverting = revertingPaths.has(file.path);
 
@@ -466,7 +486,8 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
                         hunkActionsEnabled
                         contentRevision={contentRevisionOf(file.path)}
                         isReviewed={(isStaged ? stagedReviewed.reviewedPaths : workingReviewed.reviewedPaths).has(file.path)}
-                        onToggleReviewed={isStaged ? stagedReviewed.toggleReviewed : workingReviewed.toggleReviewed}
+                        reviewButtonAtEnd
+                        onToggleReviewed={(path, diff) => toggleAndAdvance({ groupId: isStaged ? 'staged' : 'unstaged', path }, diff)}
                         {...findPropsFor(group.id as WorkingEntrySelection['groupId'], file.path)}
                         leadingAction={
                           <StageActionButton
@@ -508,7 +529,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
         }}</ProgressiveRows>
         {renderRevertAllButton()}
         </div>
-      </ScrollableOverlay>
+      </ScrollableOverlay>}
       <div className="shrink-0 border-t border-edge-muted bg-background px-4">
         {commitSlot}
       </div>
@@ -518,7 +539,7 @@ export const UnifiedWorkingChangesBody: React.FC<UnifiedWorkingChangesBodyProps>
   return (
     <>
       {confirmDialog.dialog}
-      <div ref={findRootRef} data-find-surface="" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div ref={findRootRef} tabIndex={-1} data-find-surface="" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <GitDiffFindBar find={diffFind} focusNonce={findFocusNonce} />
         {isWide ? wideBody : narrowBody}
       </div>

@@ -1400,6 +1400,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': '권한 항상 허용',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': '권한 거부',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': '다음 변경 파일',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': '검토 완료로 표시하고 다음 파일로 이동',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': '이전 변경 파일',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': '선택한 세션 보관 또는 삭제',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': '모든 세션 선택',

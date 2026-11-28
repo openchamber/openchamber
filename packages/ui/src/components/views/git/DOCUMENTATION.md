@@ -209,6 +209,11 @@ operation contracts belong to the runtime APIs and source-control modules.
   scopes through `revealTurnFile`. A find match takes the same path without the
   scroll to the header (`revealEntry`, `expandTurnFile`). Review scopes search and step
   only while files are on screen, so not over a commit or pull request list.
+- The Unreviewed files only filter is local to the Git panel and follows scope
+  switches. In working changes, a path in both groups is filtered per group.
+  A chat reveal can clear the filter to open a reviewed target. Revert all is
+  available with the full list because a revert of a partly staged file can
+  affect both sides.
 - Every scroller that holds `MultiFileDiffEntry` diffs (both layouts, both
   bodies) is a `data-diff-virtual-root` around a `data-diff-virtual-content`,
   as in the standalone diff view. Without it Pierre's shared virtualizer binds

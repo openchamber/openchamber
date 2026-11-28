@@ -1,5 +1,5 @@
 import { Icon } from '@/components/icon/Icon';
-import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { ButtonTooltip, TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -9,6 +9,7 @@ interface FileReviewedButtonProps {
   onToggle: () => void;
   compact?: boolean;
   className?: string;
+  shortcut?: string;
 }
 
 export function FileReviewedButton({
@@ -16,6 +17,7 @@ export function FileReviewedButton({
   onToggle,
   compact = false,
   className,
+  shortcut,
 }: FileReviewedButtonProps) {
   const { t } = useI18n();
   const label = reviewed
@@ -23,7 +25,7 @@ export function FileReviewedButton({
     : t('diffView.actions.markReviewed');
 
   return (
-    <ButtonTooltip label={label} side="top">
+    <ButtonTooltip label={<TooltipLabelWithShortcut label={label} shortcut={reviewed ? undefined : shortcut} />} side="top">
       <Button
         type="button"
         variant="ghost"
@@ -41,7 +43,9 @@ export function FileReviewedButton({
           event.stopPropagation();
           onToggle();
         }}
-        onKeyDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
+        }}
       >
         <Icon name={reviewed ? 'checkbox-circle' : 'checkbox-blank-circle'} className="size-3.5 shrink-0" />
         {!compact && (

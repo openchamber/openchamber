@@ -1432,6 +1432,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': 'אישור הרשאה תמיד',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': 'דחיית ההרשאה',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': 'הקובץ הבא שהשתנה',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': 'סימון כנבדק ומעבר לקובץ הבא',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': 'הקובץ הקודם שהשתנה',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': 'העברה לארכיון או מחיקה של השיחות שנבחרו',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': 'בחירת כל השיחות',

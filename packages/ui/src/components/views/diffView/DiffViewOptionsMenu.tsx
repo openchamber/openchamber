@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -14,6 +15,8 @@ import { useToolbarStep } from '@/hooks/useToolbarStep';
 import type { DiffViewMode } from '@/components/chat/message/types';
 
 interface DiffViewOptionsMenuProps {
+  unreviewedOnly?: boolean;
+  onChangeUnreviewedOnly?: (enabled: boolean) => void;
   diffWrapLines: boolean;
   onToggleWrapLines: () => void;
   diffHideWhitespace: boolean;
@@ -35,6 +38,8 @@ interface DiffViewOptionsMenuProps {
 }
 
 export const DiffViewOptionsMenu: React.FC<DiffViewOptionsMenuProps> = ({
+  unreviewedOnly,
+  onChangeUnreviewedOnly,
   diffWrapLines,
   onToggleWrapLines,
   diffHideWhitespace,
@@ -81,6 +86,12 @@ export const DiffViewOptionsMenu: React.FC<DiffViewOptionsMenuProps> = ({
           </DropdownMenuItem>
         ) : null}
         {walkthroughItem || folded?.onStartReview ? <DropdownMenuSeparator /> : null}
+        {unreviewedOnly !== undefined && (
+          <DropdownMenuCheckboxItem checked={unreviewedOnly} onCheckedChange={onChangeUnreviewedOnly} closeOnClick>
+            <Icon name="filter-3" className="size-4" />
+            {t('diffView.reviewed.unreviewedOnly')}
+          </DropdownMenuCheckboxItem>
+        )}
         <DropdownMenuItem className="flex items-center gap-2" onClick={onToggleWrapLines}>
           <Icon name="text-wrap" className="size-4" />
           <span className="min-w-0 truncate typography-ui-label text-foreground">{t('diffView.actions.wrapLines')}</span>

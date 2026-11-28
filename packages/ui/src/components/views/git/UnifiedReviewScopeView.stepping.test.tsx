@@ -43,7 +43,7 @@ const PR: ChangeRequest = {
   url: 'https://github.com/team/project/pull/17', state: 'open', draft: false, base: 'main', head: 'feature-17', headSha: 'head-17',
 };
 const STATUS: GitStatus = { current: 'feature-17', tracking: null, ahead: 0, behind: 0, files: [], isClean: true };
-const FILES = ['src/first.ts', 'src/second.ts'];
+const FILES = ['src/first.ts', 'src/second.ts', 'src/third.ts'];
 const PATCH = FILES.map((path) => [
   `diff --git a/${path} b/${path}`,
   'index 1111111..2222222 100644',
@@ -154,19 +154,43 @@ test('Alt+Down in the narrow review accordion expands an offscreen file and brin
     row(FILES[0])!.getBoundingClientRect = () => new DOMRect(0, 100 - scroller.scrollTop, 400, 2000);
     second.getBoundingClientRect = () => new DOMRect(0, 2100 - scroller.scrollTop, 400, 300);
     const isExpanded = (path: string) => row(path)?.querySelector('[aria-expanded="true"]') != null;
-    const altDown = () => act(async () => {
-      scroller.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', altKey: true, bubbles: true, cancelable: true }));
+    const pressArrow = (key: 'ArrowDown' | 'ArrowUp', shiftKey = false, target: HTMLElement = scroller) => act(async () => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, altKey: true, shiftKey, bubbles: true, cancelable: true }));
     });
+    const reviewed = (path: string) => row(path)?.querySelector('button[aria-label="Unmark as reviewed"]') != null;
 
-    await altDown();
+    await pressArrow('ArrowDown');
     await until(() => isExpanded(FILES[0]));
     expect(scroller.scrollTop).toBe(0);
     expect(isExpanded(FILES[1])).toBe(false);
 
-    await altDown();
+    await pressArrow('ArrowDown');
     await until(() => isExpanded(FILES[1]));
     expect(isExpanded(FILES[1])).toBe(true);
     expect(second.getBoundingClientRect().top).toBe(scroller.getBoundingClientRect().top);
+
+    await pressArrow('ArrowUp');
+    await act(async () => second.querySelector<HTMLElement>('[role="button"][aria-expanded="true"]')?.focus());
+    const markSecond = second.querySelector<HTMLButtonElement>('button[aria-label="Mark as reviewed"]');
+    if (!markSecond) throw new Error('the focused file did not expose its review button');
+    await act(async () => markSecond.focus());
+    await pressArrow('ArrowDown', true, markSecond);
+    expect(reviewed(FILES[0])).toBe(false);
+    expect(reviewed(FILES[1])).toBe(true);
+    expect(isExpanded(FILES[1])).toBe(false);
+    expect(isExpanded(FILES[2])).toBe(true);
+    expect(document.activeElement).toBe(scroller.closest('[data-find-surface]'));
+
+    await pressArrow('ArrowUp');
+    await pressArrow('ArrowUp');
+    await pressArrow('ArrowDown', true);
+    expect(reviewed(FILES[0])).toBe(true);
+    expect(isExpanded(FILES[0])).toBe(false);
+    expect(isExpanded(FILES[2])).toBe(true);
+    await pressArrow('ArrowDown', true);
+    expect(reviewed(FILES[2])).toBe(true);
+    expect(isExpanded(FILES[2])).toBe(false);
+    expect(isExpanded(FILES[0])).toBe(false);
   } finally {
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;

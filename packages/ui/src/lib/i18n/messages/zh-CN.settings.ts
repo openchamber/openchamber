@@ -1400,6 +1400,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': '始终允许',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': '拒绝权限',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': '下一个已更改文件',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': '标记为已查看并转到下一个文件',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': '上一个已更改文件',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': '归档或删除所选会话',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': '选择所有会话',

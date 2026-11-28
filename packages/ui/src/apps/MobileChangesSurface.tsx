@@ -2,13 +2,15 @@ import { isCompleteIdentity } from '@/lib/api/git-identity';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useIsContributorWorktree } from '@/hooks/useIsContributorWorktree';
-import { statusToGitCode } from '@/components/views/turnSnapshotDiff';
 
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ChangesPanel, type ChangesGroupConfig } from '@/components/views/git/ChangesPanel';
+import { isStagedStatusFile, isWorkingStatusFile as isUnstagedStatusFile } from '@/components/views/diffView/diffData';
+import { useMobileChangesReview, useMobileTurnFiles } from './useMobileChangesReview';
+import { UnreviewedFilesToggle } from '@/components/views/UnreviewedFilesToggle';
 import { BranchSelector } from '@/components/views/git/BranchSelector';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { MobileWalkthroughScreen } from './MobileWalkthroughScreen';
@@ -68,7 +70,6 @@ import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { cn } from '@/lib/utils';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
 import { parseDiffFromFile } from '@pierre/diffs';
-import type { GitStatus } from '@/lib/api/types';
 import { GitPathUnavailableError } from '@/lib/api/git-path-diff';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
@@ -114,17 +115,6 @@ const LOADING_COMPARISON_DIFF: ComparisonDiff = { status: 'loading' };
 const FULL_CONTEXT_DIFF_LINES = 1_000_000;
 
 const REVERT_PATHS_CONCURRENCY = 2;
-
-const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
-  const indexStatus = file.index?.trim();
-  return Boolean(indexStatus && indexStatus !== '?');
-};
-
-const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
-  const workingStatus = file.working_dir?.trim();
-  const indexStatus = file.index?.trim();
-  return Boolean(workingStatus || indexStatus === '?');
-};
 
 const diffCacheKey = (path: string, staged: boolean): string => staged ? `${path}\u0000staged` : path;
 
@@ -441,18 +431,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       : current);
   }, [comparison.key, ownerKey]);
 
-  const turnFiles = React.useMemo(
-    () => lastTurnDiffs
-      .map((diff) => ({
-        path: diff.file ?? '',
-        status: statusToGitCode(diff.status),
-        insertions: diff.additions ?? 0,
-        deletions: diff.deletions ?? 0,
-      }))
-      .filter((file) => file.path)
-      .sort((a, b) => a.path.localeCompare(b.path)),
-    [lastTurnDiffs],
-  );
+  const { files: turnFiles, data: turnDiffData } = useMobileTurnFiles(lastTurnDiffs);
 
   const listKey = route.type !== 'list'
     ? null
@@ -463,25 +442,6 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         : comparison.key ? `${ownerKey}|${comparison.key}` : null;
   const listReady = route.type === 'list'
     && (mode === 'working' || (mode === 'turn' ? turnDiffSettled : comparisonFiles !== null));
-
-  const turnDiffData = React.useMemo(() => {
-    const map = new Map<string, MobileDiffData>();
-    for (const diff of lastTurnDiffs) {
-      if (!diff.file) continue;
-      if (typeof diff.patch === 'string') {
-        const isBinary = isBinaryPatch(diff.patch);
-        map.set(diff.file, {
-          original: '',
-          modified: '',
-          isBinary,
-          fileDiff: isBinary ? undefined : fileDiffFromPatch(diff.file, diff.patch, { complete: true }),
-        });
-        continue;
-      }
-      map.set(diff.file, { original: diff.before ?? '', modified: diff.after ?? '' });
-    }
-    return map;
-  }, [lastTurnDiffs]);
 
   const changeEntries = React.useMemo(() => {
     const files = status?.files ?? [];
@@ -1053,6 +1013,21 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return groups;
   }, [handleRevertFile, handleViewChangeDiff, moveChangePaths, stagedChangeEntries, t, unstagedChangeEntries]);
 
+  const comparisonOrder = mode === 'turn' ? turnFiles : comparisonFiles;
+  const { unreviewedOnly, setUnreviewedOnly, shownChangeGroups, isWorkingReviewed, comparisonReviewedPaths,
+    toggleWorkingReview, toggleComparisonReview } = useMobileChangesReview({
+    runtimeKey, directory: currentDirectory, mode, status, stagedFiles: stagedChangeEntries,
+    workingFiles: unstagedChangeEntries, groups: changeGroups, selectedDiff, setRoute, clearCommentTargets,
+    comparison: {
+      files: comparisonOrder, key: comparison.key, activeDiffScope: mode,
+      directory: mode === 'working' ? null : mode === 'turn' ? turnDirectory : currentDirectory,
+      filesReady: mode === 'turn' ? hasTurnData : comparisonFiles !== null,
+      qualifiedBranchBase: branchComparison.base, currentBranch, selectedCommitHash, selectedPr,
+      turnSessionId, turnId: selectedTurn?.turnId, comparisonFiles: comparison.files, lastTurnDiffData: turnDiffData,
+    },
+  });
+  const allReviewed = () => <MobileChangesState message={t('diffView.reviewed.allReviewed')} />;
+
   const networkDialogs = (
     <>
       {publishChooser.context ? <PublishDialog context={publishChooser.context} onSelect={publishChooser.settle} /> : null}
@@ -1146,6 +1121,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   if (route.type === 'diff') {
     return (
       <MobileDiffDetail
+        key={`${route.staged}:${route.path}`}
         path={route.path}
         previousPath={selectedFileEntry?.previousPath}
         diff={selectedDiff}
@@ -1153,6 +1129,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         fileExists={Boolean(selectedFileEntry)}
         unavailableReason={unavailablePath?.key === `${currentDirectory}\u0000${route.path}` ? unavailablePath.reason : null}
         error={diffLoadError}
+        isReviewed={isWorkingReviewed(route.path, route.staged)}
+        onToggleReviewed={() => toggleWorkingReview(route.path, route.staged)}
         onBack={() => setRoute({ type: 'list' })}
         onRetry={() => setDiffRetryNonce((value) => value + 1)}
       />
@@ -1162,10 +1140,13 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   if (route.type === 'turn') {
     return (
       <MobileDiffDetail
+        key={route.path}
         path={route.path}
         subtitle={navigation.turnId ? t('diffView.scope.earlierTurn') : t('diffView.scope.lastTurn')}
         diff={turnDiffData.get(route.path) ?? null}
         fileExists={turnFiles.some((file) => file.path === route.path)}
+        isReviewed={comparisonReviewedPaths.has(route.path)}
+        onToggleReviewed={() => toggleComparisonReview(route.path)}
         onBack={() => setRoute(LIST_ROUTE)}
       />
     );
@@ -1193,12 +1174,15 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return (
       <ChangeRequestReviewContext.Provider value={changeRequestReview}>
       <MobileDiffDetail
+        key={activeComparisonPath}
         path={activeComparisonPath}
         previousPath={comparison.files?.find((file) => file.path === activeComparisonPath)?.previousPath}
         subtitle={[modeLabel, sourceLabel].filter(Boolean).join(' · ')}
         commentOrigin={commentOrigin}
         diff={activeFullComparisonDiff ?? (activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null)}
         fileExists={!comparison.files || comparison.files.some((file) => file.path === activeComparisonPath)}
+        isReviewed={comparisonReviewedPaths.has(activeComparisonPath)}
+        onToggleReviewed={comparison.files ? () => toggleComparisonReview(activeComparisonPath) : undefined}
         error={comparison.error ?? (activeComparisonDiff.status === 'error' ? activeComparisonDiff.message : null)}
         targetLine={commentTarget && commentTarget.sourceKey === comparison.key && commentTarget.path === activeComparisonPath
           ? { line: commentTarget.line, side: commentTarget.side, nonce: commentTarget.nonce }
@@ -1250,7 +1234,9 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         ? t('commitComparison.emptyDiff')
         : t('diffView.branch.empty', { base: sourceLabel ?? '' })} />;
     }
-    return <MobileComparisonFileList files={comparisonFiles} memoryKey={listKey} memoryReady={listReady} onSelect={(path) => {
+    const shownFiles = unreviewedOnly ? comparisonFiles.filter((file) => !comparisonReviewedPaths.has(file.path)) : comparisonFiles;
+    if (shownFiles.length === 0) return allReviewed();
+    return <MobileComparisonFileList files={shownFiles} memoryKey={listKey} memoryReady={listReady} onSelect={(path) => {
       if (comparison.key) setRoute({ type: 'comparison', path, sourceKey: comparison.key });
     }} />;
   };
@@ -1265,7 +1251,9 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     }
     if ((!hasTurnData || turnFileRequest) && turnSessionId) return <MobileChangesState loading message={t('diffView.state.loadingChanges')} />;
     if (turnFiles.length === 0) return <MobileChangesState message={t('diffView.state.noLastTurnChanges')} />;
-    return <MobileComparisonFileList files={turnFiles} memoryKey={listKey} memoryReady={listReady} onSelect={(path) => setRoute({ type: 'turn', path })} />;
+    const shownFiles = unreviewedOnly ? turnFiles.filter((file) => !comparisonReviewedPaths.has(file.path)) : turnFiles;
+    if (shownFiles.length === 0) return allReviewed();
+    return <MobileComparisonFileList files={shownFiles} memoryKey={listKey} memoryReady={listReady} onSelect={(path) => setRoute({ type: 'turn', path })} />;
   };
 
   return (
@@ -1306,6 +1294,9 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           </DropdownMenuContent>
         </DropdownMenu>
         {nestedRepoPicker}
+        {(mode === 'working' ? changeEntries.length > 0 : Boolean(comparisonOrder?.length)) && (
+          <UnreviewedFilesToggle enabled={unreviewedOnly} onChange={setUnreviewedOnly} />
+        )}
         {visible && mode === 'branch' && (
           <BranchComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
             branches={branches?.all ?? []} defaultBranches={branches?.defaultBranches} primaryRemote={binding.contexts[0]?.primaryRemote} currentBranch={currentBranch} base={branchComparison.base}
@@ -1436,17 +1427,17 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       ) : changeEntries.length > 0 ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-hidden px-2 pt-1">
-            <ChangesPanel
-              groups={changeGroups}
+            {shownChangeGroups.length === 0 ? allReviewed() : <ChangesPanel
+              groups={shownChangeGroups}
               diffStats={status?.diffStats}
               revertingPaths={revertingPaths}
-              onRevertAll={handleRevertAll}
+              onRevertAll={unreviewedOnly ? undefined : handleRevertAll}
               isRevertingAll={isRevertingAll}
               headerBackgroundClassName="bg-transparent"
               onVisiblePathsChange={setVisibleChangePaths}
               memoryKey={listKey}
               memoryReady={listReady}
-            />
+            />}
           </div>
           <div data-keyboard-rider="" className="oc-mobile-commit-bar shrink-0 border-t border-edge-muted bg-background px-4 py-3">
             <CommitSection
@@ -1521,4 +1512,3 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     </div>
   );
 };
-

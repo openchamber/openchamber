@@ -1400,6 +1400,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.permission_allow_always.label": "Дозволяти завжди",
   "settings.openchamber.keyboardShortcuts.action.permission_deny.label": "Відхилити дозвіл",
   "settings.openchamber.keyboardShortcuts.action.diff_next_file.label": "Наступний змінений файл",
+  "settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label": "Позначити як переглянутий і перейти до наступного файлу",
   "settings.openchamber.keyboardShortcuts.action.diff_previous_file.label": "Попередній змінений файл",
   "settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label": "Архівувати або видалити вибрані сесії",
   "settings.openchamber.keyboardShortcuts.action.sessions_select_all.label": "Вибрати всі сесії",

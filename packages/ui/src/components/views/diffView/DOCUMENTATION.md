@@ -52,6 +52,8 @@ remain in their existing neighbouring modules.
 - File wrappers use `overflow: clip` so they do not create a scroll box that
   captures the sticky horizontal scrollbar. Action masks clear the measured
   control area without reserving width; touch actions stay in normal flow.
+  Working-tree accordions reserve a slot for the review button at the inline
+  end. Hover actions stop before that slot so the check stays in place.
 - Stacked expansion limits bound simultaneous Pierre instances and their DOM.
   At 1,000 files and above, `StackedDiffWindow` keeps a light row per file and
   a full entry only for rows near the viewport, focused, pinned by navigation
@@ -115,3 +117,15 @@ and made the setup hook a second copy of the component's prologue.
 State setters, store actions and the refs passed by the retained view keep their
 identities for its lifetime. The lists retain the original reactive dependencies;
 including stable inputs would suggest changes that never occur.
+## Reviewing files
+
+The review action and its shortcut use the same file order as file stepping.
+Marking moves forward to the next unreviewed file in that order and stops at
+the end. Unmarking stays on the current file. The shortcut uses the focused
+file when one holds focus, then advances the panel's navigation cursor.
+
+### Why the review filter takes a separate file list
+
+Review reconciliation always sees the full scope inventory. Rendering,
+stepping and Find see the filtered list, because giving that list to
+reconciliation would remove the marks that hid the files.

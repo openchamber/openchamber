@@ -8,6 +8,7 @@ import { buildFindSources, enumerateFindRuns, UNCOVERED_STOP_ID } from './walkth
 
 interface UseWalkthroughFindOptions {
   view: WalkthroughView | null;
+  hiddenPaths?: ReadonlySet<string>;
   renderSideBySide: boolean;
   visible: boolean;
   rootRef: RefObject<HTMLElement | null>;
@@ -22,10 +23,11 @@ export interface WalkthroughFindRevealRequest {
   nonce: number;
 }
 
-export const useWalkthroughFind = ({ view, renderSideBySide, visible, rootRef, selectStop, markStopActive }: UseWalkthroughFindOptions) => {
+export const useWalkthroughFind = ({ view, hiddenPaths, renderSideBySide, visible, rootRef, selectStop, markStopActive }: UseWalkthroughFindOptions) => {
   const runs = useMemo(() => (view ? enumerateFindRuns(view) : []), [view]);
+  const searchableRuns = useMemo(() => hiddenPaths ? runs.filter((run) => !hiddenPaths.has(run.path)) : runs, [hiddenPaths, runs]);
   const layout: DiffFindLayout = renderSideBySide ? 'side-by-side' : 'inline';
-  const sources = useMemo(() => buildFindSources(runs, layout), [layout, runs]);
+  const sources = useMemo(() => buildFindSources(searchableRuns, layout), [layout, searchableRuns]);
   const find = useDiffFind({ sources });
 
   const runByKey = useMemo(() => new Map(runs.map((run) => [run.key, run])), [runs]);

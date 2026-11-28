@@ -955,6 +955,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': 'Zawsze zezwalaj',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': 'Odmów uprawnienia',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': 'Następny zmieniony plik',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': 'Oznacz jako sprawdzony i przejdź do następnego pliku',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': 'Poprzedni zmieniony plik',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': 'Zarchiwizuj lub usuń wybrane sesje',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': 'Zaznacz wszystkie sesje',

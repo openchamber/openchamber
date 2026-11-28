@@ -21,6 +21,7 @@ import { ChangeScopeSelector } from '../ChangeScopeSelector';
 import { DiffViewOptionsMenu } from '../diffView/DiffViewOptionsMenu';
 import { MultiFileDiffEntry } from '../diffView/MultiFileDiffEntry';
 import { ReviewScopeAccordion, type StackedEntryHandles } from './ReviewScopeAccordion';
+import { ReviewScopeDrillPane } from './ReviewScopeDrillPane';
 import { useStackedLiveRows } from '@/hooks/useStackedLiveRows';
 import { useDiffViewComparisons } from '../diffView/useDiffViewComparisons';
 import { useDiffViewEditor } from '../diffView/useDiffViewEditor';
@@ -52,6 +53,8 @@ import { useI18n } from '@/lib/i18n';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 
 interface UnifiedReviewScopeViewProps {
+  unreviewedOnly?: boolean;
+  onChangeUnreviewedOnly?: (enabled: boolean) => void;
   visible: boolean;
   isWide: boolean;
   rootDirectory: string | undefined;
@@ -81,6 +84,8 @@ const COMMIT_PAGE_SIZE = 50;
 
 
 export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
+  unreviewedOnly = false,
+  onChangeUnreviewedOnly,
   visible,
   isWide,
   rootDirectory,
@@ -240,11 +245,6 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     }
   }
 
-  if (isWide && changedFiles.length > 0
-    && !(selectedFilePath && changedFiles.some((f) => f.path === selectedFilePath))) {
-    setSelectedFilePath(changedFiles[0].path);
-  }
-
   const { registerSectionRef, scrollTo, cancel: cancelScrollHold } = useScrollToSection();
   const expandTurnFile = React.useCallback((path: string) => {
     setSelectedFilePath(path);
@@ -254,20 +254,6 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     expandTurnFile(path);
     scrollTo(path);
   }, [expandTurnFile, scrollTo]);
-  useTurnChipNavigation({
-    visible,
-    isTurnScope: activeDiffScope === 'turn',
-    currentSessionId,
-    turnDiffSettled,
-    lastTurnDiffs,
-    rootDirectory,
-    effectiveDirectory,
-    rootIsGitRepo,
-    nestedRepos,
-    repositoryOptions,
-    files,
-    reveal: revealTurnFile,
-  });
 
   const effectiveLayout: 'inline' | 'side-by-side' = diffLayoutPreference === 'side-by-side' ? 'side-by-side' : 'inline';
   const getLayoutForFile = React.useCallback((path: string): 'inline' | 'side-by-side' => {
@@ -291,14 +277,40 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
     onAutoUnreviewed: React.useCallback((paths: string[]) => setExpandedFiles((prev) => new Set([...prev, ...paths])), []),
     onReviewedChange: React.useCallback((path: string, reviewed: boolean) => handleToggleFileExpanded(path, !reviewed), [handleToggleFileExpanded]),
   });
+  const visibleFiles = React.useMemo(
+    () => unreviewedOnly ? changedFiles.filter((file) => !reviewedPaths.has(file.path)) : changedFiles,
+    [changedFiles, reviewedPaths, unreviewedOnly],
+  );
+  if (isWide && visibleFiles.length > 0
+    && !(selectedFilePath && changedFiles.some((file) => file.path === selectedFilePath))) {
+    setSelectedFilePath(visibleFiles[0].path);
+  }
+  const revealRequestedFile = React.useCallback((path: string) => {
+    if (unreviewedOnly && reviewedPaths.has(path)) onChangeUnreviewedOnly?.(false);
+    revealTurnFile(path);
+  }, [onChangeUnreviewedOnly, reviewedPaths, revealTurnFile, unreviewedOnly]);
+  useTurnChipNavigation({
+    visible,
+    isTurnScope: activeDiffScope === 'turn',
+    currentSessionId,
+    turnDiffSettled,
+    lastTurnDiffs,
+    rootDirectory,
+    effectiveDirectory,
+    rootIsGitRepo,
+    nestedRepos,
+    repositoryOptions,
+    files,
+    reveal: revealRequestedFile,
+  });
 
   const handleExpandOrCollapseAll = React.useCallback(() => {
     if (expandedFiles.size > 0) {
       setExpandedFiles(new Set());
     } else {
-      setExpandedFiles(new Set(changedFiles.map((f) => f.path)));
+      setExpandedFiles(new Set(visibleFiles.map((f) => f.path)));
     }
-  }, [changedFiles, expandedFiles.size]);
+  }, [visibleFiles, expandedFiles.size]);
 
   const noopRegisterRef = React.useCallback(() => {}, []);
 
@@ -316,20 +328,20 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
 
   const resolvedWideFilePath = React.useMemo(() => {
     if (selectedFilePath && changedFiles.some((f) => f.path === selectedFilePath)) {
-      return selectedFilePath;
+      return unreviewedOnly && reviewedPaths.has(selectedFilePath) ? null : selectedFilePath;
     }
-    return changedFiles[0]?.path ?? null;
-  }, [changedFiles, selectedFilePath]);
+    return visibleFiles[0]?.path ?? null;
+  }, [changedFiles, reviewedPaths, selectedFilePath, unreviewedOnly, visibleFiles]);
 
-  const { rootRef: findRootRef, diffFind, findReveal, findFocusNonce, findPropsFor, scrollToLocation } = useReviewScopeDiffNavigation({
+  const { rootRef: findRootRef, diffFind, findReveal, findFocusNonce, findPropsFor, scrollToLocation, toggleReviewedAndAdvance } = useReviewScopeDiffNavigation({
     directory: effectiveDirectory ?? undefined,
     git,
     visible,
     filesShown,
     isWide,
     scope: activeDiffScope,
-    changedFiles,
-    currentPath: isWide ? resolvedWideFilePath : selectedFilePath,
+    changedFiles: visibleFiles,
+    currentPath: isWide ? resolvedWideFilePath : selectedFilePath, reviewedPaths, toggleReviewed,
     reveal: expandTurnFile,
     revealStep: revealTurnFile,
     cancelScrollHold,
@@ -353,7 +365,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
       if (origin.kind === 'change-request') setPrDrilled(true);
       if (origin.kind === 'commit') setDrilledCommit(commitDrillKey(origin.hash));
     },
-    revealFile: revealTurnFile,
+    revealFile: revealRequestedFile,
     scrollToLocation,
   });
 
@@ -423,7 +435,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         readOnlyActions
         hunkActionsEnabled={false}
         isReviewed={reviewedPaths.has(file.path)}
-        onToggleReviewed={toggleReviewed}
+        onToggleReviewed={toggleReviewedAndAdvance}
         {...findPropsFor(file.path)}
       />
     );
@@ -515,7 +527,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   const renderAccordion = () => (
     <ReviewScopeAccordion
       listKey={JSON.stringify([effectiveDirectory, activeDiffScope, selectedCommitHash])}
-      files={changedFiles}
+    files={visibleFiles}
       expandedFiles={expandedFiles}
       findRevealKey={diffFind.isOpen && findReveal ? findReveal.key : null}
       registerSectionRef={registerSectionRef}
@@ -526,7 +538,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   );
 
   const renderSelectedFile = () => {
-    const selectedFile = changedFiles.find((f) => f.path === resolvedWideFilePath) ?? null;
+    const selectedFile = visibleFiles.find((f) => f.path === resolvedWideFilePath) ?? null;
     return selectedFile ? (
       <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal preventOverscroll data-diff-virtual-root>
         <div data-diff-virtual-content>{renderEntry(selectedFile, true)}</div>
@@ -536,7 +548,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
 
   const renderFileTree = () => (
     <FileTree
-      changedFiles={changedFiles}
+      changedFiles={visibleFiles}
       selectedFile={resolvedWideFilePath}
       onSelectFile={setSelectedFilePath}
       reviewedPaths={reviewedPaths}
@@ -617,33 +629,9 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
   );
 
   const renderDrillScope = (list: React.ReactNode, header: React.ReactNode, drilled: boolean, selectPrompt: string) => {
-    const emptyOrError = header ? renderDiffEmptyOrError() : null;
-    if (isWide) {
-      return (
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <GitSidebarColumn>
-            {drilled && header ? (
-              <>
-                {header}
-                {emptyOrError ? null : renderFileTree()}
-              </>
-            ) : list}
-          </GitSidebarColumn>
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            {header ? (emptyOrError ?? renderSelectedFile()) : renderSelectPrompt(selectPrompt)}
-          </div>
-        </div>
-      );
-    }
-    if (drilled && header) {
-      return (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {header}
-          {emptyOrError ?? renderAccordion()}
-        </div>
-      );
-    }
-    return list;
+    const emptyOrError = header ? renderDiffEmptyOrError()
+      ?? (visibleFiles.length === 0 ? renderSelectPrompt(t('diffView.reviewed.allReviewed')) : null) : null;
+    return <ReviewScopeDrillPane {...{ isWide, list, header, drilled, emptyOrError, renderFileTree, renderSelectedFile, renderAccordion }} selectPrompt={renderSelectPrompt(selectPrompt)} />;
   };
 
   const renderBody = () => {
@@ -657,6 +645,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
 
     const emptyOrError = renderDiffEmptyOrError();
     if (emptyOrError) return emptyOrError;
+    if (visibleFiles.length === 0) return renderSelectPrompt(t('diffView.reviewed.allReviewed'));
 
     if (isWide) {
       return (
@@ -771,6 +760,8 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
           ) : null}
 
           <DiffViewOptionsMenu
+            unreviewedOnly={filesShown ? unreviewedOnly : undefined}
+            onChangeUnreviewedOnly={onChangeUnreviewedOnly}
             diffWrapLines={diffWrapLines}
             onToggleWrapLines={() => setDiffWrapLines(!diffWrapLines)}
             diffHideWhitespace={diffHideWhitespace}
@@ -791,7 +782,7 @@ export const UnifiedReviewScopeView: React.FC<UnifiedReviewScopeViewProps> = ({
         </div>
       </ContextPanelHeaderToolbar>
 
-      <div ref={findRootRef} data-find-surface="" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div ref={findRootRef} tabIndex={-1} data-find-surface="" className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <GitDiffFindBar find={diffFind} focusNonce={findFocusNonce} />
         {renderBody()}
       </div>

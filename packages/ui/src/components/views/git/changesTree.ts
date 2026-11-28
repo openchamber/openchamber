@@ -132,3 +132,8 @@ export const flattenChangesTree = <F extends TreeFile>(
   walk(root, 0);
   return rows;
 };
+
+export const changesTreeFileOrder = <F extends TreeFile>(files: F[]): F[] =>
+  flattenChangesTree(buildChangesTree(files), () => true).flatMap((row) =>
+    row.kind === 'file' ? [row.file] : [],
+  );

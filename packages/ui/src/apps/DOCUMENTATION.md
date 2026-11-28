@@ -107,6 +107,11 @@
 
 ### Changes and files
 
+- The Changes list and detail share the same review scope and fingerprints as
+  desktop Changes. Marking a file advances through the remaining files in the
+  current comparison or, in working changes, through Staged then Changes. With
+  the unreviewed filter on, marking the last file returns to the list.
+
 - Changes waits for the requested repository before applying commit scope; a repository outside the folder cannot borrow another repository's commit selection. Explicit commit navigation ends a board-selected PR override, and every repository change clears repository-bound PR selection.
 - A changed-file request looks in its turn first (Last turn, or the older turn its chip names), then in its repository's freshly read working-tree status. The request carries the chip's session and folder, which read the turn, and the session on screen at the click, which owns it: only an answer while that session is on screen settles it, so a chip from another session still reaches the working-tree step; failed reads retain Retry. Manual navigation or leaving the scope ends the request, while repository resolution alone does not replay it. The older turn's folder lives in the pane's navigation, not in the surface's root, so a project switch drops the selection with the owner and the list, Last turn and Git actions belong to the new project.
 - Comparison expansion belongs to the exact path, range and retry cache entry. Branch and commit views request full context from Git; PR views reconstruct full contents from GitHub's two file versions. A pure rename has no hunks to draw. New nested-repository answers supersede earlier declined-diff results.

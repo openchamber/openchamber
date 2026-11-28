@@ -396,6 +396,12 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label',
     },
     {
+      id: 'diff_review_next_file',
+      defaultBinding: 'alt+shift+arrowdown',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label',
+    },
+    {
       id: 'previous_project',
       defaultBinding: 'ctrl+alt+arrowup',
       nativeMenu: 'non-mac',

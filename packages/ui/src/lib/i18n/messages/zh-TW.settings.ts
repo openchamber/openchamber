@@ -1278,6 +1278,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': '一律允許',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': '拒絕權限',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': '下一個已變更檔案',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': '標記為已檢視並前往下一個檔案',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': '上一個已變更檔案',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': '封存或刪除所選工作階段',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': '選取所有工作階段',

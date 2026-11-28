@@ -1303,6 +1303,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label': 'Toujours autoriser',
   'settings.openchamber.keyboardShortcuts.action.permission_deny.label': 'Refuser l’autorisation',
   'settings.openchamber.keyboardShortcuts.action.diff_next_file.label': 'Fichier modifié suivant',
+  'settings.openchamber.keyboardShortcuts.action.diff_review_next_file.label': 'Marquer comme vérifié et passer au fichier suivant',
   'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label': 'Fichier modifié précédent',
   'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label': 'Archiver ou supprimer les sessions sélectionnées',
   'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label': 'Sélectionner toutes les sessions',

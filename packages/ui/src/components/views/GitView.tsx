@@ -1,7 +1,8 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useConfigStore } from '@/stores/useConfigStore';
-import type { GitIdentityProfile, GitStatus } from '@/lib/api/types';
+import type { GitIdentityProfile } from '@/lib/api/types';
+import { isStagedStatusFile, isWorkingStatusFile as isUnstagedStatusFile } from './diffView/diffData';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -204,17 +205,6 @@ const matchGitmojiFromSubject = (subject: string, gitmojis: GitmojiEntry[]): Git
   return null;
 };
 
-const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
-  const indexStatus = file.index?.trim();
-  return Boolean(indexStatus && indexStatus !== '?');
-};
-
-const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
-  const workingStatus = file.working_dir?.trim();
-  const indexStatus = file.index?.trim();
-  return Boolean(workingStatus || indexStatus === '?');
-};
-
 type GitViewProps = {
   isActive: boolean;
   diffScope?: PendingDiffScope | null;
@@ -371,6 +361,7 @@ const GitViewBody: React.FC<GitViewProps> = ({
   ), [diffFileLayout, diffLayoutPreference]);
 
   const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+  const [unreviewedOnly, setUnreviewedOnly] = React.useState(false);
   const closeReviewDialog = React.useCallback(() => setReviewDialogOpen(false), []);
   const { submitting: reviewFlowSubmitting, start: handleStartReviewFlow } = useReviewFlowStart(
     currentSessionId,
@@ -2275,6 +2266,8 @@ const GitViewBody: React.FC<GitViewProps> = ({
 
   const workingTrailingControls = (
     <DiffViewOptionsMenu
+      unreviewedOnly={hasWorkingChanges ? unreviewedOnly : undefined}
+      onChangeUnreviewedOnly={setUnreviewedOnly}
       diffWrapLines={diffWrapLines}
       onToggleWrapLines={() => setDiffWrapLines(!diffWrapLines)}
       diffHideWhitespace={diffHideWhitespace}
@@ -2383,6 +2376,8 @@ const GitViewBody: React.FC<GitViewProps> = ({
 
           {hasWorkingChanges && gitDirectory ? (
             <UnifiedWorkingChangesBody
+              unreviewedOnly={unreviewedOnly}
+              onChangeUnreviewedOnly={setUnreviewedOnly}
               directory={gitDirectory}
               visible={isActive}
               isWide={isWide}
@@ -2415,6 +2410,8 @@ const GitViewBody: React.FC<GitViewProps> = ({
         </>
       ) : (
         <UnifiedReviewScopeView
+          unreviewedOnly={unreviewedOnly}
+          onChangeUnreviewedOnly={setUnreviewedOnly}
           visible={isActive}
           isWide={isWide}
           rootDirectory={currentDirectory}

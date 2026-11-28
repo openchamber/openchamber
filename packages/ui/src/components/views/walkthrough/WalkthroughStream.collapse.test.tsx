@@ -137,9 +137,11 @@ test('WalkthroughStream folds steps and files, collapses reviewed files, and rev
     const Harness = ({
       reviewed = EMPTY_SET,
       revealRequest = null,
+      unreviewedOnly = false,
     }: {
       reviewed?: ReadonlySet<string>;
       revealRequest?: { stopId: string; runKey: string; path: string; nonce: number } | null;
+      unreviewedOnly?: boolean;
     }) => {
       const [reviewedPaths, setReviewedPaths] = React.useState<ReadonlySet<string>>(reviewed);
       React.useEffect(() => {
@@ -158,6 +160,8 @@ test('WalkthroughStream folds steps and files, collapses reviewed files, and rev
                 renderSideBySide={false}
                 wrapLines={false}
                 reviewedPaths={reviewedPaths}
+                unreviewedOnly={unreviewedOnly}
+                allFilesReviewed={reviewedPaths.size === result.hunks.length}
                 onToggleFileReviewed={(path) => {
                   setReviewedPaths((prev) => {
                     const next = new Set(prev);
@@ -239,6 +243,16 @@ test('WalkthroughStream folds steps and files, collapses reviewed files, and rev
       reviewButtons()[0].click();
     });
     expect(fileButtons()[0].getAttribute('aria-expanded')).toBe('false');
+
+    await render({ reviewed: new Set(['src/a.ts']), unreviewedOnly: true });
+    expect(host.textContent).toContain('Step one prose.');
+    expect(fileButtons()).toHaveLength(1);
+    expect(fileButtons()[0].textContent).toContain('b.ts');
+    await act(async () => reviewButtons()[0].click());
+    expect(fileButtons()).toHaveLength(0);
+    expect(host.textContent).toContain('All files reviewed');
+    await render({ reviewed: new Set(['src/a.ts', 'src/b.ts']) });
+    expect(fileButtons()).toHaveLength(2);
   } finally {
     await act(async () => {
       root.unmount();

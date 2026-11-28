@@ -13,6 +13,20 @@ export const isNewStatusFile = (file: GitStatus['files'][number]): boolean => {
     return index === 'A' || workingDir === 'A' || index === '?' || workingDir === '?';
 };
 
+export function toWorkingFileEntry(
+    file: GitStatus['files'][number],
+    statsScope: 'staged' | 'working',
+    diffStats: GitStatus['diffStats'],
+): FileEntry {
+    const stats = diffStats?.[statsScope]?.[file.path];
+    return {
+        ...file,
+        insertions: stats?.insertions ?? 0,
+        deletions: stats?.deletions ?? 0,
+        isNew: isNewStatusFile(file),
+    };
+}
+
 export const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
     const indexCode = file.index?.trim();
     return Boolean(indexCode && indexCode !== '?');
@@ -20,7 +34,7 @@ export const isStagedStatusFile = (file: GitStatus['files'][number]): boolean =>
 
 export const isWorkingStatusFile = (file: GitStatus['files'][number]): boolean => {
     const workingCode = file.working_dir?.trim();
-    return Boolean(workingCode) || file.index === '?';
+    return Boolean(workingCode) || file.index?.trim() === '?';
 };
 
 export const toAbsolutePath = (directory: string, filePath: string): string => {
