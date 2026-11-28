@@ -20,7 +20,7 @@ const contribution = {
     token: { header: 'authorization', scheme: 'bearer' },
     oauth: { authorizeUrl: '/hub/api/rest/oauth2/auth', tokenUrl: '/hub/api/rest/oauth2/token', scopes: ['YouTrack'] },
   },
-  capabilities: { multipleAccounts: true, stateUpdate: true, children: true, labels: true, priority: true, filters: { people: true, priority: true }, projectMapping: true, sessionComments: true },
+  capabilities: { multipleAccounts: true, stateUpdate: true, children: true, labels: true, priority: true, fields: true, filters: { people: true, priority: true }, projectMapping: true, sessionComments: true },
   stateFilters: ['open', 'all', 'todo', 'in-progress', 'done'],
   identifier: 'key-number',
   urls: { item: ['/issue/{id}'] },
@@ -38,6 +38,7 @@ const INSTANCE = 'https://yt.example.com';
 const summary = (identifier = 'PROJ-1') => ({
   id: `id-${identifier}`, identifier, title: `Item ${identifier}`, url: `${INSTANCE}/issue/${identifier}`,
   state: { id: 's-1', name: 'Open', category: 'todo' }, priority: 'high', labels: [], assignee: null, container: { id: 'p-1', key: 'PROJ', name: 'Project' },
+  fields: [{ id: 'f-1', label: 'Story points', value: '5' }],
 });
 
 const dirs = [];
@@ -277,7 +278,7 @@ describe('reading and writing through an extension tracker', () => {
     const h = await harness();
     await connect(h);
     const list = await h.tracker.list({ query: 'login', state: 'todo', people: 'me', priority: 'all', containerId: null });
-    expect(list).toMatchObject({ connected: true, hasMore: false, cursor: null, items: [{ provider: 'ext-youtrack', identifier: 'PROJ-1' }] });
+    expect(list).toMatchObject({ connected: true, hasMore: false, cursor: null, items: [{ provider: 'ext-youtrack', identifier: 'PROJ-1', fields: [{ id: 'f-1', label: 'Story points', value: '5' }] }] });
     const listCall = h.calls.at(-1).request;
     expect(listCall).toMatchObject({ method: 'items.list', session: { instance: INSTANCE, account: { id: 'u-1', login: 'mona' } }, input: { query: 'login', state: 'todo', people: 'me', priority: 'all', containerId: null } });
     expect(h.calls.at(-1).params.granted).toEqual(['service']);

@@ -14,6 +14,7 @@ export type TrackerItemSummary = {
   state: { id: string | null; name: string; category: TrackerStateCategory | null } | null;
   priority?: TrackerPriority | null;
   labels?: { id: string; name: string; color: string | null }[];
+  fields?: { id: string; label: string; value: string }[];
   assignee?: TrackerPerson | null;
   container?: { id: string; key: string | null; name: string } | null;
   parent?: TrackerItemSummary | null;
@@ -84,6 +85,7 @@ export type TrackerDescriptor = {
     children: boolean;
     labels: boolean;
     priority: boolean;
+    fields: boolean;
     filters: { people: boolean; priority: boolean };
     projectMapping: boolean;
     sessionComments: boolean;

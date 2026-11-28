@@ -1,4 +1,6 @@
 export type { SourceControlReviewState, SourceControlReviewSummary } from './source-control-reviews.ts';
+import type { TrackerProviderContainer, TrackerProviderItem, TrackerProviderItemSummary, TrackerProviderPriority, TrackerProviderStateCategory } from './tracker-provider-items.ts';
+export type { TrackerProviderComment, TrackerProviderContainer, TrackerProviderField, TrackerProviderItem, TrackerProviderItemState, TrackerProviderItemSummary, TrackerProviderLabel, TrackerProviderPerson, TrackerProviderPriority, TrackerProviderProgress, TrackerProviderStateCategory } from './tracker-provider-items.ts';
 
 export const BROWSER_PROVIDER_PATH = '/browser-control';
 
@@ -700,39 +702,6 @@ export const trackerProviderTimeoutMs = (method: TrackerProviderMethod): number 
   return TRACKER_PROVIDER_READ_TIMEOUT_MS;
 };
 
-
-export type TrackerProviderStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
-export type TrackerProviderPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
-export type TrackerProviderPerson = { name: string | null; avatarUrl: string | null };
-export type TrackerProviderItemState = { id: string | null; name: string; category: TrackerProviderStateCategory | null };
-export type TrackerProviderContainer = { id: string; key: string | null; name: string };
-export type TrackerProviderLabel = { id: string; name: string; color: string | null };
-export type TrackerProviderProgress = { total: number; done: number; more: boolean };
-
-export type TrackerProviderItemSummary = {
-  id: string;
-  identifier: string;
-  title: string;
-  url: string;
-  state: TrackerProviderItemState | null;
-  priority?: TrackerProviderPriority | null;
-  labels?: TrackerProviderLabel[];
-  assignee?: TrackerProviderPerson | null;
-  container?: TrackerProviderContainer | null;
-  parent?: TrackerProviderItemSummary | null;
-  progress?: TrackerProviderProgress | null;
-  updatedAt?: string | null;
-};
-
-export type TrackerProviderComment = { id: string; body: string; createdAt: string | null; author: TrackerProviderPerson | null };
-
-export type TrackerProviderItem = TrackerProviderItemSummary & {
-  description?: string | null;
-  comments?: TrackerProviderComment[];
-  children?: TrackerProviderItemSummary[];
-  childrenMore?: boolean;
-};
-
 export type TrackerProviderWorkflowState = { id: string; name: string; category: TrackerProviderStateCategory | null; position: number };
 export type TrackerProviderLiveSummary = { identifier: string; title: string; state: { name: string; category: TrackerProviderStateCategory } };
 
@@ -854,7 +823,6 @@ export const createTrackerOutbound = ({ env }: { env: Record<string, string | un
       (message, code, status) => new TrackerOutboundError(message, code, status)),
   };
 };
-
 
 export const QUOTA_PROVIDER_PATH = '/quota';
 export const QUOTA_PROVIDER_WIRE_VERSION = 1;

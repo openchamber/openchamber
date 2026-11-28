@@ -20,6 +20,7 @@ export const LINEAR_TRACKER_DESCRIPTOR: TrackerDescriptor = Object.freeze({
     children: true,
     labels: true,
     priority: true,
+    fields: false,
     filters: Object.freeze({ people: true, priority: true }),
     projectMapping: true,
     sessionComments: true,

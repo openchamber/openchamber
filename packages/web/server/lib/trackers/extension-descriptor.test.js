@@ -8,7 +8,7 @@ const contribution = {
   label: 'YouTrack',
   instances: { kind: 'user', label: 'Server address' },
   auth: { token: { header: 'authorization', scheme: 'bearer' }, oauth: { authorizeUrl: '/hub/api/rest/oauth2/auth', tokenUrl: '/hub/api/rest/oauth2/token' } },
-  capabilities: { multipleAccounts: false, stateUpdate: true, children: false, labels: true, priority: false, filters: { people: true, priority: false }, projectMapping: true, sessionComments: true },
+  capabilities: { multipleAccounts: false, stateUpdate: true, children: false, labels: true, priority: false, fields: false, filters: { people: true, priority: false }, projectMapping: true, sessionComments: true },
   stateFilters: ['open', 'all', 'todo', 'in-progress', 'done', 'inReview'],
   identifier: 'key-number',
   urls: { item: ['/issue/{id}', '/{segments+}/issue/{id}', '/agiles/{segment}/current?issue={id}'] },
@@ -41,10 +41,12 @@ describe('buildExtensionTrackerDescriptor', () => {
       id: 'ext-youtrack',
       name: 'YouTrack',
       authMethods: ['oauth', 'token'],
-      capabilities: { stateUpdate: true, labels: true, projectMapping: true, sessionComments: true, hostAccess: false, multipleAccounts: false, filters: { people: true, priority: false } },
+      capabilities: { stateUpdate: true, labels: true, fields: false, projectMapping: true, sessionComments: true, hostAccess: false, multipleAccounts: false, filters: { people: true, priority: false } },
       stateFilters: contribution.stateFilters,
       identifierPattern: identifierPatternOf('key-number'),
     });
+    const withFields = buildExtensionTrackerDescriptor({ guestId: 'youtrack', contribution: { ...contribution, capabilities: { ...contribution.capabilities, fields: true } }, instance: null });
+    expect(withFields.capabilities).toMatchObject({ fields: true });
     expect(descriptor.urlPatterns).toEqual([
       { host: 'yt.example.com', path: '^/issue/([A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16})(?:/|$)' },
       { host: 'yt.example.com', path: '^/[^/]{1,256}(?:/[^/]{1,256}){0,19}/issue/([A-Za-z][A-Za-z0-9_]{0,31}-\\d{1,16})(?:/|$)' },

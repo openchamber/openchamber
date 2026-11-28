@@ -774,7 +774,7 @@ export type {
   TrackerProviderContainer,
   TrackerProviderContainersData,
   TrackerProviderDataByMethod,
-  TrackerProviderError,
+  TrackerProviderError, TrackerProviderField,
   TrackerProviderInputs,
   TrackerProviderItem,
   TrackerProviderItemData,

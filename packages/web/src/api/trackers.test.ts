@@ -25,6 +25,7 @@ const neutralItem = {
   assignee: { name: 'Ada', avatarUrl: null },
   container: { id: 'team-eng', key: 'ENG', name: 'Engineering' },
   labels: [{ id: 'l1', name: 'Bug', color: 'EB5757' }],
+  fields: [{ id: 'f1', label: 'Story points', value: '5' }],
   parent: null,
   progress: { total: 2, done: 1, more: false },
   updatedAt: '2026-09-30T10:00:00.000Z',
