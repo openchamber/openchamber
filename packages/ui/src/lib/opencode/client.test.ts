@@ -1417,6 +1417,7 @@ describe("messages and config", () => {
     const location = { directory: "/repo/app" }
     const provider = { id: "anthropic", name: "Anthropic" }
     const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants: [] }
+    const partialModel = { ...model, modelID: "early" }
     let pluginReads = 0
     pluginList = () => {
       pluginReads += 1
@@ -1425,10 +1426,11 @@ describe("messages and config", () => {
       return activatedPlugins()
     }
     const answer = (request: CapturedRequest) => {
+      const modelAtRead = pluginReads > 2 ? model : partialModel
       switch (request.url.pathname) {
         case "/api/debug/location": return HANG
-        case "/api/model": return json({ location, data: [model] })
-        case "/api/model/default": return json({ location, data: model })
+        case "/api/model": return json({ location, data: [modelAtRead] })
+        case "/api/model/default": return json({ location, data: modelAtRead })
         case "/api/provider": return json({ location, data: [provider] })
         default: return json({}, 404)
       }
