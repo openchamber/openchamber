@@ -705,7 +705,7 @@ export type TrackerProviderStateCategory = 'triage' | 'backlog' | 'todo' | 'in-p
 export type TrackerProviderPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
 export type TrackerProviderPerson = { name: string | null; avatarUrl: string | null };
 export type TrackerProviderItemState = { id: string | null; name: string; category: TrackerProviderStateCategory | null };
-export type TrackerProviderContainer = { id: string; key: string | null; name: string };
+export type TrackerProviderContainer = { id: string; key: string | null; name: string; kind?: 'project' | 'board' | 'sprint'; parent?: { id: string; key: string | null; name: string } | null };
 export type TrackerProviderLabel = { id: string; name: string; color: string | null };
 export type TrackerProviderProgress = { total: number; done: number; more: boolean };
 

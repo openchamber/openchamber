@@ -253,8 +253,29 @@ describe('web trackers: a server from before /api/tracker', () => {
     });
   });
 
-  it('writes in Linear field names and refuses any other tracker', async () => {
-    legacyServer(() => Response.json({ connected: true, defaultProjectPath: '/repo', teams: [{ id: 'team-eng', key: 'ENG', name: 'Engineering', projectPath: '/eng' }] }));
+  it('carries a container kind and parent through mapping and item reads', async () => {
+    trackerServer(() => Response.json({
+      connected: true,
+      defaultProjectPath: null,
+      containers: [
+        { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project', projectPath: '/proj' },
+        { id: 'b-1', key: null, name: 'Board', kind: 'board', parent: { id: 'p-1', key: 'PROJ', name: 'Project' }, projectPath: null },
+      ],
+    }));
+    const api = createWebTrackerAPI({ fetch: fetchMock });
+    const mapping = await api.mappingGet('jira');
+    expect(lastPath()).toBe('/api/tracker/jira/mapping');
+    expect(mapping).toEqual({
+      connected: true,
+      defaultProjectPath: null,
+      containers: [
+        { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project', projectPath: '/proj' },
+        { id: 'b-1', key: null, name: 'Board', kind: 'board', parent: { id: 'p-1', key: 'PROJ', name: 'Project' }, projectPath: null },
+      ],
+    });
+  });
+
+  it('writes in Linear field names and refuses any other tracker', async () => {    legacyServer(() => Response.json({ connected: true, defaultProjectPath: '/repo', teams: [{ id: 'team-eng', key: 'ENG', name: 'Engineering', projectPath: '/eng' }] }));
     const api = createWebTrackerAPI({ fetch: fetchMock });
     const mapping = await api.mappingSet('linear', { defaultProjectPath: '/repo', containerProjectPaths: { 'team-eng': '/eng' } });
     expect(lastPath()).toBe('/api/linear/mapping');

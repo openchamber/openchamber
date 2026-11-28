@@ -503,6 +503,14 @@ describe('tracker provider contract', () => {
     expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: 'done' } }] }).success).toBe(true);
     expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: null } }] }).success).toBe(false);
     expect(schemas.data['containers.list'].safeParse({ containers: [{ id: 'p-1', key: 'PROJ', name: 'Project' }] }).success).toBe(true);
+    expect(schemas.data['containers.list'].safeParse({ containers: [
+      { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project' },
+      { id: 'b-1', key: null, name: 'Board', kind: 'board', parent: { id: 'p-1', key: 'PROJ', name: 'Project' } },
+      { id: 's-1', key: null, name: 'Sprint 1', kind: 'sprint', parent: { id: 'b-1', key: null, name: 'Board' } },
+    ] }).success).toBe(true);
+    expect(schemas.data['containers.list'].safeParse({ containers: [{ id: 'e-1', key: null, name: 'Epic', kind: 'epic' }] }).success).toBe(false);
+    expect(schemas.data['containers.list'].safeParse({ containers: [{ id: 'b-1', key: null, name: 'Board', kind: 'board', parent: { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project' } }] }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, container: { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project' } }], cursor: null, hasMore: false }).success).toBe(true);
     expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9' } }).success).toBe(true);
     expect(schemas.data['comments.create'].safeParse({ comment: null }).success).toBe(true);
     expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9', body: 'echo' } }).success).toBe(false);

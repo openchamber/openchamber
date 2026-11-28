@@ -1,5 +1,9 @@
 import type { TrackerContainer, TrackerMappingResult } from './types';
 
+export function trackerProjectContainers<T extends TrackerContainer>(containers: readonly T[]): T[] {
+  return containers.filter((container) => (container.kind ?? 'project') === 'project');
+}
+
 export function resolveTrackerMappedProjectPath(
   mapping: TrackerMappingResult | null | undefined,
   container: TrackerContainer | null | undefined,
@@ -7,7 +11,7 @@ export function resolveTrackerMappedProjectPath(
   if (!mapping || mapping.connected === false) {
     return null;
   }
-  const containers = mapping.containers;
+  const containers = trackerProjectContainers(mapping.containers);
   if (container?.id) {
     const byId = containers.find((entry) => entry.id === container.id);
     if (byId?.projectPath) {

@@ -11,12 +11,13 @@ import { useI18n } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import type { TrackerAPI, TrackerContainerMapping, TrackerMappingResult, TrackerProviderId } from '@/lib/api/types';
+import { trackerProjectContainers } from '@/lib/trackers/projectMapping';
 import { trackerSettingsCopy } from './trackerSettingsCopy';
 
 type MappingView = { defaultProjectPath: string | null; containers: TrackerContainerMapping[] };
 
 const toView = (result: TrackerMappingResult): MappingView | null => (
-  result.connected ? { defaultProjectPath: result.defaultProjectPath, containers: result.containers } : null
+  result.connected ? { defaultProjectPath: result.defaultProjectPath, containers: trackerProjectContainers(result.containers) } : null
 );
 
 const NONE = '__none__';

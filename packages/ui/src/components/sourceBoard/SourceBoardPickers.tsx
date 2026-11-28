@@ -29,6 +29,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { trackerPresentation } from '@/lib/trackers/presentation';
+import { trackerContainerRows } from '@/lib/trackers/containerTree';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { useTrackerAuthEntry, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 
@@ -346,7 +347,11 @@ export const SourceBoardContainerPicker: React.FC<{
                 <DropdownMenuLabel>{t(copy.containerLabel)}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={selectedContainerId ?? ALL_CONTAINERS} onValueChange={(value) => onSelectContainer(value === ALL_CONTAINERS ? null : String(value))}>
                     <DropdownMenuRadioItem value={ALL_CONTAINERS}>{t(copy.containerAll)}</DropdownMenuRadioItem>
-                    {containers.map((container) => <DropdownMenuRadioItem key={container.id} value={container.id}>{container.name}</DropdownMenuRadioItem>)}
+                    {trackerContainerRows(containers).map(({ container, depth }) => (
+                        <DropdownMenuRadioItem key={container.id} value={container.id}>
+                            <span style={depth ? { paddingInlineStart: `${depth * 12}px` } : undefined}>{container.name}</span>
+                        </DropdownMenuRadioItem>
+                    ))}
                 </DropdownMenuRadioGroup>
                 {canSwitch && current ? (
                     <>

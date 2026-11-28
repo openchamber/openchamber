@@ -453,7 +453,11 @@ const trackerUrl = z.string().min(1).max(2_048).refine((value) => /^https?:\/\//
 const trackerCategory = z.enum(['triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled']);
 const trackerPriority = z.enum(['none', 'urgent', 'high', 'medium', 'low']);
 const trackerPerson = z.object({ name: z.string().max(256).nullable(), avatarUrl: z.string().max(2_048).nullable() }).strict();
-const trackerContainer = z.object({ id: trackerText, key: z.string().max(64).nullable(), name: z.string().min(1).max(256) }).strict();
+const trackerContainerRef = z.object({ id: trackerText, key: z.string().max(64).nullable(), name: z.string().min(1).max(256) }).strict();
+const trackerContainer = trackerContainerRef.extend({
+  kind: z.enum(['project', 'board', 'sprint']).optional(),
+  parent: trackerContainerRef.nullable().optional(),
+}).strict();
 const trackerState = z.object({ id: trackerText.nullable(), name: z.string().max(256), category: trackerCategory.nullable() }).strict();
 
 const trackerItemFields = {

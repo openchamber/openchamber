@@ -7,7 +7,13 @@ export type TrackerPerson = { name: string | null; avatarUrl: string | null };
 
 export type TrackerItemState = { id: string | null; name: string; category: TrackerStateCategory | null };
 
-export type TrackerContainer = { id: string; key: string | null; name: string };
+export type TrackerContainer = {
+  id: string;
+  key: string | null;
+  name: string;
+  kind?: 'project' | 'board' | 'sprint';
+  parent?: { id: string; key: string | null; name: string } | null;
+};
 
 export type TrackerLabel = { id: string; name: string; color: string | null };
 
