@@ -653,8 +653,6 @@ function App({ apis }: AppProps) {
     window.dispatchEvent(new Event('openchamber:app-ready'));
   }, [isInitialized, isSwitchingDirectory]);
 
-  // useEventStream replaced by SyncProvider + SyncBridge
-
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
   usePushVisibilityBeacon();

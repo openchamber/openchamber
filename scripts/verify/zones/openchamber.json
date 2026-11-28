@@ -4,6 +4,59 @@
   "sources": ["packages/ui/src/components/sections/openchamber/OpenChamberPage.tsx"],
   "features": [
     {
+      "id": "theme-editor",
+      "name": "Editing a local theme draft",
+      "sources": [
+        "packages/ui/src/components/sections/openchamber/ThemeEditorPage.tsx",
+        "packages/ui/src/components/sections/shared/SettingsColorField.tsx",
+        "packages/ui/src/lib/theme/editor.ts"
+      ],
+      "what": "The theme editor opens from Settings and rejects malformed native theme JSON while keeping its controls available.",
+      "reach": "Settings > Theme editor > Load.",
+      "proof": "The color rows and export action are visible. An invalid file reports an OpenChamber theme error and leaves Save available.",
+      "scenarios": [
+        {
+          "id": "invalid-file",
+          "kind": "break",
+          "title": "The editor opens and a malformed local file leaves the draft available",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Theme editor", "exact": true, "timeout": 60},
+            {"do": "see", "on": "dialog", "text": "surface.background"},
+            {"do": "see", "on": "settings.rowButton", "item": "theme-editor.files", "text": "Export", "exact": true},
+            {"do": "chooseFiles", "files": [{"name": "broken-theme.json", "content": "not json"}]},
+            {"do": "click", "on": "settings.rowButton", "item": "theme-editor.files", "text": "Load", "exact": true},
+            {"do": "see", "on": "toast", "text": "This is not a valid OpenChamber theme."},
+            {"do": "see", "on": "settings.rowButton", "item": "theme-editor.files", "text": "Save and use", "exact": true}
+          ]
+        },
+        {
+          "id": "invalid-export",
+          "kind": "break",
+          "title": "Exporting an unnamed draft reports an error and keeps editing available",
+          "steps": [
+            {"do": "open"},
+            {"do": "click", "on": "sidebar.settings"},
+            {"do": "click", "on": "dialog.button", "text": "Theme editor", "exact": true, "timeout": 60},
+            {"do": "click", "on": "settings.themeEditorName"},
+            {"do": "press", "key": "a", "mods": ["mod"]},
+            {"do": "press", "key": "Backspace"},
+            {"do": "click", "on": "settings.themeEditorBackgroundAlpha"},
+            {"do": "press", "key": "Home"},
+            {"do": "press", "key": "ArrowRight"},
+            {"do": "field", "on": "settings.themeEditorBackgroundAlpha", "equals": "0.01"},
+            {"do": "click", "on": "settings.rowButton", "item": "theme-editor.files", "text": "Export", "exact": true},
+            {"do": "see", "on": "toast", "text": "This is not a valid OpenChamber theme."},
+            {"do": "click", "on": "settings.themeEditorName"},
+            {"do": "type", "text": "Recovered theme"},
+            {"do": "field", "on": "settings.themeEditorBackgroundAlpha", "equals": "0.01"},
+            {"do": "see", "on": "settings.rowButton", "item": "theme-editor.files", "text": "Save and use", "exact": true, "disabled": false}
+          ]
+        }
+      ]
+    },
+    {
       "id": "themes",
       "name": "Color modes and local themes",
       "sources": [

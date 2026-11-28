@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
 import { isSplashColor } from './remote-page-policy.mjs';
+import { shouldUseLinuxTransparency } from './linux-window-transparency.mjs';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
 import { WINDOWS_REGISTRY_PATH_KEYS, expandWindowsEnvReferences, parseWindowsRegistryPath, windowsRegistryPathQuery } from '@openchamber/web/server/lib/opencode/windows-registry-path.js';
 
@@ -276,6 +277,7 @@ export const resolveMainWindowBounds = () => {
 };
 
 export const resolveSplashBackgroundColor = (themeSource = nativeTheme.themeSource) => {
+  if (usesTransparentWindow()) return '#00000000';
   const settings = readSettingsRoot();
   const dark = themeSource === 'dark' || (themeSource !== 'light' && nativeTheme.shouldUseDarkColors);
   return dark
@@ -310,6 +312,7 @@ export const buildRendererAdditionalArguments = ({
   explicitRuntime = false,
   trayEnabled = isMacMenuBarEnabled(),
   nativeFrame = usesLinuxNativeFrame(),
+  transparentWindow = usesTransparentWindow(),
 } = {}) => [
   `--openchamber-local-origin=${localOrigin}`,
   `--openchamber-dev-ui-origin=${devUiOrigin}`,
@@ -323,18 +326,34 @@ export const buildRendererAdditionalArguments = ({
   `--openchamber-relay-host-id=${relayHostId}`,
   `--openchamber-explicit-runtime=${explicitRuntime ? '1' : '0'}`,
   `--openchamber-native-frame=${nativeFrame ? '1' : '0'}`,
+  `--openchamber-transparent-window=${transparentWindow ? '1' : '0'}`,
 ];
 
-export const usesLinuxNativeFrame = () => (
+const usesLinuxNativeFrame = () => (
   process.platform === 'linux' && readSettingsRoot().desktopLinuxNativeFrame === true
 );
 
-export const usesFramelessChrome = () => (
+const usesFramelessChrome = () => (
   process.platform === 'win32' || (process.platform === 'linux' && !usesLinuxNativeFrame())
 );
 
-export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArguments }) => {
+const usesTransparentWindow = () => shouldUseLinuxTransparency({
+  platform: process.platform,
+  frameless: usesFramelessChrome(),
+  requested: process.env.OPENCHAMBER_TRANSPARENT_WINDOW,
+});
+
+export const buildWindowChromeOptions = () => {
   const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome();
+  return {
+    transparent: usesTransparentWindow(),
+    frame: usesLinuxNativeFrame(),
+    autoHideMenuBar: process.platform !== 'darwin',
+    titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
+  };
+};
+
+export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArguments }) => {
   const options = {
     title: 'OpenChamber',
     width: bounds?.width ?? DEFAULT_WINDOW_WIDTH,
@@ -344,9 +363,7 @@ export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArgu
     icon: getWindowIconPath(),
     show: false,
     backgroundColor,
-    frame: usesLinuxNativeFrame(),
-    autoHideMenuBar: process.platform !== 'darwin',
-    titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
+    ...buildWindowChromeOptions(),
     titleBarOverlay: false,
     trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
     acceptFirstMouse: true,

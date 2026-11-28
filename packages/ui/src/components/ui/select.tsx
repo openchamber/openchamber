@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import type { VariantProps } from "class-variance-authority"
 import { Select as BaseSelect } from "@base-ui/react/select"
 import type { SelectRootChangeEventDetails } from "@base-ui/react/select";
 
@@ -136,12 +137,13 @@ function SelectValue({ placeholder, children, ...props }: SelectValueProps) {
 
 function SelectTrigger({
   className,
+  size,
   children,
   asChild,
   onPointerDownCapture,
   onFocusCapture,
   ...props
-}: React.ComponentProps<typeof BaseSelect.Trigger> & AsChildProps) {
+}: React.ComponentProps<typeof BaseSelect.Trigger> & AsChildProps & VariantProps<typeof dropdownTriggerVariants>) {
   const portalContext = React.useContext(SelectPortalContext);
 
   const syncPortalContainer = React.useCallback((target: EventTarget | null) => {
@@ -160,7 +162,7 @@ function SelectTrigger({
     <BaseSelect.Trigger
       data-slot="select-trigger"
       className={cn(
-        dropdownTriggerVariants(),
+        dropdownTriggerVariants({ size }),
         "w-fit data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
         className
       )}

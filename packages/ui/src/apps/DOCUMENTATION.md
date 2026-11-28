@@ -10,6 +10,10 @@
 
 `ElectronMiniChatApp` owns the desktop mini-chat renderer. `AppEffects` coordinates shared application effects. `deepLinks` owns the pure URL vocabulary; `deepLinkNavigation` applies parsed intents and connects native entry points to shell navigation. Native widgets consume snapshots built here; their rendering and persistence belong to `packages/mobile`.
 
+`SyncRuntimeEffects` owns the settings-file subscription once per app. App roots
+mount that shared owner and do not subscribe again, because each subscriber
+invalidates the settings cache and starts its own read.
+
 ## Invariants
 
 - Mobile custom headers belong to the normalized address entered in the form. They reach that address's health check, password login, session check and runtime HTTP requests. They never follow another direct candidate or the private relay. Authorization remains reserved for the client token.

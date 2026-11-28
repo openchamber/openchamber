@@ -69,6 +69,15 @@ export function withOpacity(value: string, alpha: number): string {
   return color ? `${hexColor(color)}${Math.round(alpha * 255).toString(16).padStart(2, '0')}` : `color-mix(in srgb, ${value} ${alpha * 100}%, transparent)`;
 }
 
+export function opaqueColor(value: string): string {
+  if (value.startsWith('rgb(from ') && value.endsWith(' r g b / 1)')) return value;
+  const color = parseColor(value);
+  if (color) return color.a === 1 ? value : hexColor(color);
+  return /^[a-z]+$/i.test(value) && value.toLowerCase() !== 'transparent'
+    ? value
+    : `rgb(from ${value} r g b / 1)`;
+}
+
 export function mixColor(foreground: string, background: string, amount: number, canvas = '#ffffff'): string {
   const fg = parseColor(foreground), bg = parseColor(background), under = parseColor(canvas);
   return fg && bg && under ? hexColor(over({ ...fg, a: fg.a * amount }, over(bg, under))) : `color-mix(in srgb, ${foreground} ${amount * 100}%, ${background})`;

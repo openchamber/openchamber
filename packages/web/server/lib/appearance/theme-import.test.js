@@ -119,12 +119,24 @@ describe('theme import persistence', () => {
   });
   it('saves through the API under a server-owned ID and returns it through reload', async () => {
     const { app, themesDir, root } = await setup();
-    const response = await request(app).post('/api/config/themes').send({ theme: definition }).expect(201);
+    const config = { backgroundOpacity: 0.4, fonts: { mono: '"Example Mono", monospace' }, transitions: { fast: '100ms' } };
+    const response = await request(app).post('/api/config/themes').send({ theme: { ...definition, config } }).expect(201);
+    expect(response.body.theme.config).toEqual(config);
     expect(response.body.theme.metadata.id).toMatch(/^imported-vscode-[a-f0-9]{24}$/);
     expect(await fs.readdir(root)).toEqual(['themes']);
     expect(await fs.readdir(themesDir)).toEqual([`${response.body.theme.metadata.id}.json`]);
     const loaded = await request(app).get('/api/config/themes').expect(200);
     expect(loaded.body.themes).toEqual([response.body.theme]);
+  });
+
+  it('rejects invalid background opacity and CSS config before publication', async () => {
+    const { app, root } = await setup();
+    for (const config of [
+      { backgroundOpacity: 0 }, { backgroundOpacity: 1.1 },
+      { fonts: { mono: 'serif; body { color: red }' } },
+      { fonts: { mono: 'url(https://example.com/font)' } },
+    ]) await request(app).post('/api/config/themes').send({ theme: { ...definition, config } }).expect(400);
+    expect(await fs.readdir(root)).toEqual([]);
   });
 
   it('deduplicates simultaneous imports and never overwrites a subsequently edited theme', async () => {

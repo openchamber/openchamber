@@ -19,6 +19,7 @@ export type SettingsPageSlug =
   | 'skills.catalog'
   | 'git'
   | 'appearance'
+  | 'theme-editor'
   | 'chat'
   | 'shortcuts'
   | 'sessions'
@@ -32,6 +33,38 @@ export type SettingsPageSlug =
   | 'about'
   | 'integrations'
   | 'extensions';
+
+export const SETTINGS_PAGE_ORDER: SettingsPageSlug[] = [
+  'general',
+  'appearance',
+  'theme-editor',
+  'chat',
+  'notifications',
+  'sessions',
+  'routing',
+  'shortcuts',
+  'voice',
+  'integrations',
+  'extensions',
+  'usage',
+  'about',
+  'projects',
+  'remote-instances',
+  'tunnel',
+  'git',
+  'isolated-spaces',
+  'providers',
+  'web-search',
+  'agents',
+  'behavior',
+  'commands',
+  'mcp',
+  'plugins',
+  'magic-prompts',
+  'snippets',
+  'skills.installed',
+  'skills.catalog',
+];
 
 type SettingsPageGroup =
   | 'general'
@@ -183,6 +216,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['tools', 'diff', 'reasoning', 'dotfiles', 'draft', 'queue', 'output', 'copy', 'image', 'split messages', 'message actions'],
   },
   {
+    slug: 'theme-editor',
+    title: 'Theme editor',
+    group: 'general',
+    kind: 'single',
+    keywords: ['colors', 'palette', 'theme', 'opacity', 'transparency', 'import', 'export'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     slug: 'shortcuts',
     title: 'Shortcuts',
     group: 'general',
@@ -290,6 +331,7 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
     case 'remote-instances':
       return 'computer';
     case 'appearance':
+    case 'theme-editor':
       return 'palette';
     case 'chat':
       return 'chat-ai-3';

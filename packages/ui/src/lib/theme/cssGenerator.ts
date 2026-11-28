@@ -2,6 +2,8 @@ import type { Theme } from '@/types/theme';
 import { SEMANTIC_TYPOGRAPHY, VSCODE_TYPOGRAPHY } from '@/lib/typography';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { resolveSyntaxTokens } from './syntax';
+import { hasWindowSurfaceAlpha, translucentWindowCSS } from './transparency';
+import { componentColors } from './componentColors';
 import { withOpacity } from './color';
 import { getReadableThemeColors } from './readableColors';
 
@@ -50,7 +52,7 @@ export class CSSVariableGenerator {
 
     cssVars.push(...this.generateSyntaxColors(theme.colors.syntax));
 
-    cssVars.push(...this.generateComponentColors(theme.colors, theme));
+    cssVars.push(...this.generateComponentColors(theme));
     cssVars.push(...this.generateReadableColors(theme));
 
     cssVars.push(...this.generateTypographyVariables());
@@ -145,7 +147,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     return vars;
   }
 
-  apply(theme: Theme): void {
+  apply(theme: Theme, backgroundOpacity: number | null = null): void {
     const cssVars = this.generate(theme);
     const style = document.createElement('style');
     style.id = 'opencode-theme-variables';
@@ -161,6 +163,10 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       styleContent = `:root {\n${cssVars}\n}\n\n:root:not(.dark) {\n${cssVars}\n}`;
       document.documentElement.classList.remove('dark');
       document.documentElement.classList.add('light');
+    }
+
+    if (backgroundOpacity !== null && (backgroundOpacity < 1 || hasWindowSurfaceAlpha(theme))) {
+      styleContent += translucentWindowCSS(theme, backgroundOpacity);
     }
 
     style.textContent = styleContent;
@@ -283,56 +289,20 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     ];
   }
 
-  private generateComponentColors(colors: Theme['colors'], theme: Theme): string[] {
-    return [
-      ...this.generateMarkdownColors(colors.markdown ?? {}, theme),
-      `  --chat-user-message-bg: ${colors.chat?.userMessageBackground ?? colors.surface.elevated};`,
-      `  --chat-divider: ${colors.chat?.divider ?? colors.interactive.border};`,
-      ...this.generateToolColors(colors.tools, theme),
-    ];
-  }
-
-  private generateMarkdownColors(markdown: Record<string, string>, theme: Theme): string[] {
-    const vars: string[] = [];
-    const primary = theme.colors.primary.base;
-    const chatBackground = theme.colors.chat?.background || theme.colors.surface.background;
-
-    vars.push(`  --markdown-link: ${markdown.link || primary};`);
-    vars.push(`  --markdown-link-hover: ${markdown.linkHover || theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || theme.colors.syntax.base.string};`);
-    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || chatBackground};`);
-    vars.push(`  --markdown-blockquote: ${markdown.blockquote || theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-blockquote-border: ${markdown.blockquoteBorder || theme.colors.interactive.border};`);
-    vars.push(`  --markdown-list-marker: ${markdown.listMarker || this.opacity(primary, 0.6)};`);
-    vars.push(`  --markdown-bold: ${markdown.bold || theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-italic: ${markdown.italic || this.opacity(theme.colors.surface.foreground, 0.9)};`);
-    vars.push(`  --markdown-strikethrough: ${markdown.strikethrough || theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-hr: ${markdown.hr || theme.colors.interactive.border};`);
-
-    return vars;
-  }
-
-  private generateToolColors(tools: Theme['colors']['tools'], theme: Theme): string[] {
-    const vars: string[] = [];
-
-    vars.push(`  --tools-border: ${tools?.border || this.opacity(theme.colors.interactive.border, 0.3)};`);
-    vars.push(`  --tools-icon: ${tools?.icon || theme.colors.surface.mutedForeground};`);
-    vars.push(`  --tools-title: ${tools?.title || theme.colors.surface.foreground};`);
-    vars.push(`  --tools-description: ${tools?.description || this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
-
-    if (tools?.edit) {
-      vars.push(`  --tools-edit-added-bg: ${tools.edit.addedBackground || theme.colors.status.successBackground};`);
-      vars.push(`  --tools-edit-removed-bg: ${tools.edit.removedBackground || theme.colors.status.errorBackground};`);
-      vars.push(`  --tools-edit-modified-bg: ${tools.edit.modifiedBackground || theme.colors.status.infoBackground};`);
-      vars.push(`  --tools-edit-line-number: ${tools.edit.lineNumber || this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
-    } else {
-      vars.push(`  --tools-edit-added-bg: ${theme.colors.status.successBackground};`);
-      vars.push(`  --tools-edit-removed-bg: ${theme.colors.status.errorBackground};`);
-      vars.push(`  --tools-edit-modified-bg: ${theme.colors.status.infoBackground};`);
-      vars.push(`  --tools-edit-line-number: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
-    }
-
-    return vars;
+  private generateComponentColors(theme: Theme): string[] {
+    const { chat, markdown: m, tools: t } = componentColors(theme);
+    const variables = {
+      'chat-user-message-bg': chat.userMessageBackground, 'chat-divider': chat.divider,
+      'markdown-link': m.link, 'markdown-link-hover': m.linkHover,
+      'markdown-inline-code': m.inlineCode, 'markdown-inline-code-bg': m.inlineCodeBackground,
+      'markdown-blockquote': m.blockquote, 'markdown-blockquote-border': m.blockquoteBorder,
+      'markdown-list-marker': m.listMarker, 'markdown-bold': m.bold, 'markdown-italic': m.italic,
+      'markdown-strikethrough': m.strikethrough, 'markdown-hr': m.hr,
+      'tools-border': t.border, 'tools-icon': t.icon, 'tools-title': t.title, 'tools-description': t.description,
+      'tools-edit-added-bg': t.edit.addedBackground, 'tools-edit-removed-bg': t.edit.removedBackground,
+      'tools-edit-modified-bg': t.edit.modifiedBackground, 'tools-edit-line-number': t.edit.lineNumber,
+    };
+    return Object.entries(variables).map(([name, value]) => `  --${name}: ${value};`);
   }
 
   private generateConfigVariables(config: Theme['config']): string[] {

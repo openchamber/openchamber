@@ -6,7 +6,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 import { extensionPowersI18n } from './extension-powers.i18n';
+import { themeEditorI18n } from './theme-editor.i18n';
 export const settingsDict = {
+  ...themeEditorI18n['pt-BR'],
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Conta o período de retenção a partir do arquivamento. As sessões expiradas são excluídas.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Conta o período de retenção a partir da última atividade da sessão. As sessões expiradas são arquivadas.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Conta o período de retenção a partir da última atividade da sessão. As sessões expiradas são excluídas.',

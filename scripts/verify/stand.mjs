@@ -454,16 +454,8 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     return JSON.stringify(await response.json()).includes("stream-20000cps")
   }
   const waitUntilGuarded = (since) => waitUntil(() => openCodeArmed(info.guardLog, since), 180_000, "OpenCode to load the network guard", api, serverLog)
-  const launchedAt = Date.now()
-  api = launchApi()
-
   {
-    if (api.pid) prioritizeWindowsProcess(api.pid)
     log(`stand at ${root}: api ${apiPort}, ui ${uiPort}, fixture ${fixturePort}`)
-    await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
-    await waitUntil(() => assertIsolated(apiUrl), 120_000, "the session list", api, serverLog)
-    await waitUntilGuarded(launchedAt)
-    await abortIfStopped()
     const viteArgs = ["--force", "--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"]
     const windows = process.platform === "win32"
     ui = launch(windows ? [join(webRoot, "node_modules/vite/bin/vite.js"), ...viteArgs] : ["x", "vite", ...viteArgs], webRoot, {
@@ -473,6 +465,14 @@ export const startStand = async ({ log, logsDir, onStop }) => {
     }, windows ? process.execPath : bun)
     if (ui.pid) prioritizeWindowsProcess(ui.pid)
     await waitUntil(() => portAnswers(`${uiUrl}/`), 120_000, "the UI", ui, serverLog)
+    await abortIfStopped()
+    const launchedAt = Date.now()
+    api = launchApi()
+    if (api.pid) prioritizeWindowsProcess(api.pid)
+    await waitUntil(() => portAnswers(`${apiUrl}/health`), 180_000, "the API", api, serverLog)
+    await waitUntil(() => assertIsolated(apiUrl), 120_000, "the session list", api, serverLog)
+    await waitUntilGuarded(launchedAt)
+    await abortIfStopped()
     await waitUntil(modelsListed, 120_000, "OpenCode to list the fixture models", api, serverLog)
     // A scenario can change a setting the server keeps (Don't ask again on a
     // move); the reset puts this copy back so the next one starts the same.

@@ -1,15 +1,16 @@
 import assert from "node:assert/strict"
 import { execFileSync, execSync, spawn } from "node:child_process"
+import childProcess from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
 import fs from "node:fs"
 import { constants, getPriority, setPriority, tmpdir } from "node:os"
 import os from "node:os"
 import { createRequire, syncBuiltinESMExports } from "node:module"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 
-import { gitIn, startStand } from "./stand.mjs"
+import { gitIn, prepareStandTools, startStand } from "./stand.mjs"
 import { reservePort } from "../perf/cdp.mjs"
 import { startFixture } from "../perf/isolated-server.mjs"
 import { prioritizeWindowsProcess } from "./windows-priority.mjs"
@@ -86,6 +87,46 @@ test("Windows verification processes explicitly retain High priority", { skip: p
     assert.equal(getPriority(), constants.priority.PRIORITY_HIGH)
   } finally {
     setPriority(previous)
+  }
+})
+
+test("the UI port cannot be allocated by OpenCode during stand startup", { skip: process.env.VERIFY_LIFECYCLE_TEST !== "1", timeout: 240_000 }, async (t) => {
+  await prepareStandTools()
+  const logs = mkdtempSync(join(tmpdir(), "verify-startup-logs-"))
+  let stop
+  let checked = false
+  const originalSpawn = childProcess.spawn
+  t.mock.method(childProcess, "spawn", (executable, args, options) => {
+    if (args.some((arg) => arg === "dev:server" || arg === "server/index.js")) {
+      const root = dirname(options.env.HOME)
+      const { uiPort } = JSON.parse(fs.readFileSync(new URL(`../../tmp/verify/owners/${basename(root)}.json`, import.meta.url), "utf8"))
+      assert.ok(Number.isInteger(uiPort) && uiPort > 0)
+      const allocation = execFileSync(process.execPath, ["--input-type=module", "-e", `
+        import { createServer } from "node:net"
+        const server = createServer()
+        server.on("error", (error) => {
+          if (error.code !== "EADDRINUSE") throw error
+          console.log(error.code)
+        })
+        server.listen(${uiPort}, "127.0.0.1", () => server.close(() => console.log("available")))
+      `], { encoding: "utf8" }).trim()
+      assert.equal(allocation, "EADDRINUSE", "OpenCode can take the UI port before Vite binds it")
+      checked = true
+    }
+    return originalSpawn(executable, args, options)
+  })
+  syncBuiltinESMExports()
+  try {
+    const stand = await startStand({ log: () => {}, logsDir: logs, onStop: (cleanup) => { stop = cleanup } })
+    assert.equal(checked, true)
+    const response = await fetch(stand.uiUrl)
+    assert.match(response.headers.get("content-type"), /text\/html/)
+    assert.match(await response.text(), /@vite\/client/)
+  } finally {
+    t.mock.restoreAll()
+    syncBuiltinESMExports()
+    await stop?.()
+    rmSync(logs, { recursive: true, force: true })
   }
 })
 

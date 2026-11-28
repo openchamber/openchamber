@@ -17,8 +17,9 @@ This module owns what the server keeps and serves for how OpenChamber looks: cus
 
   Node `fs.watch` signals coalesce into fingerprint checks after 1 second, with another check 1 second later to settle a change. The shared scheduler in `../fs/folder-change-watch.js` also checks and reopens the watcher every 30 seconds because Linux/Windows watchers can silently retain a deleted folder; pure watching misses recreation, while pure polling lists and stats themes every idle second. Missing folders and unavailable, errored or closed watchers retain the 1-second fallback until the safety poll restores the watcher. OpenCode's experimental file watch requires a project location and misses new files, so it cannot own the custom themes folder.
 
-  `POST /api/config/themes` saves a converted VS Code palette. The runtime validates
-  literal colors and required authored roles, assigns a content-derived filename,
+  `POST /api/config/themes` saves a converted VS Code palette or an edited native theme.
+  The runtime validates literal colors, required authored roles and optional fonts,
+  transitions and background opacity, assigns a content-derived filename,
   and publishes through a same-directory hard link so partial files and overwrites
   are impossible. Identical retries reuse the existing file; a manually edited
   collision returns 409. Temporary files are ignored by the loader and removed

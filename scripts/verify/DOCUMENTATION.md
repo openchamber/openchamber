@@ -50,6 +50,8 @@ start "" /b /wait /high bun run verify -- composer > C:\Users\openc\verify-compo
 
 `node --test scripts/verify/processes.test.mjs scripts/verify/stand.test.mjs` covers process ownership, detached children, an exited group leader, abrupt runner death, stale-run recovery, live/foreign-run protection and PID reuse. `VERIFY_LIFECYCLE_TEST=1 node --test scripts/verify/lifecycle.test.mjs` opts into five real stand/browser runs: success, a failing scenario, a thrown error, SIGINT and SIGTERM. They run sequentially and verify that no process identity, command line or cwd from the stand survives, and that its root and Vite cache are gone.
 
+`VERIFY_LIFECYCLE_TEST=1 node --test --test-name-pattern="UI port cannot" scripts/verify/platform.test.mjs` starts a real stand and verifies that the UI port is already bound when the API launches.
+
 ### Running only what a change touches
 
 `--changed` takes the files the change touches, counted as `bun run check:changed` counts them (from where the branch left `origin/main`, with uncommitted and new files; `--base <ref>` for another base, `--base A..B` for the commits between two refs only), and runs the scenarios of the features those files can break. Each changed file goes to one of these:
@@ -167,6 +169,7 @@ Every step waits up to 20 s (`"timeout"` in seconds changes it) and fails with w
 
 ## Invariants
 
+- Vite binds its UI port before the API starts managed OpenCode. A free-port probe releases its socket, so starting OpenCode first could let its allocator take the future UI port and make the UI readiness probe reach OpenCode instead.
 - Nothing touches the user's data: the stand runs from a fresh folder under `/private/tmp` on macOS or the OS temp directory elsewhere with its own `HOME`, `XDG_*` and `OPENCHAMBER_DATA_DIR`, and its processes get only `PATH`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `LANG` and `TERM` from the shell. Windows also keeps `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP`, and redirects `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` into the stand. No provider key, token or app variable reaches it or `stand.json`. It refuses to start, and `--attach` refuses to run, when the server lists sessions of the checkout itself. Ports are free ones picked per run.
 - A `settings` step refuses a key that is not a profile setting (`scope: "profile"` in `settings-registry.json`), since the reset drops only those.
 - The reset deletes only sessions under the stand's folder; a server holding any other session is not this stand, and the reset refuses before deleting anything.

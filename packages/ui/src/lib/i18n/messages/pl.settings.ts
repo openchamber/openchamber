@@ -6,7 +6,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 import { extensionPowersI18n } from './extension-powers.i18n';
+import { themeEditorI18n } from './theme-editor.i18n';
 export const settingsDict = {
+  ...themeEditorI18n.pl,
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Okres przechowywania liczy się od archiwizacji. Sesje po upływie tego okresu są usuwane.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Okres przechowywania liczy się od ostatniej aktywności sesji. Sesje po upływie tego okresu są archiwizowane.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Okres przechowywania liczy się od ostatniej aktywności sesji. Sesje po upływie tego okresu są usuwane.',
