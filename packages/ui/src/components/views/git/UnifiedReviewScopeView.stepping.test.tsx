@@ -1,19 +1,11 @@
 import React, { act } from 'react';
 import { expect, test } from 'bun:test';
-import { plugin } from 'bun';
 import { Window } from 'happy-dom';
 import type { GitStatus } from '@/lib/api/types';
+import { startInlineDiffFixturePool } from '@/test/pierreWorkers.fixture';
 import type {
   ChangeRequest, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlReadContext, SourceControlUser,
 } from '@/lib/source-control/types';
-
-// Bun does not implement Vite's worker URL imports.
-plugin({ name: 'review-stepping-worker-url', setup(build) {
-  build.onLoad({ filter: /\?worker&url$/ }, () => ({
-    contents: `export default ${JSON.stringify(import.meta.resolve('@pierre/diffs/worker/worker.js'))};`,
-    loader: 'js',
-  }));
-} });
 
 const DIRECTORY = '/repo-stepping';
 const endpoint = { displayUrl: 'https://github.com/team/project', fingerprint: 'fetch' };
@@ -111,6 +103,8 @@ test('Alt+Down in the narrow review accordion expands an offscreen file and brin
   const github = githubLikeDescriptor();
   useSourceControlProviderRegistry.setState({ ordered: [github], byId: new Map([[github.id, github]]), status: 'ready', holdsList: true });
   const { useGitStore } = await import('@/stores/useGitStore');
+  const { useUIStore } = await import('@/stores/useUIStore');
+  useUIStore.setState({ diffLayoutPreference: 'inline' });
   useGitStore.getState().setActiveDirectory(DIRECTORY);
   useGitStore.getState().restoreStatus(DIRECTORY, STATUS);
   const { getEffectiveShortcutCombo, ShortcutDispatcher, shortcutRegistry } = await import('@/lib/shortcuts');
@@ -123,6 +117,7 @@ test('Alt+Down in the narrow review accordion expands an offscreen file and brin
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
+  const workerPool = await startInlineDiffFixturePool(root);
   const frame = () => act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))); });
   // Wait on the outcome itself, bounded by time rather than a frame count, so a loaded machine only waits longer.
   const until = async (reached: () => boolean) => {
@@ -171,6 +166,7 @@ test('Alt+Down in the narrow review accordion expands an offscreen file and brin
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;
     window.removeEventListener('keydown', dispatch);
+    workerPool.terminate();
     await dom.happyDOM.abort();
     for (const [name, value] of originals) {
       if (value) Object.defineProperty(globalThis, name, value);
