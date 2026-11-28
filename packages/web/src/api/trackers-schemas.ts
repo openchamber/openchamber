@@ -77,6 +77,12 @@ const progressSchema = z.object({ total: z.number().int().positive(), done: z.nu
   .catch(null)
   .transform((progress) => (progress ? { ...progress, done: Math.min(Math.max(progress.done, 0), progress.total) } : null));
 
+const containerRefSchema = z.object({ id: text, key: optionalText, name: text });
+const containerSchema = containerRefSchema.extend({
+  kind: z.enum(['project', 'board', 'sprint']).optional().catch(undefined),
+  parent: containerRefSchema.nullish().catch(null),
+});
+
 const summaryFields = {
   provider: text,
   id: text,
@@ -86,7 +92,7 @@ const summaryFields = {
   state: stateSchema,
   priority: prioritySchema.nullish().catch(null),
   assignee: personSchema.optional(),
-  container: z.object({ id: text, key: optionalText, name: text }).nullish().catch(null),
+  container: containerSchema.nullish().catch(null),
   updatedAt: optionalText.optional(),
 };
 
@@ -200,7 +206,7 @@ export const mappingResultSchema: z.ZodType<TrackerMappingResult> = z.union([
   z.object({
     connected: z.literal(true),
     defaultProjectPath: optionalText,
-    containers: listOf(z.object({ id: text, key: optionalText, name: text, projectPath: optionalText })),
+    containers: listOf(containerSchema.extend({ projectPath: optionalText })),
   }),
 ]);
 

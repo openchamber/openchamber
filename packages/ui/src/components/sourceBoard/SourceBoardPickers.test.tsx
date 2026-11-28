@@ -60,6 +60,46 @@ test('the container picker renders while the tracker status has no account list'
   }
 });
 
+test('the container menu nests a board under its project and a sprint under its board', async () => {
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { useTrackerAuthStore } = await import('@/stores/useTrackerAuthStore');
+  const { useTrackerRegistry } = await import('@/lib/trackers/registry');
+  const { linearLikeTrackerDescriptor } = await import('@/lib/trackers/descriptor.fixture');
+  const { SourceBoardContainerPicker } = await import('./SourceBoardPickers');
+  const apis = createWebAPIs();
+  const linear = linearLikeTrackerDescriptor();
+  useTrackerRegistry.setState({ ordered: [linear], byId: new Map([[linear.id, linear]]), status: 'ready', holdsList: true });
+  useTrackerAuthStore.setState({ entries: { linear: { status: { connected: true, account: null, accounts: [] }, isLoading: false, hasChecked: true } } });
+  const project = { id: 'p-1', key: 'PROJ', name: 'Project' };
+  const containers = [
+    project,
+    { id: 'b-1', key: null, name: 'Board', kind: 'board' as const, parent: project },
+    { id: 's-1', key: null, name: 'Sprint 1', kind: 'sprint' as const, parent: { id: 'b-1', key: null, name: 'Board' } },
+  ];
+
+  await act(async () => {
+    root.render(
+      <I18nProvider>
+        <RuntimeAPIContext.Provider value={apis}>
+          <SourceBoardContainerPicker provider="linear" containers={containers} selectedContainerId={null} onSelectContainer={() => {}} onAccountSwitched={() => {}} />
+        </RuntimeAPIContext.Provider>
+      </I18nProvider>,
+    );
+  });
+  const trigger = host.querySelector('button');
+  expect(trigger).not.toBeNull();
+  await act(async () => {
+    trigger?.click();
+  });
+
+  const items = [...document.querySelectorAll('[role="menuitemradio"]')];
+  expect(items.map((item) => item.textContent)).toEqual(['All teams', 'Project', 'Board', 'Sprint 1']);
+  const indent = (item: Element) => item.lastElementChild?.getAttribute('style') ?? '';
+  expect(items.map(indent)).toEqual(['', '', 'padding-inline-start: 12px;', 'padding-inline-start: 24px;']);
+});
+
 test('the repository picker names the chosen repository, or all of them', async () => {
   const { I18nProvider } = await import('@/lib/i18n');
   const { SourceBoardRepositoryPicker } = await import('./SourceBoardPickers');

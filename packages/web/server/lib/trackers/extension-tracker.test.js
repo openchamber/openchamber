@@ -422,6 +422,22 @@ describe('reading and writing through an extension tracker', () => {
     expect(h.tracker.matchUrl('https://other.example.com/issue/PROJ-7')).toBeNull();
   });
 
+  it('passes a container kind and parent through the mapping', async () => {
+    const h = await harness();
+    const project = { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project' };
+    const parent = { id: 'p-1', key: 'PROJ', name: 'Project' };
+    h.answers['containers.list'] = () => ({ ok: true, data: { containers: [project, { id: 'b-1', key: null, name: 'Board', kind: 'board', parent }] } });
+    await connect(h);
+    expect(await h.tracker.mapping.get()).toEqual({
+      connected: true,
+      defaultProjectPath: null,
+      containers: [
+        { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project', projectPath: null },
+        { id: 'b-1', key: null, name: 'Board', kind: 'board', parent, projectPath: null },
+      ],
+    });
+  });
+
   it('merges the stored mapping with the containers the service lists, and keeps preferences', async () => {
     const h = await harness();
     await connect(h);

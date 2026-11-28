@@ -73,7 +73,7 @@ Repository write access says nothing about the item's author, who may close, reo
 
 ### Why use phone bottom sheets and not scope popups
 
-A popup cannot scroll far enough for a long project or repository list on the phone. Tracker accounts share the container menu because accounts are few and switched rarely.
+A popup cannot scroll far enough for a long project or repository list on the phone. Tracker accounts share the container menu because accounts are few and switched rarely. Boards and sprints sit under their parent in that menu, indented by `containerTree.ts`, because a flat list gave no clue which board belonged to which project.
 
 ### Why collapse the narrow list and not squeeze the preview
 

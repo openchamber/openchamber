@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveTrackerMappedProjectPath } from './projectMapping';
+import { resolveTrackerMappedProjectPath, trackerProjectContainers } from './projectMapping';
 import type { TrackerMappingResult } from './types';
 
 const mapping = (): TrackerMappingResult => ({
@@ -35,5 +35,24 @@ describe('resolveTrackerMappedProjectPath', () => {
       defaultProjectPath: null,
       containers: [{ id: 'team-des', key: 'DES', name: 'Design', projectPath: null }],
     }, { id: 'team-des', key: 'DES', name: 'Design' })).toBeNull();
+  });
+
+  test('does not map a board or sprint container', () => {
+    expect(resolveTrackerMappedProjectPath({
+      connected: true,
+      defaultProjectPath: '/default',
+      containers: [{ id: 'board-1', key: null, name: 'Board', kind: 'board', projectPath: '/board' }],
+    }, { id: 'board-1', key: null, name: 'Board', kind: 'board' })).toBe('/default');
+  });
+});
+
+describe('trackerProjectContainers', () => {
+  test('keeps projects, including containers that do not declare a kind', () => {
+    expect(trackerProjectContainers([
+      { id: 'general', key: null, name: 'General' },
+      { id: 'p-1', key: 'PROJ', name: 'Project', kind: 'project' },
+      { id: 'b-1', key: null, name: 'Board', kind: 'board' },
+      { id: 's-1', key: null, name: 'Sprint', kind: 'sprint' },
+    ]).map((container) => container.id)).toEqual(['general', 'p-1']);
   });
 });

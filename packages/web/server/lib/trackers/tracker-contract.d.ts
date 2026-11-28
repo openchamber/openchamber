@@ -15,7 +15,7 @@ export type TrackerItemSummary = {
   priority?: TrackerPriority | null;
   labels?: { id: string; name: string; color: string | null }[];
   assignee?: TrackerPerson | null;
-  container?: { id: string; key: string | null; name: string } | null;
+  container?: { id: string; key: string | null; name: string; kind?: 'project' | 'board' | 'sprint'; parent?: { id: string; key: string | null; name: string } | null } | null;
   parent?: TrackerItemSummary | null;
   progress?: { total: number; done: number; more: boolean } | null;
   updatedAt?: string | null;
@@ -96,7 +96,7 @@ export type TrackerDescriptor = {
 
 export type TrackerMappingView = {
   defaultProjectPath: string | null | undefined;
-  containers: { id: string; key: string | null; name: string; projectPath: string | object | null }[];
+  containers: { id: string; key: string | null; name: string; kind?: 'project' | 'board' | 'sprint'; parent?: { id: string; key: string | null; name: string } | null; projectPath: string | object | null }[];
 };
 export type TrackerMappingRequest = { defaultProjectPath: unknown; containerProjectPaths: object };
 export type TrackerPreferences = { sessionComments: boolean };
