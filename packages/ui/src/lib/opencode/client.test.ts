@@ -1332,6 +1332,60 @@ describe("messages and config", () => {
     expect(catalog.models[0]).toEqual(model)
   })
 
+  test("loads an available model catalog with variants from a runtime without location plugins", async () => {
+    const location = { directory: "/repo/app" }
+    const variants = [{ id: "high", settings: { reasoningEffort: "high" } }, { id: "low", settings: {} }]
+    const provider = { id: "anthropic", name: "Anthropic", activation: "enabled" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", enabled: true, variants }
+    pluginList = () => json({ location, data: [] })
+    const answer = (request: CapturedRequest) => {
+      switch (request.url.pathname) {
+        case "/api/debug/location": return json([])
+        case "/api/model": return json({ location, data: [model] })
+        case "/api/model/default": return json({ location, data: model })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  }, 8_000)
+
+  test("waits for native location plugins instead of publishing a partial cold model catalog", async () => {
+    const location = { directory: "/repo/app" }
+    const provider = { id: "anthropic", name: "Anthropic" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants: [] }
+    const partialModel = { ...model, modelID: "early" }
+    let activated = false
+    let pluginReads = 0
+    pluginList = () => {
+      activated = ++pluginReads > 1
+      return activated ? activatedPlugins() : json({ location, data: [] })
+    }
+    const answer = (request: CapturedRequest) => {
+      const modelAtRead = activated ? model : partialModel
+      switch (request.url.pathname) {
+        case "/api/debug/location": return json([location])
+        case "/api/model": return json({ location, data: [modelAtRead] })
+        case "/api/model/default": return json({ location, data: modelAtRead })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  })
+
   test("a fresh provider read waits out the one in flight and reads again", async () => {
     const answer = (request: CapturedRequest) =>
       request.url.pathname === "/api/provider"

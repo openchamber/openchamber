@@ -190,6 +190,12 @@ generic rendering.
 
 ### Catalogs and tool input
 
+- A model catalog read waits for the plugins of each contributing location.
+  After an empty plugin list, a successful empty `debug.location.list` allows
+  the read to proceed for backends without native locations. Native OpenCode
+  registers the location before answering the plugin request, so a cold
+  native catalog still waits for activation. A failed inventory probe does
+  not bypass the wait.
 - Integration snapshots belong to the runtime and the directory they were read
   for (the Providers page reads for the project selected in Settings), and are
   provisional when Settings opens. A read first waits for that location's

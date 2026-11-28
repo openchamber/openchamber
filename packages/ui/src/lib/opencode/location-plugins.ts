@@ -14,10 +14,12 @@ class LocationPluginsNotReadyError extends Error {
   }
 }
 
-export const waitForLocationPlugins = (
+const waitForLocation = (
   client: Pick<OpenCodeClient, "plugin">,
   isCurrent: () => boolean = () => true,
+  isStateless?: (signal: AbortSignal) => Promise<boolean>,
 ): Promise<boolean> => withAbortDeadline(LIMIT_MS, async (signal) => {
+  let checkStateless = isStateless
   while (!signal.aborted && isCurrent()) {
     let plugins
     try {
@@ -26,12 +28,29 @@ export const waitForLocationPlugins = (
       return false
     }
     if (plugins.length > 0) return isCurrent()
+    if (checkStateless && !signal.aborted && isCurrent()) {
+      const stateless = await checkStateless(signal)
+      if (stateless) return !signal.aborted && isCurrent()
+      checkStateless = undefined
+    }
     await delay(POLL_MS)
   }
   return false
 })
 
-export const requireLocationPlugins = async (clients: readonly Pick<OpenCodeClient, "plugin">[], isCurrent?: () => boolean) => {
-  const ready = await Promise.all([...new Set(clients)].map((client) => waitForLocationPlugins(client, isCurrent)))
+export const waitForLocationPlugins = (client: Pick<OpenCodeClient, "plugin">, isCurrent?: () => boolean) =>
+  waitForLocation(client, isCurrent)
+
+const requireReadyLocations = async (checks: readonly Promise<boolean>[]) => {
+  const ready = await Promise.all(checks)
   if (ready.includes(false)) throw new LocationPluginsNotReadyError()
 }
+
+export const requireLocationPlugins = (clients: readonly Pick<OpenCodeClient, "plugin">[], isCurrent?: () => boolean) =>
+  requireReadyLocations([...new Set(clients)].map((client) => waitForLocationPlugins(client, isCurrent)))
+
+export const requireModelCatalogLocations = (clients: readonly Pick<OpenCodeClient, "plugin" | "debug">[], isCurrent: () => boolean) =>
+  requireReadyLocations([...new Set(clients)].map((client) => waitForLocation(client, isCurrent, async (signal) => {
+    const locations = await client.debug.location.list({ signal }).catch(() => null)
+    return Array.isArray(locations) && locations.length === 0
+  })))
