@@ -765,7 +765,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     if (!requestedModel && !requestedAgent && !requestedVariant) return requestedModel;
     const client = clientFor(directory);
     const { models: listed, agents, notReadyReason } = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
-    const models = requestedModel ? await readCatalogListing(client, listed, (known) => Boolean(findCatalogModel(known, requestedModel.providerID, requestedModel.modelID))) : listed;
+    const models = requestedModel && !notReadyReason ? await readCatalogListing(client, listed, (known) => Boolean(findCatalogModel(known, requestedModel.providerID, requestedModel.modelID))) : listed;
 
     if (requestedAgent && agents && agents.length > 0) {
       const agent = agents.find((entry) => entry?.id === requestedAgent) || null;

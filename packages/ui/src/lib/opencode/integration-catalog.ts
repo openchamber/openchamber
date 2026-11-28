@@ -2,7 +2,7 @@
 import type { IntegrationInfo } from "@opencode/client"
 import { getRuntimeKey } from "../runtime-switch"
 import { normalizeOpencodeError, opencodeClient, type OpenCodeClient } from "./client"
-import { requireLocationPlugins } from "./location-plugins"
+import { requireCatalogLocation } from "./location-plugins"
 import { listWebSearchProviders } from "./websearch"
 
 export interface IntegrationCatalog {
@@ -49,7 +49,7 @@ export function getIntegrationClient(directory?: string | null): OpenCodeClient 
 
 async function readIntegrations(client: OpenCodeClient): Promise<IntegrationInfo[]> {
   try {
-    await requireLocationPlugins([client])
+    if (await requireCatalogLocation(client) === "stateless") return []
     const response = await client.integration.list()
     return response.data
   } catch (error) {

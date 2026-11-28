@@ -2,7 +2,7 @@ import { OpenCode } from '@opencode/client';
 import type { ModelInfo, OpenCodeClient } from '@opencode/client';
 import type { SmallModelClient } from './contracts.js';
 import { asNonEmptyString } from '../shared/guards.js';
-import { readLocationCatalog, waitForLocationPlugins } from '../opencode/location-plugins.js';
+import { readLocationCatalog, waitForCatalogLocation } from '../opencode/location-plugins.js';
 
 export interface OpenCodeRuntimeProviders {
   buildOpenCodeUrl: (requestPath: string, query: string) => string;
@@ -99,13 +99,20 @@ export function getTrustRefusal(cause: unknown) {
   return null;
 }
 
+function rethrowTrustRefusal(cause: Error) {
+  const refusal = getTrustRefusal(cause);
+  if (refusal) throw refusal;
+}
+
 export async function listModelInfos(client: OpenCodeClient, directory?: string | null) {
   const key = isDirectory(directory) ? directory : '';
   if (modelCache && modelCacheKey === key && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) {
     return modelCache;
   }
   try {
-    await waitForLocationPlugins(client);
+    if (!(await waitForCatalogLocation(client, undefined, rethrowTrustRefusal))) {
+      return modelCacheKey === key && modelCache ? modelCache : [];
+    }
     const models = unwrap(await client.model.list());
     if (models.length === 0) return models;
     modelCache = models;
@@ -121,7 +128,7 @@ export async function listModelInfos(client: OpenCodeClient, directory?: string 
 
 export async function listProviderInfos(client: OpenCodeClient) {
   try {
-    await waitForLocationPlugins(client);
+    if (!(await waitForCatalogLocation(client, undefined, rethrowTrustRefusal))) return [];
     return unwrap(await client.provider.list());
   } catch (error) {
     const refusal = getTrustRefusal(error);

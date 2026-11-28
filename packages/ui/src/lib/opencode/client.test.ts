@@ -47,7 +47,10 @@ const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
     body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
   }
   requests.push(request)
-  if (url.pathname === "/api/plugin") return pluginList(request)
+  if (url.pathname === "/api/plugin") {
+    const response = pluginList(request)
+    return response === HANG ? hangUntilAborted(init?.signal ?? undefined) : response
+  }
   const next = responses.shift()
   const resolved = typeof next === "function" ? await next(request) : next
   if (resolved instanceof Error) throw resolved
@@ -1331,6 +1334,161 @@ describe("messages and config", () => {
     expect(catalog.models[0]?.variants.map((variant: { id: string }) => variant.id)).toEqual(["high", "low"])
     expect(catalog.models[0]).toEqual(model)
   })
+
+  test("loads an available model catalog with variants from a runtime without location plugins", async () => {
+    const location = { directory: "/repo/app" }
+    const variants = [{ id: "high", settings: { reasoningEffort: "high" } }, { id: "low", settings: {} }]
+    const provider = { id: "anthropic", name: "Anthropic", activation: "enabled" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", enabled: true, variants }
+    pluginList = () => json({ location, data: [] })
+    const answer = (request: CapturedRequest) => {
+      switch (request.url.pathname) {
+        case "/api/debug/location": return json([])
+        case "/api/model": return json({ location, data: [model] })
+        case "/api/model/default": return json({ location, data: model })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  }, 8_000)
+
+  test("waits for native location plugins instead of publishing a partial cold model catalog", async () => {
+    const location = { directory: "/repo/app" }
+    const provider = { id: "anthropic", name: "Anthropic" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants: [] }
+    const partialModel = { ...model, modelID: "early" }
+    let activated = false
+    let pluginReads = 0
+    pluginList = () => {
+      activated = ++pluginReads > 1
+      return activated ? activatedPlugins() : json({ location, data: [] })
+    }
+    const answer = (request: CapturedRequest) => {
+      const modelAtRead = activated ? model : partialModel
+      switch (request.url.pathname) {
+        case "/api/debug/location": return json([location])
+        case "/api/model": return json({ location, data: [modelAtRead] })
+        case "/api/model/default": return json({ location, data: modelAtRead })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  })
+
+  test("keeps polling native plugins while the location inventory request hangs", async () => {
+    const location = { directory: "/repo/app" }
+    const provider = { id: "anthropic", name: "Anthropic" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants: [] }
+    let pluginReads = 0
+    pluginList = () => ++pluginReads > 1 ? activatedPlugins() : json({ location, data: [] })
+    const answer = (request: CapturedRequest) => {
+      switch (request.url.pathname) {
+        case "/api/debug/location": return HANG
+        case "/api/model": return json({ location, data: [model] })
+        case "/api/model/default": return json({ location, data: model })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  }, 8_000)
+
+  test("recovers from a failed native plugin retry while inventory hangs", async () => {
+    const location = { directory: "/repo/app" }
+    const provider = { id: "anthropic", name: "Anthropic" }
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants: [] }
+    const partialModel = { ...model, modelID: "early" }
+    let pluginReads = 0
+    pluginList = () => {
+      pluginReads += 1
+      if (pluginReads === 1) return json({ location, data: [] })
+      if (pluginReads === 2) return json({}, 500)
+      return activatedPlugins()
+    }
+    const answer = (request: CapturedRequest) => {
+      const modelAtRead = pluginReads > 2 ? model : partialModel
+      switch (request.url.pathname) {
+        case "/api/debug/location": return HANG
+        case "/api/model": return json({ location, data: [modelAtRead] })
+        case "/api/model/default": return json({ location, data: modelAtRead })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  }, 8_000)
+
+  test("lists only image models from a pluginless backend", async () => {
+    const location = { directory: "/repo/app" }
+    const model = { id: "openai/image", modelID: "image", providerID: "openai", name: "Image" }
+    pluginList = () => json({ location, data: [] })
+    responses.push((request: CapturedRequest) => request.url.pathname === "/api/debug/location" ? json([]) : json({}, 404))
+    responses.push((request: CapturedRequest) => request.url.pathname === "/api/model" ? json({ location, data: [model] }) : json({}, 404))
+
+    expect(await opencodeClient.listImageModels()).toEqual([{ value: "openai/image", name: "Image", providerID: "openai" }])
+    expect(requests.find((request) => request.url.pathname === "/api/model")?.url.search).toContain("image")
+  }, 8_000)
+
+  test("loads a pluginless catalog when inventory becomes empty during a stalled plugin retry", async () => {
+    const location = { directory: "/repo/app" }
+    const provider = { id: "anthropic", name: "Anthropic" }
+    const variants = [{ id: "high", settings: { reasoningEffort: "high" } }]
+    const model = { id: "anthropic/claude", modelID: "claude", providerID: "anthropic", variants }
+    let releaseSecondPluginRead!: () => void
+    const secondPluginRead = new Promise<void>((resolve) => {
+      releaseSecondPluginRead = resolve
+    })
+    let pluginReads = 0
+    pluginList = () => {
+      if (++pluginReads === 1) return json({ location, data: [] })
+      releaseSecondPluginRead()
+      return HANG
+    }
+    const answer = async (request: CapturedRequest) => {
+      switch (request.url.pathname) {
+        case "/api/debug/location":
+          await secondPluginRead
+          return json([])
+        case "/api/model": return json({ location, data: [model] })
+        case "/api/model/default": return json({ location, data: model })
+        case "/api/provider": return json({ location, data: [provider] })
+        default: return json({}, 404)
+      }
+    }
+    responses.push(answer, answer, answer, answer)
+
+    expect(await opencodeClient.getProvidersForConfig(location.directory)).toEqual({
+      providers: [provider],
+      models: [model],
+      default: { id: "claude", providerID: "anthropic" },
+    })
+  }, 8_000)
 
   test("a fresh provider read waits out the one in flight and reads again", async () => {
     const answer = (request: CapturedRequest) =>

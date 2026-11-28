@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchSelectionInputs } from './selection-inputs.js';
 
 const agents = [{ id: 'build', mode: 'primary' }];
+const models = [{ id: 'example/model', providerID: 'example' }];
 
 // OpenCode 2.4 on a location it has just built: every catalog read answers at once with what has loaded,
 // and plugin.list stays empty until the plugins have activated.
@@ -9,6 +10,7 @@ const coldLocation = ({ activatesAfterPolls = 2, modelList = async () => ({ data
   let polls = 0;
   const active = () => polls >= activatesAfterPolls;
   return {
+    debug: { location: { list: async () => [{ directory: '/native' }] } },
     plugin: { list: async () => {
       polls += 1;
       return { data: active() ? [{ state: { status: 'active' } }] : [] };
@@ -26,6 +28,20 @@ afterEach(() => {
 });
 
 describe('fetchSelectionInputs', () => {
+  it('returns selection inputs without a not-ready reason on a stateless backend', async () => {
+    vi.useFakeTimers();
+    const client = {
+      plugin: { list: async () => ({ data: [] }) },
+      debug: { location: { list: async () => [] } },
+      model: { list: async () => ({ data: models }) },
+      agent: { list: async () => ({ data: agents }) },
+      config: { get: async () => [] },
+    };
+    const reading = read(client);
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(await reading).toMatchObject({ models, agents, notReadyReason: null });
+  });
+
   it('reads the agents of a new location after its plugins have activated', async () => {
     const inputs = await read(coldLocation());
     expect(inputs.agents).toEqual(agents);
@@ -37,8 +53,17 @@ describe('fetchSelectionInputs', () => {
     const reading = read(coldLocation({ activatesAfterPolls: Infinity }));
     await vi.advanceTimersByTimeAsync(5_100);
     const inputs = await reading;
-    expect(inputs.agents).toEqual([]);
+    expect(inputs.agents).toBeNull();
     expect(inputs.notReadyReason).toBe('Location plugins did not finish activating');
+  });
+
+  it('does not expose early selection inputs after a failed location inventory', async () => {
+    vi.useFakeTimers();
+    const client = coldLocation({ activatesAfterPolls: Infinity, modelList: async () => ({ data: models }) });
+    client.debug.location.list = async () => { throw new Error('Inventory unavailable'); };
+    const reading = read(client);
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(await reading).toMatchObject({ models: [], agents: null, config: null, notReadyReason: expect.any(String) });
   });
 
   it("passes on the reason an OpenCode before 2.4 gives when its own wait for plugins ran out", async () => {

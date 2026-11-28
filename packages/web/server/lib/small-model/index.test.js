@@ -76,6 +76,8 @@ beforeAll(async () => {
       res.writeHead(403, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ code: 'opencode_trust_required', directory: '/proj', error: 'Trust required' }));
     }
+    if (url.pathname === '/api/plugin') return send({ location: LOCATION, data: [] });
+    if (url.pathname === '/api/debug/location') return send([]);
     if (url.pathname === '/api/model') return send({ location: LOCATION, data: state.models });
     if (url.pathname === '/api/model/default') return send(state.defaultResponse ?? { location: LOCATION, data: state.defaultModel });
     if (url.pathname === '/api/provider') return send({ location: LOCATION, data: state.providers });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { OpenCode } from '@opencode/client';
 import { createOpenCodeTrust } from '../../web/server/lib/opencode-trust/index.js';
 import { OpenCodeTrustRefusedError } from './opencodeTrust';
 
@@ -12,6 +13,8 @@ const gitService = {
 };
 
 const sdkClient = {
+  plugin: { list: mock() },
+  debug: { location: { list: mock() } },
   model: {
     list: mock(),
   },
@@ -26,6 +29,8 @@ const sdkClient = {
 };
 
 const make = mock(() => sdkClient);
+const makeSdkClient = OpenCode.make;
+const fetchSdk = globalThis.fetch;
 const rawFetch = mock(async () => {
   throw new Error('raw fetch should not be used');
 });
@@ -56,6 +61,8 @@ describe('bridge git commit message generator', () => {
     gitService.getGitLog.mockReset();
     gitService.getGitDiff.mockReset();
     sdkClient.model.list.mockReset();
+    sdkClient.plugin.list.mockReset();
+    sdkClient.debug.location.list.mockReset();
     sdkClient.experimental.generate.text.mockReset();
     sdkClient.agent.get.mockReset();
     make.mockReset();
@@ -63,6 +70,7 @@ describe('bridge git commit message generator', () => {
 
     globalThis.fetch = rawFetch;
     make.mockImplementation(() => sdkClient);
+    sdkClient.plugin.list.mockImplementation(async () => ({ data: [{}] }));
     gitService.getGitStatus.mockImplementation(async () => ({ files: [{ path: 'src/a.ts', index: ' ', working_dir: 'M' }] }));
     sdkClient.model.list.mockImplementation(async () => ({
       location: { directory: '/repo', project: { id: 'p', directory: '/repo', canonical: '/repo' } },
@@ -84,6 +92,50 @@ describe('bridge git commit message generator', () => {
     expect(sdkClient.experimental.generate.text).toHaveBeenCalledTimes(1);
     expect(sdkClient.experimental.generate.text.mock.calls[0][0].prompt).toContain('+new line');
   });
+
+  it('checks the configured thinking variant using a confirmed pluginless catalog', async () => {
+    gitService.getGitLog.mockImplementation(async () => ({ all: [] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: '+new line', submodule: null }));
+    const location = { directory: '/repo' };
+    const requests = [];
+    let selected;
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(request) {
+        const route = new URL(request.url).pathname;
+        requests.push(route);
+        switch (route) {
+          case '/api/plugin': return Response.json({ location, data: [] });
+          case '/api/debug/location': return Response.json([]);
+          case '/api/model': return Response.json({
+            location,
+            data: [{
+              providerID: 'anthropic',
+              id: 'claude-sonnet-4-5',
+              variants: [{ id: requests.includes('/api/debug/location') ? 'low' : 'high' }],
+            }],
+          });
+          case '/api/experimental/generate/text':
+            selected = (await request.json()).model;
+            return Response.json({ location, data: { text: '{"subject":"feat: add a line","highlights":[]}' } });
+          default: return new Response(null, { status: 404 });
+        }
+      },
+    });
+    make.mockImplementation((options) => makeSdkClient({ ...options, fetch: fetchSdk }));
+
+    try {
+      await generate({
+        apiUrl: server.url.origin,
+        settings: { smallModelUseDefault: false, smallModelOverride: 'anthropic/claude-sonnet-4-5', smallModelVariant: 'high' },
+      });
+      expect(selected).toEqual({ id: 'claude-sonnet-4-5', providerID: 'anthropic' });
+      expect(requests.slice(0, 3)).toEqual(['/api/plugin', '/api/debug/location', '/api/model']);
+    } finally {
+      await server.stop(true);
+    }
+  }, 8_000);
 
   it('reads the prompts of the directory it commits in and uses an empty instructions override as written', async () => {
     gitService.getGitLog.mockImplementation(async () => ({ all: [] }));

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { getDefaultModelInfo, getTrustRefusal } from './client.js';
+import { describe, expect, it, vi } from 'vitest';
+import { getDefaultModelInfo, getTrustRefusal, listModelInfos, listProviderInfos, resetOpenCodeRuntimeProviders } from './client.js';
 
 describe('default model boundary', () => {
   const read = (payload) => getDefaultModelInfo({ model: { default: async () => payload } });
@@ -38,5 +38,30 @@ describe('trust refusal boundary', () => {
 
   it.each([null, undefined, 17, 'failed', { code: 'constructor' }])('ignores unrelated failures: %j', (error) => {
     expect(getTrustRefusal(error)).toBeNull();
+  });
+});
+
+describe('small-model catalog readiness', () => {
+  it('does not publish or cache a partial catalog before native plugins activate', async () => {
+    vi.useFakeTimers();
+    try {
+      let active = false;
+      const client = {
+        plugin: { list: async () => ({ data: active ? [{}] : [] }) },
+        debug: { location: { list: async () => [{ directory: '/native' }] } },
+        model: { list: async () => ({ data: [{ id: active ? 'ready' : 'early' }] }) },
+        provider: { list: async () => ({ data: [{ id: active ? 'ready' : 'early' }] }) },
+      };
+      const read = Promise.all([listModelInfos(client, '/native'), listProviderInfos(client)]);
+      await vi.advanceTimersByTimeAsync(5_100);
+      expect(await read).toEqual([[], []]);
+
+      active = true;
+      expect(await listModelInfos(client, '/native')).toEqual([{ id: 'ready' }]);
+      expect(await listProviderInfos(client)).toEqual([{ id: 'ready' }]);
+    } finally {
+      resetOpenCodeRuntimeProviders();
+      vi.useRealTimers();
+    }
   });
 });

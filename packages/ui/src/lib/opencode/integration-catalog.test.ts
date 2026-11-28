@@ -25,6 +25,25 @@ test("without a current directory, credential writes stay unscoped like the list
   expect(getIntegrationClient()).toBe(opencodeClient.getSdkClient())
 })
 
+test("a stateless backend has an empty catalog without a native integration endpoint", async () => {
+  const directory = "/repo/stateless-project"
+  const sdk = opencodeClient.getScopedSdkClient(directory)
+  const location = { directory }
+  const plugins = spyOn(sdk.plugin, "list").mockResolvedValue({ location, data: [] })
+  const inventory = spyOn(sdk.debug.location, "list").mockResolvedValue([])
+  const integrations = spyOn(sdk.integration, "list").mockRejectedValue(new Error("No integration endpoint"))
+  const websearch = spyOn(sdk.websearch, "providers").mockResolvedValue({ location, data: [] })
+  try {
+    expect((await loadIntegrationCatalog(directory)).integrations).toEqual([])
+    expect(integrations).not.toHaveBeenCalled()
+  } finally {
+    plugins.mockRestore()
+    inventory.mockRestore()
+    integrations.mockRestore()
+    websearch.mockRestore()
+  }
+}, 8_000)
+
 // OpenCode 2.4 answers a location nobody opened yet with an empty list until its plugins load.
 test("a project OpenCode has not opened yet lists its integrations once its plugins load", async () => {
   const sdk = opencodeClient.getScopedSdkClient("/repo/cold-project")
@@ -35,6 +54,7 @@ test("a project OpenCode has not opened yet lists its integrations once its plug
     pluginReads += 1
     return { location: { directory: "/repo/cold-project" }, data: loaded() ? [{ source: { type: "builtin" }, features: {}, state: { status: "active" } }] : [] }
   })
+  const inventory = spyOn(sdk.debug.location, "list").mockRejectedValue(new Error("Inventory unavailable"))
   const list = spyOn(sdk.integration, "list").mockImplementation(async () => (
     { location: { directory: "/repo/cold-project" }, data: loaded() ? [openai] : [] }
   ))
@@ -44,6 +64,7 @@ test("a project OpenCode has not opened yet lists its integrations once its plug
     expect(catalog.integrations.map((integration) => integration.id)).toEqual(["openai"])
   } finally {
     plugins.mockRestore()
+    inventory.mockRestore()
     list.mockRestore()
     websearch.mockRestore()
   }
