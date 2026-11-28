@@ -1444,6 +1444,17 @@ describe("messages and config", () => {
     })
   }, 8_000)
 
+  test("lists only image models from a pluginless backend", async () => {
+    const location = { directory: "/repo/app" }
+    const model = { id: "openai/image", modelID: "image", providerID: "openai", name: "Image" }
+    pluginList = () => json({ location, data: [] })
+    responses.push((request: CapturedRequest) => request.url.pathname === "/api/debug/location" ? json([]) : json({}, 404))
+    responses.push((request: CapturedRequest) => request.url.pathname === "/api/model" ? json({ location, data: [model] }) : json({}, 404))
+
+    expect(await opencodeClient.listImageModels()).toEqual([{ value: "openai/image", name: "Image", providerID: "openai" }])
+    expect(requests.find((request) => request.url.pathname === "/api/model")?.url.search).toContain("image")
+  }, 8_000)
+
   test("loads a pluginless catalog when inventory becomes empty during a stalled plugin retry", async () => {
     const location = { directory: "/repo/app" }
     const provider = { id: "anthropic", name: "Anthropic" }

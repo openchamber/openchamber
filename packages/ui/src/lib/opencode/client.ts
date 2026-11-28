@@ -1,7 +1,7 @@
 
 import { AgentUnavailableError } from "./agent-unavailable-error"
 import { readFolderAgents } from "./folder-agents"
-import { requireLocationPlugins, requireModelCatalogLocations, waitForLocationPlugins } from "./location-plugins"
+import { requireModelCatalogLocations, waitForLocationPlugins } from "./location-plugins"
 import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
@@ -768,7 +768,7 @@ class OpencodeService {
 
   async listImageModels(): Promise<Array<{ value: string; name: string; providerID: string }>> {
     const client = this.clientFor(this.currentDirectory)
-    await requireLocationPlugins([client], captureRuntimeInstance())
+    await requireModelCatalogLocations([client], captureRuntimeInstance())
     const models = await call("model.list", () => client.model.list({ types: ["image"] }).then((r) => r.data))
     return models.map((model) => ({ value: `${model.providerID}/${model.modelID}`, name: model.name, providerID: model.providerID }))
   }

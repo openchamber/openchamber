@@ -103,8 +103,9 @@ sign-ins and the custom provider form all take that project.
 The Settings project may be one OpenCode has not opened yet. Since 2.4 such a
 location answers `integration.list` with an empty list until its plugins load,
 which showed "Connect provider" with only the custom provider card; the read
-first waits for the location's plugins (`requireLocationPlugins`, up to 5 s)
-and fails rather than returning an empty catalog.
+first waits for the location's plugins (up to 5 s) and fails rather than
+returning an empty catalog. A confirmed stateless backend returns an empty
+catalog without requesting native integrations.
 
 After saving a custom provider, OpenCode accepts its key only once that location
 has loaded the new provider, and a location nobody opened yet first waits for

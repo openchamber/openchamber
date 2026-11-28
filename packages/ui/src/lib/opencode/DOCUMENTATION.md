@@ -190,7 +190,7 @@ generic rendering.
 
 ### Catalogs and tool input
 
-- A model catalog read waits for the plugins of each contributing location.
+- Model catalog reads, including image models, wait for the plugins of each contributing location.
   After an empty plugin list, a successful empty `debug.location.list` allows
   the read to proceed for backends without native locations. Native OpenCode
   registers the location before answering the plugin request, so a cold
@@ -201,8 +201,9 @@ generic rendering.
 - Integration snapshots belong to the runtime and the directory they were read
   for (the Providers page reads for the project selected in Settings), and are
   provisional when Settings opens. A read first waits for that location's
-  plugins (`requireLocationPlugins`), because a location OpenCode has not opened
-  yet lists no integrations until they load. Credential writes and credential events trigger replacement reads;
+  plugins, because a location OpenCode has not opened yet lists no integrations
+  until they load. A confirmed stateless backend has an empty integration catalog
+  without an `integration.list` request. Credential writes and credential events trigger replacement reads;
   earlier reads cannot overwrite later ones. A failed web-search-provider read
   keeps integrations visible rather than filtering out possible model providers.
 - Plugin inventories throw on failed reads. Checks retain the last outdated
