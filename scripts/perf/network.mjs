@@ -53,6 +53,7 @@ export const createNetworkRecorder = (client, { keepSocketPayloads = false } = {
   const requests = new Map()
   const socketFrames = []
   const record = (requestId) => requests.get(requestId)
+  const toWall = (entry, timestamp) => (Number.isFinite(timestamp) ? entry.wallTime + (timestamp - entry.timestamp) * 1000 : null)
   client.on("Network.requestWillBeSent", (params) => {
     // A redirect reuses the request id; the record follows the final URL.
     const previous = requests.get(params.requestId)
@@ -62,6 +63,13 @@ export const createNetworkRecorder = (client, { keepSocketPayloads = false } = {
       type: params.type ?? previous?.type ?? null,
       wallTime: params.wallTime * 1000,
       timestamp: params.timestamp,
+      // Epoch milliseconds of the response headers and of the last byte, from
+      // the monotonic CDP timestamps, so a request's span sits on the same
+      // clock as `wallTime`.
+      responseAtWall: null,
+      finishedAtWall: null,
+      initiator: params.initiator?.type ?? null,
+      queuedMs: null,
       status: null,
       fromCache: false,
       fromServiceWorker: false,
@@ -81,6 +89,14 @@ export const createNetworkRecorder = (client, { keepSocketPayloads = false } = {
     if (!entry) return
     entry.status = params.response.status
     entry.type = params.type ?? entry.type
+    entry.responseAtWall = toWall(entry, params.timestamp)
+    // How long the request waited before it went out: for a socket under
+    // the per-host connection cap, a connection, or the renderer's queue. A
+    // request that waits behind others costs a round trip more than it shows.
+    const timing = params.response.timing
+    if (timing && Number.isFinite(timing.requestTime) && Number.isFinite(timing.sendStart) && timing.sendStart >= 0) {
+      entry.queuedMs = Math.max(0, (timing.requestTime - entry.timestamp) * 1000 + timing.sendStart)
+    }
     if (params.response.fromDiskCache) entry.fromCache = true
     if (params.response.fromServiceWorker) entry.fromServiceWorker = true
   })
@@ -95,12 +111,14 @@ export const createNetworkRecorder = (client, { keepSocketPayloads = false } = {
     if (!entry) return
     entry.encoded = Number(params.encodedDataLength ?? 0)
     entry.finishedAt = params.timestamp
+    entry.finishedAtWall = toWall(entry, params.timestamp)
   })
   client.on("Network.loadingFailed", (params) => {
     const entry = record(params.requestId)
     if (!entry) return
     entry.failed = true
     entry.finishedAt = params.timestamp
+    entry.finishedAtWall = toWall(entry, params.timestamp)
   })
   client.on("Network.webSocketFrameReceived", (params) => {
     const payload = String(params.response?.payloadData ?? "")

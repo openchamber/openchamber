@@ -687,6 +687,82 @@ bun run profile:switch -- --url http://127.0.0.1:4599 --title "perf: long 120" -
 `--render-probe` counts renders across the switches after the last page load
 (with `--cold-reload`, the last cycle) and prints them per switch.
 
+### A remote server: `--rtt`
+
+On loopback every request answers in a millisecond, so a switch that waits
+for three requests one after another looks as fast as one that waits for
+none. Users on a remote or SSH OpenCode, or behind the relay, pay a round
+trip per request. `--rtt <ms>` emulates that with CDP
+`Network.emulateNetworkConditions` on the page from its first load:
+each HTTP request waits `<ms>` between being sent and its response headers.
+`--down-kbps` / `--up-kbps` cap throughput (fixture sessions compress about
+37×, so a byte cap here understates a real session's payload).
+
+What the emulation covers, checked against a local echo server:
+fetch and XHR, the WebSocket handshake and the EventSource connect each take
+one RTT. WebSocket messages and SSE events after the first are **not**
+delayed, so event-driven updates look instant; a switch that waits on the
+realtime channel reads too fast. It models no TCP or TLS handshake per new
+connection. It does keep Chrome's six connections per host over HTTP/1.1,
+which is what a plain `http://` remote or an SSH tunnel uses, and that queue
+is often where the extra round trips come from.
+
+Per switch the summary records, for every request sent between the click
+and the end of the window and for every request still open at the click
+(`inFlightAtClick`: a hover prefetch the switch waits for, or requests
+holding the host's connections): `startMs`, `responseMs`, `endMs` after the
+click, `queuedMs` (time before it went out: a free connection or the
+renderer's queue), and `beforeVisible`. Two derived fields:
+
+- `contentGate`: the same-origin request that finished last before the new
+  messages rendered, with its queue time. `null` means the switch rendered
+  from memory (a hover or neighbour prefetch already loaded it).
+- `serialChain`: the longest run of requests that did not overlap before
+  `visible`. Non-overlap does not prove the code awaited one before the
+  next; read the code behind each link.
+
+With `--rtt`, each switch's line also prints both. `--hover 0` clicks as
+soon as the pointer arrives, so the hover prefetch (180 ms delay) cannot
+run first; the default 400 ms rest lets it finish before the click when the
+RTT is short, and the switch then measures memory, not the network.
+
+```bash
+bun run profile:switch -- --url http://127.0.0.1:4799 --title "perf: long 120" --title "perf: short A" --title "perf: short B" --cold-reload --repeat 3 --headless --timing --hover 0 --rtt 250
+```
+
+The first input after a reload focuses the window, and the app's `focus`
+handlers send about five requests at once. With the event stream that fills
+all six connections, so the first click after a load queues one RTT
+behind them. A user returning to the window and clicking a session hits the
+same queue; a switch inside a focused window does not.
+
+### While sessions stream: `--stream`
+
+`--stream <ids>` keeps those sessions answering through every switch: before
+each click every idle one gets a prompt for `--stream-model` (a fixture model,
+default `perf/agent-40tools-300cps`; needs `--dir`). Put a streamed session in
+the plan to switch to it and away from it; leave it out to switch between idle
+sessions while it streams in the background. A streaming session moves its row
+up the sidebar, so the press re-reads the row's position, and a switch that
+left another session active prints a warning (`activeAfter` in the summary).
+
+Per switch the summary also records `stale`: the last frame after the click
+in which a message of the previous session was still painted on screen, and
+`foreign`: messages painted after the click that the server says belong to
+another session than the one clicked (a stream rendering into the wrong
+chat). `busyToVisible` is the main-thread time from the click to `visible`.
+`--cpu-throttle <rate>` slows the page to approximate a loaded laptop, and
+`--no-expand` leaves the sidebar's "Show more" lists as they load: expanding a
+seeded list of thousands of sessions virtualizes the planned rows away.
+
+Measured 2026-11-28 on v2.8.1 and HEAD, headless, a stand seeded with the
+maintainer's 5,608-session list and three of their real sessions imported,
+three sessions streaming `stream-1200cps`, `--cpu-throttle 4
+--force-accessibility`: warm switches 239 ms median (218 ms with nothing
+streaming), switching into the streaming session 462 ms (218 ms), no previous
+session painted past the reveal and no foreign messages. Unthrottled every
+switch stayed near 100 ms.
+
 `--sessions a,b,c` picks the rows to click; the default is the first rows in
 the sidebar, so pass explicit ids or titles to compare runs across days. The
 row must be present in the sidebar; the command fails rather than measuring a
@@ -1334,7 +1410,7 @@ The measurement rules are in `.agents/skills/performance-engineering/SKILL.md`, 
 | `fixture-conversations.mjs` | Scripted conversations keyed by prompt, with tool steps OpenCode runs for real, and the scratch project files they edit. `scripts/design/shots.mjs` seeds its sessions from them; no perf scenario sends these prompts. |
 | `seed-long-session.mjs` | Builds a long session (default 120 turns) through the `openchamber session` CLI and the fixture provider's seeding models. |
 | `aggregate-runs.mjs` | Median, p95, min and max per metric over repeated single-run captures, excluding runs whose validity flags say they measured nothing. |
-| `network.mjs` | Request and byte accounting over the CDP Network domain, grouped by endpoint pattern. |
+| `network.mjs` | Request and byte accounting over the CDP Network domain, grouped by endpoint pattern, with each request's span (sent, headers, last byte) and queue time on the epoch clock. |
 | `startup-probe.mjs` | Page-side startup recorder: React mounted, splash and overlay gone, composer usable, model picker, and the app's startup trace marks. |
 | `cpu-profile.mjs` | Aggregates `Profiler.stop()` output into self time per function. |
 | `idle-probe.mjs` | Page-side instrumentation installed before application code runs; attributes scheduled work to the call site that scheduled it. Must never change observable behaviour. |

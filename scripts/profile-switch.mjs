@@ -30,6 +30,7 @@
  * cycle yields one cold visit per session.
  */
 
+import { spawn } from "node:child_process"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import process from "node:process"
@@ -110,6 +111,27 @@ Options:
                            accessibility client turns it on (a screen reader,
                            or a macOS app that reads other windows), so every
                            machine and headless runs measure that case
+  --rtt <ms>               Emulate a remote server: every HTTP request waits
+                           <ms> between being sent and its response headers
+                           (CDP Network.emulateNetworkConditions, from page load
+                           on). Covers fetch, XHR, the WebSocket handshake and
+                           the EventSource connect; does NOT delay WebSocket
+                           messages or SSE events after the first. Default 0 (off)
+  --down-kbps <n>          With or without --rtt, cap download throughput at
+                           <n> kilobits per second (default: unlimited)
+  --up-kbps <n>            Cap upload throughput at <n> kilobits per second
+  --stream <ids>           Keep these sessions (comma-separated) streaming a
+                           reply through every switch: before each click each
+                           idle one gets a prompt (the fixture provider only).
+                           They may also be in the plan, to switch to and away
+                           from them. Needs --dir
+  --stream-model <model>   Model for --stream (default: perf/agent-40tools-300cps)
+  --dir <path>             Project directory of the sessions (for --stream)
+  --cpu-throttle <rate>    Slow the page's CPU by <rate> (Emulation.setCPUThrottlingRate),
+                           to approximate a slower or loaded machine
+  --no-expand              Leave the sidebar's "Show more" lists as they load,
+                           as a user sees them; a large session list expanded
+                           in full virtualizes rows out of the DOM
   --chrome <path>          Chrome/Chromium executable
   --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
                            profile per run, removed afterwards). Its storage
@@ -147,6 +169,14 @@ const parseArgs = (argv) => {
     renderProbeHook: null,
     extraCategories: [],
     forceAccessibility: false,
+    rtt: 0,
+    downKbps: null,
+    upKbps: null,
+    stream: null,
+    streamModel: "perf/agent-40tools-300cps",
+    dir: null,
+    expand: true,
+    cpuThrottle: 1,
     chrome: null,
     profileDir: null,
     headless: false,
@@ -178,12 +208,26 @@ const parseArgs = (argv) => {
     else if (value === "--render-probe-hook") options.renderProbeHook = argv[++index]
     else if (value === "--extra-categories") options.extraCategories = String(argv[++index]).split(",").map((category) => category.trim()).filter(Boolean)
     else if (value === "--force-accessibility") options.forceAccessibility = true
+    else if (value === "--rtt") options.rtt = Number(argv[++index])
+    else if (value === "--down-kbps") options.downKbps = Number(argv[++index])
+    else if (value === "--up-kbps") options.upKbps = Number(argv[++index])
+    else if (value === "--stream") options.stream = String(argv[++index]).split(",").map((id) => id.trim()).filter(Boolean)
+    else if (value === "--stream-model") options.streamModel = argv[++index]
+    else if (value === "--dir") options.dir = resolve(argv[++index])
+    else if (value === "--no-expand") options.expand = false
+    else if (value === "--cpu-throttle") options.cpuThrottle = Number(argv[++index])
     else if (value === "--chrome") options.chrome = argv[++index]
     else if (value === "--profile-dir") options.profileDir = resolve(argv[++index])
     else if (value === "--headless") options.headless = true
     else throw new Error(`Unknown option: ${value}`)
   }
   if (!Number.isInteger(options.repeat) || options.repeat < 1) throw new Error("--repeat must be a positive integer")
+  if (!Number.isFinite(options.rtt) || options.rtt < 0) throw new Error("--rtt must be a non-negative number of milliseconds")
+  if (options.stream && !options.dir) throw new Error("--stream needs --dir")
+  if (options.stream && !options.streamModel.startsWith("perf/")) throw new Error("--stream-model must be a fixture model (perf/...)")
+  for (const [flag, kbps] of [["--down-kbps", options.downKbps], ["--up-kbps", options.upKbps]]) {
+    if (kbps !== null && (!Number.isFinite(kbps) || kbps <= 0)) throw new Error(`${flag} must be a positive number`)
+  }
   return options
 }
 
@@ -203,7 +247,35 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
   // under display:none, and showing it again is the switch being measured.
   const renderedMessages = () => [...document.querySelectorAll('[data-message-id]')].filter((el) => el.checkVisibility())
   const messageIds = () => renderedMessages().map((el) => el.getAttribute('data-message-id'))
-  const before = new Set(messageIds())
+  // Refreshed at the click: a streaming session adds messages during the hover.
+  let before = new Set(messageIds())
+  // Messages of the previous session still painted on screen after the click
+  // (the "old message lingers" glitch), and every new message id seen, with
+  // the first and last frame it was on screen; the caller checks afterwards
+  // which of them belong to the clicked session.
+  const stale = { lastAt: null, frames: 0, ids: new Set() }
+  const seen = new Map()
+  const paintedOnScreen = (el) => {
+    const rect = el.getBoundingClientRect()
+    if (rect.height <= 0 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) return false
+    return effectiveOpacity(el) > 0.01
+  }
+  const trackPainted = () => {
+    const now = elapsed()
+    let staleThisFrame = false
+    for (const el of renderedMessages()) {
+      const id = el.getAttribute('data-message-id')
+      if (before.has(id)) {
+        if (state.ack !== null && paintedOnScreen(el)) { staleThisFrame = true; stale.ids.add(id) }
+        continue
+      }
+      if (!paintedOnScreen(el)) continue
+      const entry = seen.get(id)
+      if (entry) entry.last = now
+      else seen.set(id, { first: now, last: now })
+    }
+    if (staleThisFrame) { stale.frames += 1; stale.lastAt = now }
+  }
   const state = {
     t0: null, ack: null, content: null, visible: null, revealCleared: null, messageCount: null,
     frames: [], revealStates: [], anchors: null, scroller: null, finished: false, shiftDone: false,
@@ -298,6 +370,7 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
     if (state.finished) return
     if (state.t0 !== null) {
       state.frames.push(elapsed())
+      trackPainted()
       if (state.content !== null && state.visible === null) checkVisible()
       else if (state.visible !== null && !state.shiftDone) trackShift()
     }
@@ -305,7 +378,7 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
   }
   requestAnimationFrame(tick)
   window.__openchamberSwitchProbe = {
-    start() { state.t0 = performance.now(); performance.mark("switch:start"); noteReveal() },
+    start() { before = new Set(messageIds()); state.t0 = performance.now(); performance.mark("switch:start"); noteReveal() },
     done() { return state.shiftDone || (state.t0 !== null && state.content === null && elapsed() > 8000) },
     finish() {
       state.finished = true
@@ -335,6 +408,8 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
           // anchor offsets (against the window) were measured.
           scroller: state.scroller ? state.scroller.tagName.toLowerCase() + '.' + String(state.scroller.className).trim().split(/\\s+/).slice(0, 3).join('.') : null,
         },
+        stale: { lastAt: stale.lastAt === null ? null : Math.round(stale.lastAt), frames: stale.frames, ids: [...stale.ids] },
+        seen: [...seen].map(([id, entry]) => ({ id, first: Math.round(entry.first), last: Math.round(entry.last) })),
         firstFrame: state.frames[0] ?? null,
         longestFrameGap: gaps.reduce((max, gap) => Math.max(max, gap), 0),
         framesRecorded: state.frames.length,
@@ -376,17 +451,68 @@ const readSidebarRows = (client) => evaluateValue(client, `[...document.querySel
 
 const median = (values) => percentile(values, 0.5)
 
+const STREAM_TYPES = new Set(["WebSocket", "EventSource"])
+
+/**
+ * The longest run of requests that ran one after another before the chat was
+ * visible: each starts once the previous one has finished (2 ms slack), all
+ * finished before `visible`. Under --rtt every such link costs at least one
+ * round trip, so its depth times the RTT is a floor on the switch. "Serial"
+ * says they did not overlap, not that the code awaited one before the next;
+ * the code locations behind the chain say which waits are real. Streams and
+ * requests still open at `visible` are left out.
+ */
+const serialChain = (requests, visibleMs) => {
+  if (!Number.isFinite(visibleMs)) return null
+  const spans = requests
+    .filter((request) => !STREAM_TYPES.has(request.type) && Number.isFinite(request.endMs) && request.endMs <= visibleMs + 1)
+    .sort((left, right) => left.endMs - right.endMs)
+  const best = spans.map(() => ({ depth: 1, previous: -1 }))
+  for (let index = 0; index < spans.length; index += 1) {
+    for (let before = 0; before < index; before += 1) {
+      if (spans[before].endMs <= spans[index].startMs + 2 && best[before].depth + 1 > best[index].depth) best[index] = { depth: best[before].depth + 1, previous: before }
+    }
+  }
+  let tail = -1
+  for (let index = 0; index < spans.length; index += 1) if (tail < 0 || best[index].depth > best[tail].depth) tail = index
+  const chain = []
+  for (let index = tail; index >= 0; index = best[index].previous) chain.unshift(spans[index])
+  return {
+    depth: chain.length,
+    requestsBeforeVisible: spans.length,
+    chain: chain.map((request) => ({ endpoint: request.endpoint, startMs: request.startMs, endMs: request.endMs })),
+  }
+}
+
 // Metric columns reported per visit type and per session. `pick` reads the
 // value from a switch entry; null values are left out of the statistics.
+/**
+ * The same-origin request that finished last before the new messages
+ * rendered: the one the first paint waited for, if any. `queuedMs` is how
+ * long it sat before going out; under --rtt a queued request costs a round
+ * trip per request ahead of it.
+ */
+const contentGate = (requests, contentMs) => {
+  if (!Number.isFinite(contentMs)) return null
+  // endpointPattern keeps the origin only on cross-origin URLs.
+  const candidates = requests.filter((request) => !STREAM_TYPES.has(request.type) && !/^[A-Z]+ https?:/.test(request.endpoint) && Number.isFinite(request.endMs) && request.endMs <= contentMs + 1)
+  const gate = candidates.reduce((latest, request) => (latest === null || request.endMs > latest.endMs ? request : latest), null)
+  return gate ? { endpoint: gate.endpoint, startMs: gate.startMs, queuedMs: gate.queuedMs, responseMs: gate.responseMs, endMs: gate.endMs } : null
+}
+
 const SWITCH_METRICS = {
   ack: (entry) => entry.ack,
   content: (entry) => entry.content,
   visible: (entry) => entry.visible,
   revealCleared: (entry) => entry.revealCleared,
   longestTask: (entry) => entry.longestTask,
+  busyToVisible: (entry) => entry.busyToVisible ?? null,
+  staleUntil: (entry) => entry.stale?.lastAt ?? null,
   accessibilityMs: (entry) => entry.accessibility?.ms ?? null,
   accessibilityLongestPassMs: (entry) => entry.accessibility?.longestPassMs ?? null,
   requests: (entry) => entry.requestCount,
+  serialDepth: (entry) => entry.serialChain?.depth ?? null,
+  gateQueuedMs: (entry) => entry.contentGate?.queuedMs ?? null,
   decodedKb: (entry) => entry.network?.decodedKb ?? null,
   encodedKb: (entry) => entry.network?.encodedKb ?? null,
   shiftMaxPx: (entry) => entry.shift?.maxPx ?? null,
@@ -465,6 +591,41 @@ const printComparison = (current, baseline) => {
 
 const fmt = (value) => (value === null || value === undefined ? "-" : `${Math.round(value)}ms`)
 
+const CLI_PATH = resolve(import.meta.dirname, "../packages/web/bin/cli.js")
+
+const runSessionCli = (url, args) => new Promise((resolveRun, reject) => {
+  const child = spawn(process.execPath, [CLI_PATH, "session", ...args, "--port", new URL(url).port, "--json"], { stdio: ["ignore", "pipe", "pipe"] })
+  let stdout = ""
+  child.stdout.on("data", (chunk) => { stdout += chunk })
+  child.on("error", reject)
+  child.on("close", (code) => {
+    try { resolveRun(JSON.parse(stdout)) } catch { reject(new Error(`session ${args[0]} exited with ${code}: ${stdout.slice(0, 300)}`)) }
+  })
+})
+
+/** Sends a prompt to each stream session unless it is already busy; resolves once all are busy. */
+const ensureStreaming = async (options) => (await Promise.all(options.stream.map((sessionId) => ensureSessionStreaming(options, sessionId)))).every(Boolean)
+
+const ensureSessionStreaming = async (options, sessionId) => {
+  const base = ["--session", sessionId, "--dir", options.dir]
+  const busy = async () => (await runSessionCli(options.url, ["status", ...base]))?.sessionStatus?.type === "busy"
+  if (await busy()) return true
+  const sent = await runSessionCli(options.url, ["send", ...base, "--prompt", "Keep going with the next part.", "--model", options.streamModel])
+  if (sent?.status !== "ok") throw new Error(`Could not start the stream: ${JSON.stringify(sent).slice(0, 300)}`)
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (await busy()) { await wait(1500); return true }
+    await wait(250)
+  }
+  return false
+}
+
+/** Which of the message ids painted after a click belong to `sessionId` (null: unknown). */
+const classifySeen = async (options, sessionId, seen) => Promise.all(seen.map(async (entry) => {
+  if (!options.dir) return { ...entry, own: null }
+  const response = await fetch(`${options.url}/api/session/${sessionId}/message/${entry.id}?directory=${encodeURIComponent(options.dir)}`)
+  return { ...entry, own: response.status === 200 ? true : response.status === 404 ? false : null }
+}))
+
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const output = resolve(options.output ?? join("artifacts", `switch-profile-${new Date().toISOString().replace(/[:.]/g, "-")}`))
@@ -503,7 +664,24 @@ const main = async () => {
       await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildRenderProbeSource({ traceHook: options.renderProbeHook }) })
       console.log("ATTRIBUTION RUN — render probe on; switch timings from this run are inflated.")
     }
+    if (options.cpuThrottle > 1) {
+      await client.send("Emulation.setCPUThrottlingRate", { rate: options.cpuThrottle })
+      console.log(`CPU throttled ${options.cpuThrottle}x.`)
+    }
     const network = createNetworkRecorder(client)
+    const kbpsToBytes = (kbps) => (kbps === null ? -1 : (kbps * 1000) / 8)
+    const networkConditions = options.rtt > 0 || options.downKbps !== null || options.upKbps !== null
+      ? { rttMs: options.rtt, downKbps: options.downKbps, upKbps: options.upKbps }
+      : null
+    if (networkConditions) {
+      await client.send("Network.emulateNetworkConditions", {
+        offline: false,
+        latency: options.rtt,
+        downloadThroughput: kbpsToBytes(options.downKbps),
+        uploadThroughput: kbpsToBytes(options.upKbps),
+      })
+      console.log(`Emulated network: ${options.rtt} ms per request${options.downKbps ? `, down ${options.downKbps} kbit/s` : ""}${options.upKbps ? `, up ${options.upKbps} kbit/s` : ""}. WebSocket messages and SSE events after the first are not delayed.`)
+    }
 
     // Opens the app parked on `parkId`, so the session it restores is not one
     // of the plan and the first click on every planned session is cold.
@@ -516,7 +694,7 @@ const main = async () => {
       console.log(`Loaded ${options.url}${parkId ? ` parked on ${parkId}` : ""}; settling for up to ${options.settle}s.`)
       const settle = await settlePage(client, options.settle)
       console.log(`Settled after ${settle.seconds}s.`)
-      const expanded = await expandSessionLists(client)
+      const expanded = options.expand ? await expandSessionLists(client) : 0
       if (expanded > 0) await wait(3000)
     }
 
@@ -591,35 +769,76 @@ const main = async () => {
           console.warn(`Warning: ${id} was already the active session; this click would measure nothing, skipped.`)
           continue
         }
+        const streaming = options.stream ? await ensureStreaming(options) : null
+        if (options.stream && !streaming) console.warn(`Warning: ${options.stream.join(", ")} did not all become busy before switch #${index}.`)
         await wait(800)
+        // Hovering a row prefetches it, so the switch's requests can start here.
+        const hoveredAt = Date.now()
         await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x, y: box.y })
         await wait(options.hover)
         await evaluateValue(client, buildProbeSource(id, options.shiftWindow))
         await evaluateValue(client, `window.__openchamberStreamPerformance?.reset()`)
+        // A streaming session moves its row up the sidebar, so the row may
+        // have moved during the hover: press where it is now.
+        const pressBox = await evaluateValue(client, `(() => {
+          const rect = document.querySelector('[data-session-row="${id}"]')?.getBoundingClientRect()
+          return rect ? { x: rect.x + 60, y: rect.y + rect.height / 2 } : null
+        })()`) ?? box
+        if (pressBox.x !== box.x || pressBox.y !== box.y) await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pressBox.x, y: pressBox.y })
         const clickedAt = Date.now()
         await evaluateValue(client, `window.__openchamberSwitchProbe.start()`)
-        await pressAt(client, box.x, box.y)
+        await pressAt(client, pressBox.x, pressBox.y)
         await wait(options.gap)
         const extendUntil = Date.now() + 10_000
         while (Date.now() < extendUntil && !(await evaluateValue(client, `window.__openchamberSwitchProbe.done()`))) await wait(200)
         const probe = await evaluateValue(client, `window.__openchamberSwitchProbe.finish()`)
+        probe.activeAfter = await evaluateValue(client, `document.querySelector('[data-session-row][aria-current="page"]')?.getAttribute('data-session-row') ?? null`)
+        if (probe.activeAfter !== id) console.warn(`Warning: switch #${index} left ${probe.activeAfter ?? "no session"} active instead of ${id}; the press missed the row.`)
         const windowEnd = Date.now()
         await evaluateValue(client, `performance.mark("switch:end")`)
         const renders = await readRenderCounters(client)
         const triggered = network.startedBetween(clickedAt - 5, windowEnd)
-        const requests = triggered.map((request) => ({
+        const sinceClick = (wall) => (wall === null ? null : round(wall - clickedAt, 0))
+        const describeRequest = (request) => ({
           at: round(request.wallTime - clickedAt, 0),
           endpoint: `${request.method} ${endpointPattern(request.url, options.url)}`,
+          type: request.type,
+          initiator: request.initiator,
+          // Milliseconds after the click: sent, response headers, last byte.
+          startMs: round(request.wallTime - clickedAt, 0),
+          responseMs: sinceClick(request.responseAtWall),
+          endMs: sinceClick(request.finishedAtWall),
+          queuedMs: request.queuedMs === null ? null : round(request.queuedMs, 0),
+          beforeVisible: probe.visible !== null && request.finishedAtWall !== null && request.finishedAtWall - clickedAt <= probe.visible + 1,
           encodedBytes: request.encoded ?? request.streamedEncoded,
           decodedBytes: request.decoded,
           finished: request.finishedAt !== null,
-        }))
+        })
+        const requests = triggered.map(describeRequest)
+        // Requests sent before the click and still open at it: a hover
+        // prefetch the switch may wait for, or requests holding the browser's
+        // connections to the host (six per host over HTTP/1.1), which a
+        // switch request then queues behind. Event streams opened before the
+        // last load are left out (one is open per page).
+        const inFlightAtClick = [...network.requests.values()]
+          .filter((request) => request.wallTime < clickedAt - 5 && request.wallTime >= hoveredAt - 60_000)
+          .filter((request) => (request.finishedAtWall === null ? STREAM_TYPES.has(request.type) || request.wallTime >= hoveredAt - 5 : request.finishedAtWall >= clickedAt))
+          .map(describeRequest)
+        const chain = serialChain([...inFlightAtClick, ...requests], probe.visible)
+        const gate = contentGate([...inFlightAtClick, ...requests], probe.content)
         const networkSummary = summarizeRequests(triggered, options.url)
-        const entry = { index, cycle, id, visit, ...probe, requestCount: triggered.length, requests, network: networkSummary, renders, longestTask: null }
+        probe.seen = await classifySeen(options, id, probe.seen)
+        // Messages of another session painted after the click: a stream of
+        // the session left behind rendering into the one clicked.
+        const foreign = probe.seen.filter((entry) => entry.own === false)
+        const entry = { index, cycle, id, visit, streaming, from: switches.at(-1)?.id ?? park, foreign, ...probe, requestCount: triggered.length, requests, inFlightAtClick, serialChain: chain, contentGate: gate, network: networkSummary, renders, longestTask: null }
         switches.push(entry)
         probedSwitches += 1
         const renderSummary = Object.entries(renders).map(([metric, count]) => `${metric.replace(/\.render$/, "")}=${count}`).join(" ")
         console.log(`#${String(index).padStart(2)} ${visit.padEnd(4)} ${id.slice(0, 16)} ack=${fmt(probe.ack)} content=${fmt(probe.content)} visible=${fmt(probe.visible)} shift=${probe.shift ? `${probe.shift.maxPx}px` : "-"} (${probe.messageCount ?? "-"} msgs) longestFrameGap=${fmt(probe.longestFrameGap)} requests=${triggered.length} ${networkSummary.decodedKb}KB ${renderSummary}`)
+        if (probe.stale.frames > 0 || foreign.length > 0) console.log(`    previous session painted until ${fmt(probe.stale.lastAt)} (${probe.stale.frames} frames after ack); foreign messages: ${foreign.map((entry) => `${entry.id.slice(0, 14)} ${entry.first}→${entry.last}ms`).join(", ") || "none"}`)
+        if (networkConditions && chain) console.log(`    serial depth ${chain.depth} before visible: ${chain.chain.map((request) => `${request.endpoint} [${request.startMs}→${request.endMs}]`).join(" → ")}`)
+        if (networkConditions) console.log(`    first paint waited for: ${gate ? `${gate.endpoint} sent ${gate.startMs}, queued ${gate.queuedMs ?? "?"}ms, done ${gate.endMs}` : "no request (rendered from memory)"}`)
         index += 1
       }
     }
@@ -644,7 +863,13 @@ const main = async () => {
       const end = marks[markIndex + 1].ts
       const longest = tasks.filter((event) => event.ts >= start && event.ts <= end).reduce((max, event) => Math.max(max, event.dur / 1000), 0)
       switches[switchIndex].longestTask = tasks.length === 0 ? null : round(longest)
-      switches[switchIndex].accessibility = accessibilityInWindow(traceEvents, { main: rendererMainThread(traceEvents, { start, end }).main, start, end, recorded: true })
+      const { main } = rendererMainThread(traceEvents, { start, end })
+      switches[switchIndex].accessibility = accessibilityInWindow(traceEvents, { main, start, end, recorded: true })
+      // Main-thread time spent between the click and `visible`.
+      const visibleAt = switches[switchIndex].visible
+      switches[switchIndex].busyToVisible = tasks.length === 0 || visibleAt === null ? null : round(tasks
+        .filter((event) => `${event.pid}:${event.tid}` === main && event.ts >= start && event.ts <= start + visibleAt * 1000)
+        .reduce((total, event) => total + event.dur / 1000, 0))
       switchIndex += 1
     }
 
@@ -668,6 +893,9 @@ const main = async () => {
       repeat: options.repeat,
       coldReload: options.coldReload,
       shiftWindowMs: options.shiftWindow,
+      networkConditions,
+      cpuThrottle: options.cpuThrottle,
+      stream: options.stream ? { session: options.stream, model: options.streamModel } : null,
       frameLiveness,
       accessibility: accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }),
       ...summarizeSwitches(switches, titles),
@@ -687,8 +915,8 @@ const main = async () => {
       if (!visitStats) continue
       console.log(`${visit} (${visitStats.switches}): ${[
         line("ack", visitStats.ack), line("content", visitStats.content), line("visible", visitStats.visible),
-        line("shift", visitStats.shiftMaxPx, "px"), line("longest task", visitStats.longestTask), line("accessibility", visitStats.accessibilityMs),
-        line("requests", visitStats.requests, ""), line("decoded", visitStats.decodedKb, "KB"),
+        line("shift", visitStats.shiftMaxPx, "px"), line("longest task", visitStats.longestTask), line("busy to visible", visitStats.busyToVisible), line("old session painted until", visitStats.staleUntil), line("accessibility", visitStats.accessibilityMs),
+        line("requests", visitStats.requests, ""), line("serial depth", visitStats.serialDepth, ""), line("decoded", visitStats.decodedKb, "KB"),
       ].join(" · ")}`)
       if (visitStats.notVisible > 0) console.log(`  ${visitStats.notVisible} switch(es) showed content that never became fully visible`)
     }
