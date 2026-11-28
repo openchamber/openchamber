@@ -1993,6 +1993,32 @@ session out of the old directory's store, and a commit still naming that
 directory had the chat's load effect read the session and its transcript back
 into it.
 
+The deferred switch is capped at 300 ms (`STARVED_SWITCH_MS` in
+`useShownSessionSelection`). React restarts a deferred render whenever an urgent
+update arrives, and every streamed store update is one, so a column render
+longer than the gap between stream events never finished: the previous session
+stayed on screen until React expired the lane, about 5 s after the click (a 120
+ms column render under an event every 16, 50 or 100 ms committed after 5.0 to
+5.1 s, measured with the real scheduler and a busy-looping column; with the cap
+the same runs committed after 0.43 s). Once the target has waited 300 ms
+(`useShownAfter`) the column renders the target as an urgent update, which a
+stream cannot interrupt, so such a switch commits within the cap plus one
+render. 300 ms sits above a warm switch on a throttled stand (239 ms median
+from the click to visible with three sessions streaming, the deferred render
+only a part of it), so an ordinary switch never reaches it and looks as before.
+While the column is still behind, a further click shows its target at once,
+never the older deferred value; the timer is not restarted per click, so a
+second click inside the 300 ms can commit sooner than 300 ms after itself, which
+only shows the newest session earlier. A cleared selection (`null`) is never
+forced: it keeps the transcript until the draft opens, as before. That
+measurement is no unit test: it spins the CPU against real timers for seconds
+and fails on a busy machine.
+The cap counts only time the deferred value lags: while the previous
+timeline is held for a cold load (below), the target is the session already
+shown, so the hold and its 400 ms limit are unchanged. Once the hold gives up
+and forwards a session that is still loading, the cap can force that commit
+too; it shows the same loading state the deferred render would.
+
 A session whose messages are not in memory at the click keeps the previous
 timeline on screen while they load (up to 400ms), then swaps straight to the
 finished view; the skeleton appears only when loading takes longer. The

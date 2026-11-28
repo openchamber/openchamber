@@ -6,7 +6,7 @@ The column binds one shown session to its transcript, composer, navigation, load
 
 ## Invariants
 
-- Session ID and directory travel together through deferred selection so timeline keys, subscriptions, and loader targets always refer to the same session. The live selection updates the sidebar, URL, and tab before the interruptible transcript transition finishes.
+- Session ID and directory travel together through deferred selection so timeline keys, subscriptions, and loader targets always refer to the same session. The live selection updates the sidebar, URL, and tab before the interruptible transcript transition finishes; a transition a live stream keeps interrupting is forced after 300 ms (`sync/DOCUMENTATION.md`, "Session switch commit").
 - A pinned column navigates locally and resets only when its owner supplies a different origin. Its timeline dialog is local; the main column uses app state so the global shortcut can open it. Returning to a parent is hidden at the pinned origin because that parent is already in the main chat, but remains available in deeper subtasks.
 - Mobile message selections use a controller owned by their column so quoted comments reach that column's composer.
 - A pinned session demands bootstrap for its own directory because app bootstrap covers only the current directory and globally selected session. History retention follows the actually rendered session through the deferred switch until commit.
