@@ -32,9 +32,10 @@ describe('tracker accounts', () => {
     const view = await accounts.connect('ext-yt', { instance: 'https://yt.example.com', account: mona, credential: token('secret-1') }, connection);
     expect(view).toEqual({
       instance: 'https://yt.example.com',
-      accounts: [{ id: 'u-1', login: 'mona', name: 'Mona', connectedAt: 1_001, status: 'valid', method: 'token' }],
+      accounts: [{ id: 'u-1', login: 'mona', name: 'Mona', instance: 'https://yt.example.com', connectedAt: 1_001, status: 'valid', method: 'token' }],
       activeAccountId: 'u-1',
       hasClient: false,
+      clients: [],
     });
     expect(JSON.stringify(view)).not.toContain('secret-1');
     const stored = await accounts.read('ext-yt');
@@ -64,12 +65,81 @@ describe('tracker accounts', () => {
     expect((await accounts.read('ext-yt')).accounts.find((account) => account.id === 'u-1').credential.token).toBe('a2');
   });
 
-  it('refuses a connect to another server while accounts live on this one', async () => {
+  it('keeps accounts of two servers side by side, each with its own credential and OAuth client', async () => {
     const { accounts } = await store();
-    await accounts.connect('ext-yt', { instance: 'https://yt.example.com', account: mona, credential: token('a') });
-    await expect(accounts.connect('ext-yt', { instance: 'https://other.example.com', account: { id: 'u-9', login: null }, credential: token('z') }))
-      .rejects.toMatchObject({ status: 409, code: 'INSTANCE_MISMATCH' });
-    await expect(accounts.setClient('ext-yt', { instance: 'https://other.example.com', clientId: 'c', clientSecret: 's', target })).rejects.toMatchObject({ code: 'INSTANCE_MISMATCH' });
+    const siteA = 'https://a.example.com';
+    const siteB = 'https://b.example.com';
+    const targetA = { authorizeUrl: `${siteA}/hub/auth`, tokenUrl: `${siteA}/hub/token` };
+    const targetB = { authorizeUrl: `${siteB}/hub/auth`, tokenUrl: `${siteB}/hub/token` };
+    await accounts.connect('ext-yt', { instance: siteA, account: mona, credential: token('a') });
+    await accounts.connect('ext-yt', { instance: siteB, account: { id: 'u-9', login: 'bob' }, credential: token('z') });
+    let view = await accounts.publicView('ext-yt');
+    expect(view.accounts.map((account) => `${account.id}@${account.instance}`)).toEqual([`u-1@${siteA}`, `u-9@${siteB}`]);
+    expect((await accounts.read('ext-yt')).accounts.map((account) => account.credential.token)).toEqual(['a', 'z']);
+    // The active account's server is the one the view reports.
+    expect(view.instance).toBe(siteB);
+    expect(await accounts.activate('ext-yt', 'u-1')).toBe(true);
+    expect((await accounts.publicView('ext-yt')).instance).toBe(siteA);
+
+    await accounts.setClient('ext-yt', { instance: siteA, clientId: 'client-a', clientSecret: 'sa', target: targetA });
+    await accounts.setClient('ext-yt', { instance: siteB, clientId: 'client-b', clientSecret: 'sb', target: targetB });
+    expect(await accounts.readClient('ext-yt', siteA, targetA)).toEqual({ id: 'client-a', secret: 'sa' });
+    expect(await accounts.readClient('ext-yt', siteB, targetB)).toEqual({ id: 'client-b', secret: 'sb' });
+    expect(await accounts.readClient('ext-yt', siteA, targetB)).toBeNull();
+    view = await accounts.publicView('ext-yt');
+    expect(view.clients).toEqual([siteA, siteB]);
+    expect(view.hasClient).toBe(true);
+  });
+
+  it('a version 1 store becomes version 2: each account takes the tracker\'s server and its client, and the next write drops the old fields', async () => {
+    const { accounts, dir } = await store();
+    const site = 'https://yt.example.com';
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(trackerAccountsPersistPath(dir), JSON.stringify({
+      version: 1,
+      trackers: {
+        'ext-yt': {
+          instance: site,
+          client: { id: 'client-1', secret: 'shh', target },
+          accounts: [{ id: 'u-1', login: 'mona', name: 'Mona', revision: '11111111-1111-4111-8111-111111111111', connectedAt: 900, status: 'valid', credential: token('a') }],
+          activeAccountId: 'u-1',
+          mapping: { defaultProjectPath: '/repo', containerProjectPaths: {} },
+          preferences: { sessionComments: true },
+        },
+      },
+    }));
+    const view = await accounts.publicView('ext-yt');
+    expect(view.accounts).toEqual([{ id: 'u-1', login: 'mona', name: 'Mona', instance: site, connectedAt: 900, status: 'valid', method: 'token' }]);
+    expect(view.instance).toBe(site);
+    expect(view.clients).toEqual([site]);
+    expect(await accounts.readClient('ext-yt', site, target)).toEqual({ id: 'client-1', secret: 'shh' });
+    expect(await accounts.mapping('ext-yt')).toEqual({ defaultProjectPath: '/repo', containerProjectPaths: {} });
+    expect(await accounts.preferences('ext-yt')).toEqual({ sessionComments: true });
+
+    await accounts.setPreferences('ext-yt', { sessionComments: false });
+    const written = JSON.parse(await fs.readFile(trackerAccountsPersistPath(dir), 'utf8'));
+    expect(written.version).toBe(2);
+    expect(written.trackers['ext-yt'].instance).toBeUndefined();
+    expect(written.trackers['ext-yt'].client).toBeUndefined();
+    expect(written.trackers['ext-yt'].accounts[0].instance).toBe(site);
+    expect(written.trackers['ext-yt'].clients).toEqual({ [site]: { id: 'client-1', secret: 'shh', target } });
+  });
+
+  it('disconnecting one account keeps the other account, its server and its client', async () => {
+    const { accounts } = await store();
+    const siteA = 'https://a.example.com';
+    const siteB = 'https://b.example.com';
+    const targetB = { authorizeUrl: `${siteB}/hub/auth`, tokenUrl: `${siteB}/hub/token` };
+    await accounts.connect('ext-yt', { instance: siteA, account: mona, credential: token('a') });
+    await accounts.connect('ext-yt', { instance: siteB, account: { id: 'u-9', login: 'bob' }, credential: token('z') });
+    await accounts.setClient('ext-yt', { instance: siteB, clientId: 'client-b', clientSecret: 'sb', target: targetB });
+    expect(await accounts.removeAccount('ext-yt', 'u-9')).toBe(true);
+    const view = await accounts.publicView('ext-yt');
+    expect(view.accounts.map((account) => `${account.id}@${account.instance}`)).toEqual([`u-1@${siteA}`]);
+    expect(view.instance).toBe(siteA);
+    expect(view.activeAccountId).toBe('u-1');
+    expect(view.clients).toEqual([siteB]);
+    expect(await accounts.readClient('ext-yt', siteB, targetB)).toEqual({ id: 'client-b', secret: 'sb' });
   });
 
   it('a disconnect wins over a connect whose verification is still pending', async () => {
@@ -78,7 +148,7 @@ describe('tracker accounts', () => {
     // Nothing is connected yet; the disconnect still invalidates the pending connect.
     expect(await accounts.removeAccount('ext-yt', 'u-1')).toBe(false);
     expect(await accounts.connect('ext-yt', { instance: 'https://yt.example.com', account: mona, credential: token('a') }, connection)).toBeNull();
-    expect(await accounts.publicView('ext-yt')).toEqual({ instance: null, accounts: [], activeAccountId: null, hasClient: false });
+    expect(await accounts.publicView('ext-yt')).toEqual({ instance: null, accounts: [], activeAccountId: null, hasClient: false, clients: [] });
     // A later connect's identity supersedes an earlier one too.
     const first = accounts.beginConnect('ext-yt');
     const second = accounts.beginConnect('ext-yt');
@@ -112,13 +182,15 @@ describe('tracker accounts', () => {
     expect((await accounts.read('ext-yt')).accounts[0]).toMatchObject({ revision: next, credential: refreshed, status: 'valid' });
 
     await accounts.setClient('ext-yt', { instance: 'https://yt.example.com', clientId: 'client-1', clientSecret: 'shh', target });
-    expect(await accounts.readClient('ext-yt', target)).toEqual({ id: 'client-1', secret: 'shh' });
+    expect(await accounts.readClient('ext-yt', 'https://yt.example.com', target)).toEqual({ id: 'client-1', secret: 'shh' });
     await accounts.setClient('ext-yt', { instance: 'https://yt.example.com', clientId: 'client-1', clientSecret: '', target });
-    expect(await accounts.readClient('ext-yt', target)).toEqual({ id: 'client-1', secret: 'shh' });
+    expect(await accounts.readClient('ext-yt', 'https://yt.example.com', target)).toEqual({ id: 'client-1', secret: 'shh' });
     await accounts.setClient('ext-yt', { instance: 'https://yt.example.com', clientId: 'client-2', clientSecret: '', target });
-    expect(await accounts.readClient('ext-yt', target)).toEqual({ id: 'client-2', secret: '' });
-    expect(await accounts.readClient('ext-yt', { ...target, tokenUrl: 'https://yt.example.com/moved' })).toBeNull();
+    expect(await accounts.readClient('ext-yt', 'https://yt.example.com', target)).toEqual({ id: 'client-2', secret: '' });
+    expect(await accounts.readClient('ext-yt', 'https://yt.example.com', { ...target, tokenUrl: 'https://yt.example.com/moved' })).toBeNull();
+    expect(await accounts.readClient('ext-yt', 'https://other.example.com', target)).toBeNull();
     expect((await accounts.publicView('ext-yt')).hasClient).toBe(true);
+    expect((await accounts.publicView('ext-yt')).clients).toEqual(['https://yt.example.com']);
   });
 
   it('the last account leaving forgets the server, the client and the mapping; preferences and session records stay', async () => {
@@ -130,7 +202,7 @@ describe('tracker accounts', () => {
     await accounts.writeSessionRecord('ext-yt', 'ses_1', { identifier: 'PROJ-1', sessionOrigin: 'https://app.example.com', started: true, completed: false, failure: false });
     expect(await accounts.mapping('ext-yt')).toEqual({ defaultProjectPath: '/repo', containerProjectPaths: { 'p-1': '/repo' } });
     expect(await accounts.removeAccount('ext-yt', 'u-1')).toBe(true);
-    expect(await accounts.publicView('ext-yt')).toEqual({ instance: null, accounts: [], activeAccountId: null, hasClient: false });
+    expect(await accounts.publicView('ext-yt')).toEqual({ instance: null, accounts: [], activeAccountId: null, hasClient: false, clients: [] });
     expect(await accounts.mapping('ext-yt')).toEqual({ defaultProjectPath: null, containerProjectPaths: {} });
     expect(await accounts.preferences('ext-yt')).toEqual({ sessionComments: true });
     expect(await accounts.sessionRecord('ext-yt', 'ses_1')).toMatchObject({ identifier: 'PROJ-1', started: true });

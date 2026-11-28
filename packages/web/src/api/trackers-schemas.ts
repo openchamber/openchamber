@@ -148,6 +148,7 @@ export const statesResultSchema: z.ZodType<TrackerStatesResult> = z.union([
 const accountSchema: z.ZodType<TrackerAccount> = z.object({
   id: text,
   name: optionalText,
+  instance: z.string().trim().min(1).max(2_048).nullable().optional().catch(undefined),
   user: personSchema.optional(),
   current: z.boolean().catch(false),
   authorizedAt: z.number().nullish().catch(null),
@@ -165,6 +166,7 @@ const connectInfoSchema: z.ZodType<TrackerConnectInfo> = z.object({
     z.object({ kind: z.literal('user'), label: z.string().trim().min(1).max(64), placeholder: z.string().trim().min(1).max(256).optional() }),
   ]),
   hasClient: z.boolean().catch(false),
+  clients: listOf(z.string().trim().min(1).max(2_048)).optional(),
   redirectUri: z.string().trim().min(1).max(2_048).nullable().catch(null),
 });
 

@@ -200,3 +200,7 @@ generic `{provider}` keys.
 The packaged desktop UI uses `openchamber-ui://`, which a browser opening a
 tracker comment cannot load. Session posts supply the local server's HTTP
 origin, and the server posts only when that origin is reachable publicly.
+
+### Why Add account asks for the site again
+
+A tracker with `multipleAccounts` may keep its accounts on different servers: two Jira sites, each with its own token. The form therefore offers the site field every time it adds an account, prefilled with the active account's server, and sends the typed origin with the token or the browser sign-in. The account list shows the site when the accounts differ, and the board picker does the same, because the same person and the same workspace name can appear on both sites. A tracker without `multipleAccounts` still shows one site and the server refuses another.

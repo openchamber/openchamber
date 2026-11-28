@@ -13,10 +13,10 @@ const unexpected = (): never => { throw new Error('Unexpected runtime API access
 
 const connectedStatus: TrackerAuthStatus = {
   connected: true,
-  account: { id: 'org-a', name: 'Acme Org', user: { name: 'Ada', avatarUrl: null }, current: true },
+  account: { id: 'org-a', name: 'Acme Org', instance: 'https://acme.atlassian.net', user: { name: 'Ada', avatarUrl: null }, current: true },
   accounts: [
-    { id: 'org-a', name: 'Acme Org', user: { name: 'Ada', avatarUrl: null }, current: true },
-    { id: 'org-b', name: 'Beta Org', user: { name: 'Ada B', avatarUrl: null }, current: false },
+    { id: 'org-a', name: 'Acme Org', instance: 'https://acme.atlassian.net', user: { name: 'Ada', avatarUrl: null }, current: true },
+    { id: 'org-b', name: 'Beta Org', instance: 'https://beta.atlassian.net', user: { name: 'Ada B', avatarUrl: null }, current: false },
   ],
 };
 
@@ -196,6 +196,24 @@ describe('TrackerSettings', () => {
     expect(calls).toContain('activate:linear:org-b');
   });
 
+  test('adds an account on a second server, prefilled with the active one, and names each account\'s server', async () => {
+    status = { ...connectedStatus, connect: { ...connect, instance: 'https://acme.atlassian.net' } };
+    await mount(youtrack({ authMethods: ['token'] }), extensionOf({ ...tokenAndOauth, authMethods: ['token'], oauth: undefined }));
+    expect(container.textContent).toContain('On https://acme.atlassian.net');
+    expect(container.textContent).toContain('On https://beta.atlassian.net');
+
+    await click('Add account');
+    const address = inputs().find((input) => input.placeholder === 'https://youtrack.example.com');
+    if (!address) throw new Error('Missing server address field');
+    expect(address.value).toBe('https://acme.atlassian.net');
+    await type(address, 'https://second.atlassian.net');
+    const tokenField = inputs().find((input) => input.type === 'password');
+    if (!tokenField) throw new Error('Missing token field');
+    await type(tokenField, 'secret-2');
+    await click('Connect');
+    expect(calls).toContain('token:ext-youtrack:https://second.atlassian.net:secret-2:');
+  });
+
   test('shows neither other accounts nor a second sign-in for a tracker with one account', async () => {
     status = connectedStatus;
     const linear = linearLikeTrackerDescriptor();
@@ -260,7 +278,7 @@ describe('TrackerSettings', () => {
     label: 'YouTrack', instances: { kind: 'user', label: 'Server address', placeholder: 'https://youtrack.example.com' },
     authMethods: ['oauth', 'token'], token: { scheme: 'bearer', username: false, scopes: ['YouTrack'], createPath: '/tokens' }, oauth: { scopes: ['YouTrack'] },
   };
-  const connect = { instance: null, instances: { kind: 'user' as const, label: 'Server address', placeholder: 'https://youtrack.example.com' }, hasClient: false, redirectUri: 'http://localhost/api/tracker/ext-youtrack/oauth/callback' };
+  const connect = { instance: null, instances: { kind: 'user' as const, label: 'Server address', placeholder: 'https://youtrack.example.com' }, hasClient: false, clients: [], redirectUri: 'http://localhost/api/tracker/ext-youtrack/oauth/callback' };
 
   test('an extension tracker asks for the server, offers the token and the client forms, and connects with a token', async () => {
     status = { connected: false, connect };
@@ -354,8 +372,8 @@ describe('TrackerSettings', () => {
     status = { ...connectedStatus, connect: { ...connect, instance: 'https://yt.example.com' } };
     await mount(youtrack({ authMethods: ['oauth'] }), extensionOf({ ...tokenAndOauth, authMethods: ['oauth'], token: undefined }));
     await click('Add account');
-    // The mapping selects carry hidden inputs; the client field is the first visible text one.
-    const clientIdField = inputs().find((input) => input.type === 'text' && !input.readOnly && !input.hidden && !input.getAttribute('aria-hidden'));
+    // The mapping selects carry hidden inputs; the server and client fields are the visible text ones.
+    const clientIdField = inputs().filter((input) => input.type === 'text' && !input.readOnly && !input.hidden && !input.getAttribute('aria-hidden')).at(-1);
     if (!clientIdField) throw new Error('Missing client id field');
     await type(clientIdField, 'client-1');
     await click('Connect');

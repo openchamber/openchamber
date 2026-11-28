@@ -54,6 +54,21 @@ describe('web trackers: an extension tracker\'s status', () => {
     trackerServer(() => Response.json({ connected: false, accounts: [{ id: 42 }], connect: { instance: null, instances: { kind: 'fixed', origin: 'https://yt.example.com' }, hasClient: true, redirectUri: null } }));
     await expect(api.authStatus('ext-youtrack')).resolves.toMatchObject({ connected: false, accounts: [], connect: { hasClient: true } });
   });
+
+  it('reads the server of each account and the servers with a saved OAuth client', async () => {
+    trackerServer(() => Response.json({
+      connected: true,
+      account: { id: 'u-2', name: 'Bob', instance: 'https://b.example.com', current: true },
+      accounts: [
+        { id: 'u-1', name: 'Mona', instance: 'https://a.example.com', current: false },
+        { id: 'u-2', name: 'Bob', instance: 'https://b.example.com', current: true },
+      ],
+      connect: { instance: 'https://b.example.com', instances: { kind: 'user', label: 'Server address' }, hasClient: true, clients: ['https://a.example.com'], redirectUri: null },
+    }));
+    const status = await createWebTrackerAPI({ fetch: fetchMock }).authStatus('ext-youtrack');
+    expect(status.accounts?.map((account) => `${account.id}@${account.instance}`)).toEqual(['u-1@https://a.example.com', 'u-2@https://b.example.com']);
+    expect(status.connect).toMatchObject({ instance: 'https://b.example.com', hasClient: true, clients: ['https://a.example.com'] });
+  });
 });
 
 describe('web trackers: providers', () => {

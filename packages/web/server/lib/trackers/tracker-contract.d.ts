@@ -51,6 +51,7 @@ export type TrackerListOptions = {
 export type TrackerAccount = {
   id: string;
   name: string | null;
+  instance?: string | null;
   user?: TrackerPerson | null;
   current: boolean;
   authorizedAt?: number | null;
@@ -63,6 +64,7 @@ export type TrackerConnectInfo = {
   instance: string | null;
   instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
   hasClient: boolean;
+  clients?: string[];
   redirectUri: string | null;
 };
 
@@ -122,9 +124,10 @@ export interface TrackerSessionStatusRuntime {
 
 export type TrackerAccountsView = {
   instance: string | null;
-  accounts: Array<{ id: string; login: string | null; name?: string; avatarUrl?: string; connectedAt: number; status: 'valid' | 'invalid'; invalidReason?: string; method: 'oauth' | 'token' }>;
+  accounts: Array<{ id: string; login: string | null; instance: string; name?: string; avatarUrl?: string; connectedAt: number; status: 'valid' | 'invalid'; invalidReason?: string; method: 'oauth' | 'token' }>;
   activeAccountId: string | null;
   hasClient: boolean;
+  clients: string[];
 };
 
 export interface TrackerImplementation {

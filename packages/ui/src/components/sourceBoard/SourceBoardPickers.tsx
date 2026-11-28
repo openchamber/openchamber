@@ -305,6 +305,12 @@ export const SourceBoardContainerPicker: React.FC<{
     const current = accounts.find((account) => account.current) ?? null;
     const [switching, setSwitching] = React.useState(false);
     const accountName = (account: (typeof accounts)[number]) => account.name?.trim() || account.id;
+    const sites = new Set(accounts.map((account) => account.instance).filter((instance): instance is string => Boolean(instance)));
+    const accountLabel = (account: (typeof accounts)[number]) => {
+        if (sites.size < 2 || !account.instance) return accountName(account);
+        const host = URL.canParse(account.instance) ? new URL(account.instance).host : account.instance;
+        return `${accountName(account)} · ${host}`;
+    };
     const canSwitch = descriptor.capabilities.multipleAccounts && accounts.length > 1 && Boolean(current) && Boolean(trackers);
     const containerName = containers.find((container) => container.id === selectedContainerId)?.name ?? t(copy.containerAll);
 
@@ -336,7 +342,7 @@ export const SourceBoardContainerPicker: React.FC<{
                 >
                     <span className="flex min-w-0 items-center gap-1.5">
                         <Icon name={icon} className="size-3.5 shrink-0" />
-                        {canSwitch && current ? <span className="truncate text-muted-foreground">{accountName(current)} /</span> : null}
+                        {canSwitch && current ? <span className="truncate text-muted-foreground">{accountLabel(current)} /</span> : null}
                         <span className="truncate">{containerName}</span>
                         <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
                     </span>
@@ -353,7 +359,7 @@ export const SourceBoardContainerPicker: React.FC<{
                         <DropdownMenuSeparator />
                         <DropdownMenuLabel>{t(copy.accountLabel)}</DropdownMenuLabel>
                         <DropdownMenuRadioGroup value={current.id} onValueChange={(value) => void activate(String(value))}>
-                            {accounts.map((account) => <DropdownMenuRadioItem key={account.id} value={account.id}>{accountName(account)}</DropdownMenuRadioItem>)}
+                            {accounts.map((account) => <DropdownMenuRadioItem key={account.id} value={account.id}>{accountLabel(account)}</DropdownMenuRadioItem>)}
                         </DropdownMenuRadioGroup>
                     </>
                 ) : null}

@@ -63,7 +63,7 @@ const hostOf = (instance: string) => new URL(instance).hostname.replace(/^www\./
 
 const freezeList = <T>(list: readonly T[]) => Object.freeze([...list]);
 
-export function buildExtensionTrackerDescriptor({ guestId, contribution, instance }: { guestId: string; contribution: TrackerContribution; instance: string | null }): Readonly<TrackerDescriptor> {
+export function buildExtensionTrackerDescriptor({ guestId, contribution, instance, instances }: { guestId: string; contribution: TrackerContribution; instance?: string | null; instances?: readonly (string | null)[] }): Readonly<TrackerDescriptor> {
   const fail: (reason: string) => never = (reason) => { throw invalidContribution(guestId, reason); };
   const id = extensionProviderId(guestId);
   if (!id) fail('the guest id cannot name a provider');
@@ -74,12 +74,14 @@ export function buildExtensionTrackerDescriptor({ guestId, contribution, instanc
   const templates = urls?.item;
   if (!Array.isArray(templates) || templates.length === 0 || templates.length > TEMPLATES_MAX) fail('link templates are invalid');
 
-  const origin = contribution.instances.kind === 'fixed' ? contribution.instances.origin : instance;
-  const host = origin ? hostOf(origin) : null;
+  const origins = contribution.instances.kind === 'fixed'
+    ? [contribution.instances.origin]
+    : [...new Set((instances ?? [instance ?? null]).filter((value): value is string => typeof value === 'string' && value.length > 0))];
+  const hosts = [...new Set(origins.map(hostOf))];
   const compiled = templates.map((template) => compileTrackerUrlTemplate(template, identifier, fail));
-  const urlPatterns = host
-    ? compiled.map((pattern) => Object.freeze(pattern.query ? { host, path: pattern.path, query: Object.freeze({ ...pattern.query }) } : { host, path: pattern.path }))
-    : [];
+  const urlPatterns = hosts.flatMap((host) => compiled.map((pattern) => Object.freeze(
+    pattern.query ? { host, path: pattern.path, query: Object.freeze({ ...pattern.query }) } : { host, path: pattern.path },
+  )));
   const oauthMethods: TrackerAuthMethod[] = auth.oauth ? ['oauth'] : [];
   const tokenMethods: TrackerAuthMethod[] = auth.token ? ['token'] : [];
 
