@@ -387,7 +387,7 @@ export type TrackerCapabilities = {
   priority: boolean;
   filters: { people: boolean; priority: boolean };
   projectMapping: boolean;
-  sessionComments: boolean;
+  sessionComments: boolean; comments: boolean;
 };
 
 export type TrackerContribution = {

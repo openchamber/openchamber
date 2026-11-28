@@ -63,7 +63,7 @@ describe('TrackerSettings', () => {
       return { ok: true };
     },
     list: unexpected, refreshListReads: unexpected, refreshItemReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
-    mappingSet: unexpected, sessionStatusPost: unexpected, preferencesSet: unexpected,
+    commentCreate: unexpected, mappingSet: unexpected, sessionStatusPost: unexpected, preferencesSet: unexpected,
   };
   const apis: RuntimeAPIs = {
     runtime: { platform: 'web', isVSCode: false, isDesktop: false }, trackers,

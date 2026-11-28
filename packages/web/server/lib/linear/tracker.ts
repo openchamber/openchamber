@@ -23,6 +23,7 @@ export const LINEAR_TRACKER_DESCRIPTOR: TrackerDescriptor = Object.freeze({
     filters: Object.freeze({ people: true, priority: true }),
     projectMapping: true,
     sessionComments: true,
+    comments: false,
     hostAccess: true,
   }),
   stateFilters: Object.freeze(['open', 'all', 'backlog', 'todo', 'in-progress', 'inReview', 'done', 'canceled', 'duplicate']),

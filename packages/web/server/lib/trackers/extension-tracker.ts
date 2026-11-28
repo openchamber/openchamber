@@ -544,6 +544,16 @@ export function createExtensionTracker({
       const data = await forwardAs('items.updateState', { id: itemId, stateId });
       return connected(data && { item: withProvider(data.item) });
     },
+    comments: Object.freeze({
+      create: async ({ identifier, body }: { identifier: string; body: string }) => {
+        const trimmedIdentifier = isPrimitiveText(identifier) ? identifier.trim().toUpperCase() : '';
+        const trimmedBody = isPrimitiveText(body) ? body.trim() : '';
+        if (!trimmedIdentifier || !trimmedBody) throw userError('identifier and body are required');
+        if (!identifierPattern.test(trimmedIdentifier)) throw userError(`identifier is not a ${label} identifier`);
+        const data = await forwardAs('comments.create', { identifier: trimmedIdentifier, body: trimmedBody });
+        return connected(data && { comment: data.comment });
+      },
+    }),
     liveSummaries: async (identifiers: string[]) => {
       const items: ProviderData['items.liveSummaries']['items'] = [];
       for (let index = 0; index < identifiers.length; index += TRACKER_PROVIDER_LIVE_SUMMARIES_MAX) {

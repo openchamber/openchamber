@@ -484,7 +484,7 @@ const trackerSchema = z.object({
     priority: z.boolean().default(false),
     filters: z.object({ people: z.boolean().default(false), priority: z.boolean().default(false) }).strict().default({ people: false, priority: false }),
     projectMapping: z.boolean().default(false),
-    sessionComments: z.boolean().default(false),
+    sessionComments: z.boolean().default(false), comments: z.boolean().default(false),
   }).strict(),
   stateFilters: z.array(z.string().trim().regex(TRACKER_STATE_FILTER)).min(TRACKER_BASE_STATE_FILTERS.length).max(TRACKER_STATE_FILTERS_MAX)
     .refine((filters) => new Set(filters).size === filters.length, { message: 'state filters must be unique' })

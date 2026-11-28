@@ -6,6 +6,7 @@ import type {
   TrackerAuthStart,
   TrackerAuthStatus,
   TrackerComment,
+  TrackerCommentCreateResult,
   TrackerConnectFailureCode,
   TrackerConnectInfo,
   TrackerConnectResult,
@@ -205,6 +206,11 @@ export const mappingResultSchema: z.ZodType<TrackerMappingResult> = z.union([
 ]);
 
 export const preferencesSchema: z.ZodType<TrackerPreferences> = z.object({ sessionComments: z.boolean() });
+
+export const commentResultSchema: z.ZodType<TrackerCommentCreateResult> = z.union([
+  disconnected,
+  z.object({ connected: z.literal(true), comment: z.object({ id: text }).nullable() }),
+]);
 
 export const sessionStatusResultSchema: z.ZodType<TrackerSessionStatusPostResult> = z.union([
   disconnected,

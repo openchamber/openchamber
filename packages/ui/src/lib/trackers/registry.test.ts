@@ -67,7 +67,7 @@ describe('tracker registry', () => {
       authMethods: [],
       capabilities: {
         multipleAccounts: false, stateUpdate: false, children: false, labels: false, priority: false,
-        filters: { people: false, priority: false }, projectMapping: false, sessionComments: false, hostAccess: false,
+        filters: { people: false, priority: false }, projectMapping: false, sessionComments: false, comments: false, hostAccess: false,
       },
       stateFilters: ['open', 'all'],
       urlPatterns: [],

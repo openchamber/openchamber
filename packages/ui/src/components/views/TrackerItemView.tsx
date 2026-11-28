@@ -17,6 +17,7 @@ import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChe
 import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewerPicker } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { SourceBoardTrackerStatus } from '@/components/sourceBoard/SourceBoardTrackerStatus';
+import { TrackerReply } from '@/components/references/TrackerReply';
 import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl, useShowTrackerItem, wasTrackerItemRequested } from '@/components/sourceBoard/openTrackerItem';
 import { useLinkRepository } from '@/components/sourceBoard/boardRepository';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
@@ -313,6 +314,7 @@ const TrackerWorkItem: React.FC<{
             now={now}
             footer={<SourceBoardActions item={item} project={null} context={null} onStartWorktree={() => undefined} onChanged={() => void refresh()} worktreeAvailable={false} />}
             trackerStateControl={<SourceBoardTrackerStatus item={detail.value} onChanged={() => void refresh()} />}
+            reply={<TrackerReply item={detail.value} onRefresh={() => void refreshFromHost()} />}
             onOpenTrackerItem={(child) => { showTrackerItem(child.url, null); }}
             onRefresh={refreshFromHost}
         />

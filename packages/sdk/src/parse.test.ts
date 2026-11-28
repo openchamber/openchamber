@@ -1887,7 +1887,7 @@ describe('contributes.tracker', () => {
     // Capabilities left out are off; filters default together.
     expect(parsed.capabilities).toEqual({
       multipleAccounts: false, stateUpdate: true, children: false, labels: true, priority: true,
-      filters: { people: true, priority: false }, projectMapping: true, sessionComments: true,
+      filters: { people: true, priority: false }, projectMapping: true, sessionComments: true, comments: false,
     });
     expect(toPublicTracker(parsed)).toEqual({
       label: 'YouTrack',
@@ -1904,6 +1904,17 @@ describe('contributes.tracker', () => {
     expect(parse({ panel: pageless, service: role })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('come together') });
     expect(parse({ panel: pageless, service: { ...role, provides: undefined }, tracker })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(parse({ panel: { ...pageless, id: 'a'.repeat(29) }, service: role, tracker })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('28') });
+  });
+
+  test('comments is its own capability: off unless the service writes item comments', () => {
+    const off = parse({ panel: pageless, service: role, tracker });
+    expect(off).toMatchObject({ ok: true });
+    if (!off.ok) throw new Error(off.message);
+    expect(off.manifest.contributes.tracker!.capabilities.comments).toBe(false);
+    const on = parse({ panel: pageless, service: role, tracker: { ...tracker, capabilities: { ...tracker.capabilities, comments: true } } });
+    expect(on).toMatchObject({ ok: true });
+    if (!on.ok) throw new Error(on.message);
+    expect(on.manifest.contributes.tracker!.capabilities.comments).toBe(true);
   });
 
   test('an extension is a Git host or a tracker, never both', () => {

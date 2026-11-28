@@ -26,6 +26,7 @@ const trackersApi = (authStatus: TrackerAPI["authStatus"]): TrackerAPI => ({
   get: unreachable,
   states: unreachable,
   updateState: unreachable,
+  commentCreate: unreachable,
   mappingGet: unreachable,
   mappingSet: unreachable,
   sessionStatusPost: unreachable,

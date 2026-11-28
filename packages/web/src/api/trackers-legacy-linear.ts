@@ -35,6 +35,7 @@ export const BUILT_IN_LINEAR_TRACKER: TrackerDescriptor = {
     filters: { people: true, priority: true },
     projectMapping: true,
     sessionComments: true,
+    comments: false,
     hostAccess: true,
   },
   stateFilters: ['open', 'all', 'backlog', 'todo', 'in-progress', 'inReview', 'done', 'canceled', 'duplicate'],
@@ -252,6 +253,10 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
     })), 'Failed to load Linear workflow states'),
 
     updateState: (provider, input) => call(provider, '/issues/update', { method: 'POST', body: JSON.stringify({ id: input.id, stateId: input.stateId }) }, itemResult(provider), 'Failed to update Linear issue'),
+
+    commentCreate: async () => {
+      throw new Error('Commenting on tracker items is not available on this server');
+    },
 
     mappingGet: (provider) => call(provider, '/mapping', GET, mappingResult, 'Failed to load Linear mapping'),
 

@@ -42,7 +42,7 @@ test('re-reads the tracker list and every status when the server announces a cha
     authStatus: async (provider) => { statusReads.push(provider); return { connected: false }; },
     authStart: unexpected, authConnectToken: unexpected, authSaveOAuthClient: unexpected, authDisconnect: unexpected, authActivate: unexpected,
     list: unexpected, refreshListReads: unexpected, refreshItemReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
-    mappingGet: unexpected, mappingSet: unexpected, sessionStatusPost: unexpected, preferencesGet: unexpected, preferencesSet: unexpected,
+    commentCreate: unexpected, mappingGet: unexpected, mappingSet: unexpected, sessionStatusPost: unexpected, preferencesGet: unexpected, preferencesSet: unexpected,
   };
   const { createRoot } = await import('react-dom/client');
   const { useTrackerRegistry } = await import('@/lib/trackers/registry');
