@@ -14,8 +14,10 @@ import { buildDiffTreeRows } from '../diffFileTree';
 import type { DiffData, FileEntry } from './types';
 import { formatDiffTotals } from './diffData';
 
-const REVIEW_TOGGLE_REVEAL_CLASSNAME = 'pointer-events-none opacity-0 transition-opacity group-data-[review-hover]:pointer-events-auto group-data-[review-hover]:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100';
-const REVIEW_TOGGLE_TOUCH_CLASSNAME = 'pointer-coarse:size-9';
+const REVIEW_TOGGLE_VISIBLE_CLASSNAME = 'opacity-0 transition-opacity group-data-[review-hover]:opacity-100 group-has-[:focus-visible]:opacity-100 pointer-coarse:opacity-100 [@media(hover:none)]:opacity-100';
+const REVIEW_TOGGLE_POINTER_CLASSNAME = 'pointer-events-none group-data-[review-hover]:pointer-events-auto pointer-coarse:pointer-events-auto [@media(hover:none)]:pointer-events-auto';
+const REVIEW_TOGGLE_CLASSNAME = cn(REVIEW_TOGGLE_VISIBLE_CLASSNAME, REVIEW_TOGGLE_POINTER_CLASSNAME);
+const REVIEW_TOGGLE_BUTTON_CLASSNAME = 'focus-visible:pointer-events-auto pointer-coarse:size-9';
 const REVIEW_MARK_HIDE_CLASSNAME = 'transition-opacity group-data-[review-hover]:opacity-0 group-has-[:focus-visible]:opacity-0 pointer-coarse:opacity-0 [@media(hover:none)]:opacity-0';
 
 const markMouseHover = (event: React.PointerEvent<HTMLElement>) => {
@@ -23,7 +25,7 @@ const markMouseHover = (event: React.PointerEvent<HTMLElement>) => {
 };
 
 const clearMouseHover = (event: React.PointerEvent<HTMLElement>) => {
-    event.currentTarget.removeAttribute('data-review-hover');
+    if (event.pointerType === 'mouse') event.currentTarget.removeAttribute('data-review-hover');
 };
 
 const ReviewedMarkSlot: React.FC<{ reviewed: boolean; interactive: boolean }> = ({ reviewed, interactive }) => {
@@ -38,10 +40,9 @@ const ReviewedMarkSlot: React.FC<{ reviewed: boolean; interactive: boolean }> = 
                             'size-3.5 shrink-0 text-[var(--status-success)]',
                             interactive && REVIEW_MARK_HIDE_CLASSNAME
                         )}
-                        aria-label={interactive ? undefined : t('diffView.reviewed.label')}
-                        aria-hidden={interactive ? true : undefined}
+                        aria-hidden="true"
                     />
-                    {interactive ? <span className="sr-only">{t('diffView.reviewed.label')}</span> : null}
+                    <span className="sr-only">{t('diffView.reviewed.label')}</span>
                 </>
             ) : null}
         </span>
@@ -115,12 +116,12 @@ export const FileList = React.memo<FileListProps>(({
                                 <ReviewedMarkSlot reviewed={isReviewed} interactive={Boolean(onToggleReviewed)} />
                             </button>
                             {onToggleReviewed ? (
-                                <span className={cn('absolute inset-y-0 end-1 flex w-6 items-center justify-center pointer-coarse:w-9', REVIEW_TOGGLE_REVEAL_CLASSNAME)}>
+                                <span className={cn('absolute inset-y-0 end-1 flex w-6 items-center justify-center pointer-coarse:w-9', REVIEW_TOGGLE_CLASSNAME)}>
                                     <FileReviewedButton
                                         compact
                                         reviewed={isReviewed}
                                         onToggle={() => onToggleReviewed(file.path, null)}
-                                        className={REVIEW_TOGGLE_TOUCH_CLASSNAME}
+                                        className={REVIEW_TOGGLE_BUTTON_CLASSNAME}
                                     />
                                 </span>
                             ) : null}
@@ -237,12 +238,12 @@ export const FileTree = React.memo<FileListProps>(({
                                     </FileTreeRowEnd>
                                 </button>
                                 {onToggleReviewed ? (
-                                    <span className="sticky end-2 z-[2] -ms-6 flex h-6 w-6 shrink-0 items-center justify-center pointer-coarse:-ms-9 pointer-coarse:w-9">
+                                    <span className={cn('sticky end-2 z-[2] -ms-6 flex h-6 w-6 shrink-0 items-center justify-center pointer-coarse:-ms-9 pointer-coarse:w-9', REVIEW_TOGGLE_CLASSNAME)}>
                                         <FileReviewedButton
                                             compact
                                             reviewed={isReviewed}
                                             onToggle={() => onToggleReviewed(row.file.path, null)}
-                                            className={cn(REVIEW_TOGGLE_REVEAL_CLASSNAME, REVIEW_TOGGLE_TOUCH_CLASSNAME)}
+                                            className={REVIEW_TOGGLE_BUTTON_CLASSNAME}
                                         />
                                     </span>
                                 ) : null}
