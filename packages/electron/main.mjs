@@ -68,8 +68,7 @@ import {
   startupStartedAt,
   takeDeferredAppEvents,
   takeEarlyWindow,
-  usesFramelessChrome,
-  usesLinuxNativeFrame,
+  buildWindowChromeOptions,
   wasEarlyWindowClosed,
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
@@ -2881,9 +2880,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     icon: getWindowIconPath(),
     show: false,
     backgroundColor: resolveSplashBackgroundColor(),
-    frame: usesLinuxNativeFrame(),
-    autoHideMenuBar: process.platform !== 'darwin',
-    titleBarStyle: process.platform === 'darwin' || usesFramelessChrome() ? 'hidden' : 'default',
+    ...buildWindowChromeOptions(),
     trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
     acceptFirstMouse: true,
     webPreferences: {

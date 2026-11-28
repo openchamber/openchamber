@@ -123,6 +123,7 @@ const MOBILE_SETTINGS_PAGES = [
   'general',
   'isolated-spaces',
   'appearance',
+  'theme-editor',
   'chat',
   'notifications',
   'sessions',
@@ -1148,7 +1149,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
     }, isNativeMobileApp ? 4000 : 8000);
     return () => window.clearTimeout(timeout);
   }, [isConnected, isNativeMobileApp, connectionEpoch, runtimeEndpointEpoch]);
-
   useAppFontEffects();
   usePushVisibilityBeacon({ enabled: true });
   useUpdatePolling();
@@ -1168,7 +1168,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useNativeWidgetSync({ enabled: isNativeMobileApp && isConnected && isInitialized });
   useDeepLinkSource({ ready: isNativeMobileApp && isConnected && isInitialized, switchToServer: switchToSavedInstance });
   const fontsReady = useFontsReady();
-
   const isReconnecting = !isConnected && connectionPhase === 'reconnecting';
 
   if (!fontsReady) {

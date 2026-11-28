@@ -122,6 +122,13 @@ Built-in JSON files in `packages/ui/src/lib/theme/themes/` show the supported ov
 
 Optional `config.fonts` accepts `sans`, `mono` and `heading`. Optional `config.transitions` accepts `fast`, `normal` and `slow` CSS transition values.
 
+Optional `config.backgroundOpacity` accepts a number above 0 up to 1. On Linux,
+start the frameless desktop app with `OPENCHAMBER_TRANSPARENT_WINDOW=1` to let
+the desktop show through its background. Without that environment variable,
+with a native title bar, or on other platforms and runtimes, backgrounds stay
+opaque. Text and icons keep their foreground colors. Terminal, diff and editor
+canvases and floating dialogs keep their own opaque fills.
+
 ## Tune the theme in the app
 
 - Start with the backgrounds. Keep `surface.muted`, used by the sidebar, a little

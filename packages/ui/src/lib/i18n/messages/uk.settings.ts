@@ -6,7 +6,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 import { extensionPowersI18n } from './extension-powers.i18n';
+import { themeEditorI18n } from './theme-editor.i18n';
 export const settingsDict = {
+  ...themeEditorI18n.uk,
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Період зберігання рахується від архівації. Сесії, строк яких минув, видаляються.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, архівуються.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, видаляються.',

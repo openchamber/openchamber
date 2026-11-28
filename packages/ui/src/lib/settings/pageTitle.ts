@@ -20,6 +20,7 @@ const SETTINGS_PAGE_TITLE_KEYS = {
   integrations: 'settings.page.integrations.title',
   extensions: 'settings.page.extensions.title',
   appearance: 'settings.page.appearance.title',
+  'theme-editor': 'settings.themeEditor.title',
   chat: 'settings.page.chat.title',
   shortcuts: 'settings.page.shortcuts.title',
   sessions: 'settings.page.sessions.title',

@@ -17,6 +17,7 @@ import { SIDEBAR_SESSION_SEARCH_ITEMS } from './search-sidebar-sessions';
 import { SESSION_COST_SEARCH_ITEMS, SESSION_GOAL_SEARCH_ITEMS } from './search-session-limits';
 import { VOICE_SEARCH_ITEMS } from './search-voice';
 import { SKILLS_SEARCH_ITEMS } from './search-skills';
+import { THEME_EDITOR_SEARCH_ITEMS, THEME_PICKER_SEARCH_ITEMS } from './search-themes';
 
 type SettingsSearchTitle =
   | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
@@ -50,6 +51,7 @@ export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContex
 export const shortcutSearchItemId = (actionId: string): string => `shortcuts.action.${actionId}`;
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  ...THEME_EDITOR_SEARCH_ITEMS,
   {
     id: 'chat.activity-default',
     page: 'chat',
@@ -75,35 +77,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.weekStartsOn',
     keywords: ['calendar', 'monday', 'sunday'],
   },
-  {
-    id: 'appearance.color-mode',
-    page: 'appearance',
-    titleKey: 'settings.openchamber.visual.section.colorMode',
-    keywords: ['theme', 'system', 'light mode', 'dark mode', 'appearance'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'appearance.light-theme',
-    page: 'appearance',
-    titleKey: 'settings.openchamber.visual.field.lightTheme',
-    keywords: ['theme', 'color', 'light mode'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'appearance.dark-theme',
-    page: 'appearance',
-    titleKey: 'settings.openchamber.visual.field.darkTheme',
-    keywords: ['theme', 'color', 'dark mode'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'appearance.import-theme',
-    page: 'appearance',
-    titleKey: 'settings.themeImport.action',
-    descriptionKey: 'settings.themeImport.catalogHint',
-    keywords: ['theme', 'import', 'browse', 'catalog', 'vs code', 'vscode', 'open vsx', 'openvsx', 'json', 'jsonc', 'syntax', 'palette'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
+  ...THEME_PICKER_SEARCH_ITEMS,
   {
     id: 'appearance.dock-badge',
     page: 'general',

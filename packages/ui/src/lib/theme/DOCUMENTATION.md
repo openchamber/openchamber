@@ -42,6 +42,52 @@ retain their exact authored background. Bodies and gutters use the same fill.
 
 For authoring and supported fields, see `docs/CUSTOM_THEMES.md`. Surface semantics belong to `.agents/skills/theme-system/references/tokens-and-examples.md`.
 
+### Why native transparency changes background tokens only
+
+`config.backgroundOpacity` accepts values above 0 up to 1. The theme provider
+passes window opacity to the CSS generator only when `desktopRuntime.ts` reports a window
+created with an alpha channel. Web, VS Code, hosted mobile, Capacitor and opaque
+desktop windows keep their existing rendering.
+
+The translucent block paints the root canvas and docked panel cards once.
+It clears the document and body backgrounds, including Mini Chat's inline
+splash background, while the translucent palette is active.
+Nested canvas layers become transparent so their fills cannot compound toward
+opaque. Terminal, editor and diff canvases keep their own fills, and portals
+outside the root keep authored theme surfaces. The peeked sidebar restores its
+unscaled sidebar fill because it overlays the transcript. Window and parent opacity would
+also fade text and icons, so this path never changes either.
+
+Tailwind alpha text utilities mix toward `--oc-text-backdrop`, the opaque theme
+canvas color, through the root PostCSS pipeline. Only a transparent window sets
+that variable; its fallback preserves existing CSS on every other runtime.
+Authored text and icon colors resolve to opaque colors at the shared definition
+boundary. Background alpha stays authored; native window opacity multiplies it.
+Deliberate disabled-control and animation opacity styles retain their existing behavior.
+Surface colors that cannot resolve to hex take the same cleanup path, since CSS
+functions and keywords can carry alpha. The text backdrop uses the shared opaque
+color conversion, including for those colors.
+
+### Why theme editing uses a local draft
+
+Settings edits a separate palette and the bounded schematic preview. Color changes
+write no settings, theme files or global theme context. Save publishes a new theme
+through the existing import path and activates it; the original file stays untouched.
+Load and export use native OpenChamber JSON. Leaving the page discards unsaved edits.
+Foreground controls accept RGB only; alpha controls belong exclusively to background
+roles. Native window alpha remains capability-gated to eligible Linux desktop windows.
+The editor converts supported CSS colors into literal colors for the server import
+contract and preserves fonts, transitions and window background opacity.
+Chat, markdown and tool defaults resolve through the shared component-color helper.
+Compaction removes inherited values before editing, so base-color changes update
+their dependants while explicit overrides remain. Border alpha survives RGB edits
+without gaining an opacity control.
+The draft schema permits an incomplete name while retaining color validation.
+Save, export and file import use the complete schema and require a non-empty name.
+Both schemas share compaction; inherited palettes derive from already parsed colors.
+The page's always-mounted file input ref tracks its lifetime, so pending file reads
+cannot replace a draft after the page closes.
+
 `scripts/port-opencode-theme.ts` is the maintainer's OpenCode App converter,
 promoted from the personal converter that produced the `OpenCode App / …`
 library. It reads an installed sibling `../opencode` checkout, using its actual

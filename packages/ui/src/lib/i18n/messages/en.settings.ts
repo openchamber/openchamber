@@ -6,7 +6,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 import { extensionPowersI18n } from './extension-powers.i18n';
+import { themeEditorI18n } from './theme-editor.i18n';
 export const settingsDict = {
+  ...themeEditorI18n.en,
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Counts the retention period from archiving. Expired sessions are deleted.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Counts the retention period from the session\'s last activity. Expired sessions are archived.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Counts the retention period from the session\'s last activity. Expired sessions are deleted.',

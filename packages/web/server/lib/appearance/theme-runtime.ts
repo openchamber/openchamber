@@ -79,6 +79,7 @@ const hasFileErrorCode = (value: unknown): value is { code?: unknown } => Boolea
 
 const color = z.string().regex(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
 const role = z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*$/).max(64);
+const cssValue = z.string().max(256).refine((value) => !/[;{}<>\\]/.test(value) && !/\b(?:url|image|image-set|cross-fade|element)\s*\(|@import/i.test(value));
 const importedThemeSchema = z.object({
   metadata: z.object({
     name: z.string().trim().min(1).max(160),
@@ -89,6 +90,11 @@ const importedThemeSchema = z.object({
     tags: z.array(z.string().max(40)).max(16).default([]),
   }),
   colors: z.record(role, z.record(role, z.union([color, z.record(role, color)]))),
+  config: z.object({
+    backgroundOpacity: z.number().gt(0).lte(1).optional(),
+    fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(),
+    transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional(),
+  }).optional(),
 });
 const fileErrorSchema = z.object({ code: z.string() });
 

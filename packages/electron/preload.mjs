@@ -21,6 +21,7 @@ const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
 const trayEnabled = process.platform !== 'darwin' || readArgValue('--openchamber-tray-enabled') !== '0';
 const nativeFrame = readArgValue('--openchamber-native-frame') === '1';
+const transparentWindow = readArgValue('--openchamber-transparent-window') === '1';
 
 const currentOrigin = (() => {
   try {
@@ -82,6 +83,7 @@ contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
   arch: process.arch,
   trayEnabled,
   nativeFrame,
+  transparentWindow,
 });
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_PLATFORM__', process.platform);

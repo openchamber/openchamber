@@ -52,6 +52,7 @@ import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage'
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { ThemeEditorPage } from '@/components/sections/openchamber/ThemeEditorPage';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsScrollbarTopClearanceContext } from '@/components/sections/shared/settingsScrollbarClearance';
 import {
@@ -71,6 +72,7 @@ import {
   getSettingsPageMeta,
   resolveSettingsSlug,
   type SettingsPageSlug,
+  SETTINGS_PAGE_ORDER as pageOrder,
   type SettingsRuntimeContext,
   type SettingsPageMeta,
 } from '@/lib/settings/metadata';
@@ -115,37 +117,6 @@ interface SettingsViewProps {
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   initialMobileStage?: MobileStage;
 }
-
-const pageOrder: SettingsPageSlug[] = [
-  'general',
-  'appearance',
-  'chat',
-  'notifications',
-  'sessions',
-  'routing',
-  'shortcuts',
-  'voice',
-  'integrations',
-  'extensions',
-  'usage',
-  'about',
-  'projects',
-  'remote-instances',
-  'tunnel',
-  'git',
-  'isolated-spaces',
-  'providers',
-  'web-search',
-  'agents',
-  'behavior',
-  'commands',
-  'mcp',
-  'plugins',
-  'magic-prompts',
-  'snippets',
-  'skills.installed',
-  'skills.catalog',
-];
 
 const NAV_GROUP_ORDER = ['general', 'projects', 'opencode', 'content'] as const;
 
@@ -634,6 +605,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     switch (slug) {
+      case 'theme-editor':
+        return <ThemeEditorPage />;
       case 'projects':
         return <ProjectsPage />;
       case 'remote-instances':

@@ -3,6 +3,8 @@ import React from 'react';
 import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import { withPrColors } from '@/lib/theme/themes/prColors';
 import type { Theme } from '@/types/theme';
+import { windowSurfaceColors } from '@/lib/theme/transparency';
+import { mixColor, opaqueColor } from '@/lib/theme/color';
 
 export type ThemeSchematicLayout = 'desktop' | 'phone';
 
@@ -11,13 +13,14 @@ interface ThemeSchematicProps {
   splitWith?: Theme;
   layout: ThemeSchematicLayout;
   className?: string;
+  translucentPreview?: boolean;
 }
 
-export function ThemeSchematic({ theme, splitWith, layout, className }: ThemeSchematicProps) {
+export function ThemeSchematic({ theme, splitWith, layout, className, translucentPreview = false }: ThemeSchematicProps) {
   const clipId = React.useId();
   const size = layout === 'phone' ? PHONE_SIZE : DESKTOP_SIZE;
   const Draw = layout === 'phone' ? PhoneDrawing : DesktopDrawing;
-  const colors = React.useMemo(() => resolveColors(theme), [theme]);
+  const colors = React.useMemo(() => resolveColors(theme, translucentPreview), [theme, translucentPreview]);
   const splitColors = React.useMemo(() => (splitWith ? resolveColors(splitWith) : null), [splitWith]);
 
   return (
@@ -43,19 +46,23 @@ type Colors = ReturnType<typeof resolveColors>;
 
 const mix = (color: string, percent: number, base = 'transparent') => `color-mix(in oklab, ${color} ${percent}%, ${base})`;
 
-function resolveColors(source: Theme) {
+function resolveColors(source: Theme, translucentPreview = false) {
   const theme = withPrColors(source);
   const { surface, interactive, status, primary, chat, markdown, tools, pr, syntax } = theme.colors;
   const dark = theme.metadata.variant === 'dark';
   const readable = getReadableThemeColors(theme);
   const chatBackground = chat?.background || surface.background;
+  const opacity = theme.config?.backgroundOpacity ?? 1;
+  const windowColors = translucentPreview && opacity < 1 ? windowSurfaceColors(theme, opacity) : surface;
+  const textMix = (value: string, percent: number) => translucentPreview
+    ? mixColor(value, opaqueColor(surface.background), percent / 100) : mix(value, percent);
   return {
     dark,
-    background: surface.background,
+    background: windowColors.background,
     foreground: surface.foreground,
-    muted: surface.muted,
+    muted: windowColors.muted,
     mutedForeground: surface.mutedForeground,
-    elevated: surface.elevated,
+    elevated: windowColors.elevated,
     elevatedForeground: surface.elevatedForeground || surface.foreground,
     border: interactive.border,
     primary: primary.base,
@@ -65,21 +72,21 @@ function resolveColors(source: Theme) {
     titleRest: `color-mix(in oklab, ${surface.foreground} 50%, ${surface.mutedForeground})`,
     selection: mix(interactive.selection, 70),
     selectionForeground: readable.selectionForeground,
-    text: mix(surface.foreground, 90),
+    text: textMix(surface.foreground, 90),
     bold: markdown?.bold || surface.foreground,
-    inlineCode: mix(markdown?.inlineCode || syntax.base.string, 90),
+    inlineCode: textMix(markdown?.inlineCode || syntax.base.string, 90),
     inlineCodeBackground: mix(markdown?.inlineCodeBackground || chatBackground, 50),
     inlineCodeWash: mix(surface.foreground, 4),
     userBubble: chat?.userMessageBackground ?? surface.elevated,
     userBubbleEdge: mix(primary.base, 5),
     toolsIcon: tools?.icon || surface.mutedForeground,
     toolsTitle: tools?.title || surface.foreground,
-    toolsDescription: tools?.description || mix(surface.mutedForeground, 60),
+    toolsDescription: tools?.description || textMix(surface.mutedForeground, 60),
     chatDivider: chat?.divider ?? interactive.border,
-    effort: mix(readable.status.warning, 75),
+    effort: textMix(readable.status.warning, 75),
     prOpen: pr?.open ?? status.success,
     prMerged: pr?.merged ?? status.info,
-    panel: dark ? surface.muted : `color-mix(in srgb, ${surface.muted} 50%, ${surface.background})`,
+    panel: translucentPreview ? windowColors.muted : dark ? surface.muted : `color-mix(in srgb, ${surface.muted} 50%, ${surface.background})`,
     edgeRing: dark ? 'rgb(255 255 255 / 0.08)' : 'rgb(0 0 0 / 0.14)',
     box: mix(surface.foreground, dark ? 3 : 4),
   };

@@ -1,38 +1,44 @@
 import { z } from 'zod';
 import type { Theme } from '../../types/theme';
-import { mixColor, onColor, readableText, withOpacity } from './color';
+import { mixColor, onColor, opaqueColor, readableText, withOpacity } from './color';
 import { resolveSyntaxTokens } from './syntax';
+import { isThemeBackground } from './transparency';
+import { componentColors } from './componentColors';
 
 const COLOR_PATTERN = /^(?:#[\da-f]{3,8}|[a-z]+|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\([\w#.,%\s/+()-]*\))$/i;
 const LOADS_RESOURCE = /\b(?:url|image|image-set|cross-fade|element)\s*\(|@import/i;
 const text = z.string().trim().min(1);
 const color = text.refine((value) => COLOR_PATTERN.test(value) && !LOADS_RESOURCE.test(value), 'Expected a CSS colour');
+const foreground = color.transform(opaqueColor);
 const cssValue = z.string().refine((value) => !/[;{}<>\\]/.test(value) && !LOADS_RESOURCE.test(value), 'Unsupported CSS value');
-const optionalColors = (keys: string[]) => z.record(z.string(), color).transform((values) => Object.fromEntries(Object.entries(values).filter(([key]) => keys.includes(key))));
-const primary = z.object({ base: color, foreground: color.optional(), hover: color.optional(), active: color.optional(), muted: color.optional() });
-const surface = z.object({ background: color, foreground: color, muted: color, mutedForeground: color, elevated: color, elevatedForeground: color.optional(), overlay: color.optional(), subtle: color.optional() });
-const interactive = z.object({ border: color, selection: color.optional(), selectionForeground: color.optional(), borderHover: color.optional(), borderFocus: color.optional(), focus: color.optional(), focusRing: color.optional(), cursor: color.optional(), hover: color.optional(), active: color.optional() });
+const optionalColors = (keys: string[]) => z.record(z.string(), color).transform((values) => Object.fromEntries(Object.entries(values)
+  .filter(([key]) => keys.includes(key))
+  .map(([key, value]) => [key, key.endsWith('Background') || key === 'background' || /Border$|^divider$|^hr$/.test(key) ? value : opaqueColor(value)])));
+const primary = z.object({ base: foreground, foreground: foreground.optional(), hover: color.optional(), active: color.optional(), muted: color.optional() });
+const surface = z.object({ background: color, foreground, muted: color, mutedForeground: foreground, elevated: color, elevatedForeground: foreground.optional(), overlay: color.optional(), subtle: color.optional() });
+const interactive = z.object({ border: color, selection: color.optional(), selectionForeground: foreground.optional(), borderHover: color.optional(), borderFocus: color.optional(), focus: color.optional(), focusRing: color.optional(), cursor: foreground.optional(), hover: color.optional(), active: color.optional() });
 const status = z.object({
-  error: color, errorForeground: color.optional(), errorBackground: color.optional(), errorBorder: color.optional(),
-  warning: color, warningForeground: color.optional(), warningBackground: color.optional(), warningBorder: color.optional(),
-  success: color, successForeground: color.optional(), successBackground: color.optional(), successBorder: color.optional(),
-  info: color, infoForeground: color.optional(), infoBackground: color.optional(), infoBorder: color.optional(),
+  error: foreground, errorForeground: foreground.optional(), errorBackground: color.optional(), errorBorder: color.optional(),
+  warning: foreground, warningForeground: foreground.optional(), warningBackground: color.optional(), warningBorder: color.optional(),
+  success: foreground, successForeground: foreground.optional(), successBackground: color.optional(), successBorder: color.optional(),
+  info: foreground, infoForeground: foreground.optional(), infoBackground: color.optional(), infoBorder: color.optional(),
 });
 const syntax = z.object({
-  base: z.object({ background: color.optional(), foreground: color.optional(), comment: color, keyword: color, string: color, number: color, function: color, variable: color, type: color, operator: color }),
-  tokens: z.record(z.string(), color).optional(),
-  highlights: z.record(z.string(), color).optional(),
+  base: z.object({ background: color.optional(), foreground: foreground.optional(), comment: foreground, keyword: foreground, string: foreground, number: foreground, function: foreground, variable: foreground, type: foreground, operator: foreground }),
+  tokens: z.record(z.string(), foreground).optional(),
+  highlights: z.record(z.string(), color).transform((values) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, isThemeBackground(key) ? value : opaqueColor(value)]))).optional(),
 });
+const themeMetadata = z.object({ id: text, name: text, variant: z.enum(['light', 'dark']), description: z.string().default(''), version: z.string().default('1.0.0'), author: z.string().optional(), tags: z.array(z.string()).default([]) });
 const definition = z.object({
-  metadata: z.object({ id: text, name: text, variant: z.enum(['light', 'dark']), description: z.string().default(''), version: z.string().default('1.0.0'), author: z.string().optional(), tags: z.array(z.string()).default([]) }),
+  metadata: themeMetadata,
   colors: z.object({
     primary, surface, interactive, status, syntax,
-    pr: z.object({ open: color.optional(), draft: color.optional(), blocked: color.optional(), merged: color.optional(), closed: color.optional() }).optional(),
+    pr: z.object({ open: foreground.optional(), draft: foreground.optional(), blocked: foreground.optional(), merged: foreground.optional(), closed: foreground.optional() }).optional(),
     chat: optionalColors(['background', 'userMessageBackground', 'divider']).optional(),
     markdown: optionalColors(['link', 'linkHover', 'inlineCode', 'inlineCodeBackground', 'blockquote', 'blockquoteBorder', 'listMarker', 'bold', 'italic', 'strikethrough', 'hr']).optional(),
-    tools: z.object({ border: color.optional(), icon: color.optional(), title: color.optional(), description: color.optional(), edit: optionalColors(['addedBackground', 'removedBackground', 'modifiedBackground', 'lineNumber']).optional() }).optional(),
+    tools: z.object({ border: color.optional(), icon: foreground.optional(), title: foreground.optional(), description: foreground.optional(), edit: optionalColors(['addedBackground', 'removedBackground', 'modifiedBackground', 'lineNumber']).optional() }).optional(),
   }),
-  config: z.object({ fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(), transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional() }).optional(),
+  config: z.object({ fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(), transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional(), backgroundOpacity: z.number().gt(0).lte(1).optional() }).optional(),
 });
 
 export type ThemeDefinition = z.input<typeof definition>;
@@ -62,7 +68,7 @@ function resolveTheme(source: z.output<typeof definition>): Theme {
     ...c.syntax.highlights,
   };
   const resolvedSyntax = { base, tokens: resolveSyntaxTokens({ base, tokens: c.syntax.tokens }), highlights };
-  return {
+  const theme: Theme = {
     metadata,
     colors: {
       primary: { ...c.primary, foreground: c.primary.foreground ?? onColor(p, s.background), hover: c.primary.hover ?? mixColor(p, neutral, 0.9), active: c.primary.active ?? mixColor(p, neutral, 0.8) },
@@ -86,16 +92,18 @@ function resolveTheme(source: z.output<typeof definition>): Theme {
     },
     config,
   };
+  return { ...theme, colors: { ...theme.colors, ...componentColors(theme) } };
 }
 
 export const themeSchema = definition.transform(resolveTheme);
 export const requireTheme = themeSchema.parse;
 export const themeListSchema = z.array(themeSchema.nullable().catch(null)).transform((themes) => themes.filter((theme): theme is Theme => theme !== null));
+const draftDefinition = definition.extend({ metadata: themeMetadata.extend({ name: z.string() }) });
+export const requireThemeDraft = draftDefinition.transform(resolveTheme).parse;
 
-export function compactTheme(value: ThemeDefinition): ThemeDefinition {
-  const source = definition.parse(value);
+function compactParsedTheme(source: z.output<typeof definition>): ThemeDefinition {
   const c = source.colors;
-  const defaults = requireTheme({ metadata: source.metadata, colors: {
+  const defaults = resolveTheme({ metadata: source.metadata, colors: {
     primary: { base: c.primary.base },
     surface: { background: c.surface.background, foreground: c.surface.foreground, muted: c.surface.muted, mutedForeground: c.surface.mutedForeground, elevated: c.surface.elevated },
     interactive: { border: c.interactive.border },
@@ -127,12 +135,33 @@ export function compactTheme(value: ThemeDefinition): ThemeDefinition {
   }
   if (c.syntax.highlights) {
     const diffColors = ['diffAdded', 'diffRemoved', 'diffModified'];
-    const inherited = requireTheme({ ...source, colors: { ...c, syntax: { base: c.syntax.base, tokens: c.syntax.tokens, highlights: Object.fromEntries(Object.entries(c.syntax.highlights).filter(([key]) => diffColors.includes(key))) } } });
+    const inherited = resolveTheme({ ...source, colors: { ...c, syntax: { base: c.syntax.base, tokens: c.syntax.tokens, highlights: Object.fromEntries(Object.entries(c.syntax.highlights).filter(([key]) => diffColors.includes(key))) } } });
     c.syntax.highlights = prune(c.syntax.highlights, inherited.colors.syntax.highlights ?? {}, diffColors);
   }
   if (c.pr) {
-    const inherited = requireTheme({ ...source, colors: { ...c, pr: undefined } });
+    const inherited = resolveTheme({ ...source, colors: { ...c, pr: undefined } });
     c.pr = prune(c.pr, { ...inherited.colors.pr });
+  }
+  if (c.chat) {
+    c.chat = prune(c.chat, { ...resolveTheme({ ...source, colors: { ...c, chat: undefined } }).colors.chat });
+    if (!Object.keys(c.chat).length) delete c.chat;
+  }
+  if (c.markdown) {
+    c.markdown = prune(c.markdown, { ...resolveTheme({ ...source, colors: { ...c, markdown: undefined } }).colors.markdown });
+    if (!Object.keys(c.markdown).length) delete c.markdown;
+  }
+  if (c.tools) {
+    const { edit, ...values } = c.tools;
+    const { edit: inheritedEdit, ...inherited } = { ...resolveTheme({ ...source, colors: { ...c, tools: undefined } }).colors.tools };
+    c.tools = prune(values, inherited);
+    if (edit) {
+      const overrides = prune(edit, inheritedEdit ?? {});
+      if (Object.keys(overrides).length) c.tools.edit = overrides;
+    }
+    if (!Object.keys(c.tools).length) delete c.tools;
   }
   return source;
 }
+
+export const compactTheme = (value: ThemeDefinition): ThemeDefinition => compactParsedTheme(definition.parse(value));
+export const compactThemeDraft = (value: ThemeDefinition): ThemeDefinition => compactParsedTheme(draftDefinition.parse(value));

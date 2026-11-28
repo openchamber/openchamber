@@ -6,7 +6,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 import { extensionPowersI18n } from './extension-powers.i18n';
+import { themeEditorI18n } from './theme-editor.i18n';
 export const settingsDict = {
+  ...themeEditorI18n.ja,
   'settings.openchamber.sessionRetention.field.archivedDescription': '保持期間はアーカイブ時点から数えます。期間を過ぎたセッションは削除されます。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保持期間はセッションの最終アクティビティから数えます。期間を過ぎたセッションはアーカイブされます。',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保持期間はセッションの最終アクティビティから数えます。期間を過ぎたセッションは削除されます。',

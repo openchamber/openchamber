@@ -6,7 +6,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 import { extensionPowersI18n } from './extension-powers.i18n';
+import { themeEditorI18n } from './theme-editor.i18n';
 export const settingsDict = {
+  ...themeEditorI18n['zh-CN'],
   'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限从归档时开始计算。过期会话会被删除。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限从会话的最后活动时间开始计算。过期会话会被归档。',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保留期限从会话的最后活动时间开始计算。过期会话会被删除。',

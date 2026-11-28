@@ -301,6 +301,8 @@
   "settings.theme": {"selector": "[role=\"listbox\"] [data-theme-id]", "means": "A theme in Appearance's theme list; pair it with its visible name."},
   "settings.themeOn": {"selector": "[role=\"listbox\"] [data-theme-id][aria-selected=\"true\"]", "means": "The chosen theme in the displayed Light or Dark list."},
   "settings.themeSearch": {"selector": "[role=\"dialog\"] input[placeholder=\"Search themes\"]", "means": "The filter above Appearance's theme list."},
+  "settings.themeEditorName": {"selector": "[role=\"dialog\"] input[aria-label=\"Theme name\"]", "means": "The name of the palette draft in the theme editor."},
+  "settings.themeEditorBackgroundAlpha": {"selector": "[role=\"dialog\"] input[aria-label=\"Background opacity for surface.background\"]", "means": "The authored canvas alpha in the local palette draft."},
   "settings.shortcutKeys": {"selector": "[data-settings-item=\"shortcuts.action.{action}\"] kbd", "means": "The assigned keys, or Unassigned, in a keyboard shortcut row."},
   "app.colorMode": {"selector": "html.{mode}", "means": "The app rendered in its light or dark color mode."},
   "settings.themeById": {"selector": "[data-theme-id=\"{theme}\"][aria-selected=\"true\"]", "means": "The selected theme identified by its remembered id."},

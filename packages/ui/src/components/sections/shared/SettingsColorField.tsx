@@ -19,7 +19,9 @@ export const SettingsColorField: React.FC<{
   onChange: (value: string) => void;
   labels: SettingsColorFieldLabels;
   legacyCss?: string | null;
-}> = ({ value, onChange, labels, legacyCss = null }) => {
+  compact?: boolean;
+  disabled?: boolean;
+}> = ({ value, onChange, labels, legacyCss = null, compact = false, disabled = false }) => {
   const selected = value.toLowerCase();
   const isPreset = COLOR_PRESETS.some((color) => color === selected);
   const isLegacy = selected !== '' && !isHexColor(selected) && legacyCss !== null;
@@ -31,13 +33,25 @@ export const SettingsColorField: React.FC<{
   const draftInvalid = draft.trim() !== '' && !isHexColor(draft.trim());
   const commitDraft = () => {
     const next = draft.trim();
-    if (next === '' || isHexColor(next)) onChange(next.toLowerCase());
+    if ((!compact && next === '') || isHexColor(next)) onChange(next.toLowerCase());
   };
+
+  if (compact) return (
+    <div className="flex items-center gap-2" dir="ltr">
+      <input type="color" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} aria-label={labels.custom}
+        className="h-8 w-8 pointer-coarse:min-h-9 pointer-coarse:min-w-9 shrink-0 cursor-pointer rounded-md bg-transparent" />
+      <Input value={draft} disabled={disabled} onChange={(event) => setDraft(event.target.value)}
+        onBlur={commitDraft} onKeyDown={(event) => { if (event.key === 'Enter') commitDraft(); }}
+        aria-label={labels.hex} aria-invalid={draftInvalid || draft.trim() === ''}
+        className="w-24 font-mono pointer-coarse:min-h-9" maxLength={7} />
+    </div>
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2.5">
       <button
         type="button"
+        disabled={disabled}
         onClick={() => onChange('')}
         aria-pressed={selected === ''}
         className={cn(SWATCH_CLASS, 'border border-border text-muted-foreground', selected === '' && SELECTED_CLASS)}
@@ -53,6 +67,7 @@ export const SettingsColorField: React.FC<{
         <button
           key={color}
           type="button"
+          disabled={disabled}
           onClick={() => onChange(color)}
           aria-pressed={selected === color}
           className={cn(SWATCH_CLASS, selected === color && SELECTED_CLASS)}
@@ -63,6 +78,7 @@ export const SettingsColorField: React.FC<{
       ))}
       <button
         type="button"
+        disabled={disabled}
         onClick={() => pickerRef.current?.click()}
         aria-pressed={isCustom}
         className={cn(
@@ -77,6 +93,7 @@ export const SettingsColorField: React.FC<{
       </button>
       <input
         ref={pickerRef}
+        disabled={disabled}
         type="color"
         tabIndex={-1}
         aria-hidden="true"
@@ -86,6 +103,7 @@ export const SettingsColorField: React.FC<{
       />
       {isCustom ? (
         <Input
+          disabled={disabled}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commitDraft}
