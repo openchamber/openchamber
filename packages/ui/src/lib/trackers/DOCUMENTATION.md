@@ -203,3 +203,12 @@ generic `{provider}` keys.
 The packaged desktop UI uses `openchamber-ui://`, which a browser opening a
 tracker comment cannot load. Session posts supply the local server's HTTP
 origin, and the server posts only when that origin is reachable publicly.
+
+### Why a container's parent is a bounded ref and not a recursive container
+
+A container says where it sits with `parent: { id, key, name }`: one level, with
+no parent of its own and no project path. A recursive container would let a
+provider describe a tree deeper than the board ever nests, and would make the
+mapping and start-in filters depend on walking it. The flat ref is enough for
+the scope menu, and `containerTree.ts` still handles the missing parents,
+cycles and duplicates a provider may send.
