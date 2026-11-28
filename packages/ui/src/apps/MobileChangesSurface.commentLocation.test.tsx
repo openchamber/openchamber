@@ -1,21 +1,13 @@
 import React, { act } from 'react';
 import { expect, test } from 'bun:test';
-import { plugin } from 'bun';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import { SyncProvider } from '@/sync/sync-context';
 import type { GitLogEntry, GitStatus } from '@/lib/api/types';
+import { startInlineDiffFixturePool } from '@/test/pierreWorkers.fixture';
 import type {
   ChangeRequest, ChangeRequestStatus, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlUser,
 } from '@/lib/source-control/types';
-
-// Bun does not implement Vite's worker URL imports.
-plugin({ name: 'mobile-changes-worker-url', setup(build) {
-  build.onLoad({ filter: /\?worker&url$/ }, () => ({
-    contents: `export default ${JSON.stringify(import.meta.resolve('@pierre/diffs/worker/worker.js'))};`,
-    loader: 'js',
-  }));
-} });
 
 const DIRECTORY = '/repo-comment';
 const ACCOUNT_ID = 'github.com#7';
@@ -172,6 +164,7 @@ test("the phone's composer label opens the comparison a comment was written on, 
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
+  const workerPool = await startInlineDiffFixturePool(root);
   const frame = () => act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))); });
   const until = async (reached: () => boolean) => {
     for (let round = 0; round < 200 && !reached(); round += 1) await frame();
@@ -209,6 +202,7 @@ test("the phone's composer label opens the comparison a comment was written on, 
   } finally {
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;
+    workerPool.terminate();
     await dom.happyDOM.abort();
     for (const [name, value] of originals) {
       if (value) Object.defineProperty(globalThis, name, value);

@@ -1,18 +1,10 @@
 import React, { act } from 'react';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { plugin } from 'bun';
 import { OpenCode } from '@opencode/client';
+import { startInlineDiffFixturePool } from '@/test/pierreWorkers.fixture';
 
 import type { ComparisonDiffResult } from './types';
-
-// Bun does not implement Vite's worker URL imports.
-plugin({ name: 'large-full-worker-url', setup(build) {
-  build.onLoad({ filter: /\?worker&url$/ }, () => ({
-    contents: `export default ${JSON.stringify(import.meta.resolve('@pierre/diffs/worker/worker.js'))};`,
-    loader: 'js',
-  }));
-} });
 
 const SYNC_SDK = OpenCode.make({
   baseUrl: 'http://opencode.test',
@@ -23,23 +15,27 @@ const installDom = () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
-    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    window: dom, document: dom.document, Document: dom.Document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
     Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
     customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
     Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
-    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver, IntersectionObserver: dom.IntersectionObserver,
     getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
     cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
   };
-  for (const [name, value] of Object.entries(globals)) {
+  // Pierre renders real DOM nodes once the fixture's worker pool is available.
+  const domClasses = Object.fromEntries(Object.getOwnPropertyNames(dom)
+    .filter((name) => /^(?:HTML\w*|SVG\w*)Element$|^(?:DocumentFragment|ShadowRoot|Range|Selection|Text|Comment|NodeFilter|DOMParser)$/.test(name))
+    .map((name) => [name, Object.getOwnPropertyDescriptor(dom, name)?.value]));
+  for (const [name, value] of Object.entries({ ...domClasses, ...globals })) {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   const previousFetch = globalThis.fetch;
   globalThis.fetch = Object.assign(async () => new Promise<Response>(() => {}), previousFetch);
-  return () => {
+  return async () => {
     globalThis.fetch = previousFetch;
-    dom.happyDOM.cancelAsync();
+    await dom.happyDOM.abort();
     for (const [name, descriptor] of originals) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
@@ -65,9 +61,14 @@ test('an oversized whole-file read waits for its own approval, and Find stays on
   let fullReads = 0;
   const findFullContext: boolean[] = [];
   const apis = createWebAPIs();
+  const scroller = document.createElement('div');
+  scroller.dataset.diffVirtualRoot = '';
   const container = document.createElement('div');
-  document.body.append(container);
+  container.dataset.diffVirtualContent = '';
+  scroller.append(container);
+  document.body.append(scroller);
   const root = createRoot(container);
+  const workerPool = await startInlineDiffFixturePool(root);
   let fullRead: Promise<ComparisonDiffResult> | null = null;
   const loadFull = () => {
     fullReads += 1;
@@ -97,6 +98,7 @@ test('an oversized whole-file read waits for its own approval, and Find stays on
     expect(findFullContext).not.toContain(true);
   } finally {
     await act(async () => root.unmount());
-    restoreDom();
+    workerPool.terminate();
+    await restoreDom();
   }
 });

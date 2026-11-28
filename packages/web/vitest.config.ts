@@ -24,7 +24,7 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, 'opencode-server/**/*.test.mjs'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    setupFiles: ['./test/isolated-data-dir.ts', './test/loopback-supertest.js'],
+    setupFiles: ['./test/isolated-data-dir.ts', './test/isolated-git-config.ts', './test/loopback-supertest.js'],
     env: {
       OPENCHAMBER_ENTERPRISE_MODE: '',
       OPENCHAMBER_RELAY_URL: '',

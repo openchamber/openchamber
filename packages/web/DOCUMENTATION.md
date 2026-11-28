@@ -51,9 +51,16 @@ This package owns the browser build, Vite plugins, development launchers and web
 - Test workers leave capacity for loopback handshakes and Git subprocesses. Git operations need a timeout above Vitest's default because subprocess round trips vary with machine load.
 - UI fixtures that import Vite assets execute through Vitest because Bun's raw TypeScript loader cannot load those assets.
 - Tests use isolated configuration and loopback binds. Inherited enterprise policy, pinned endpoints and OpenCode skill-discovery switches cannot determine a test's result; cases that need those settings provide them explicitly.
+- Vitest starts each file with empty global and system Git configuration and clears inherited `GIT_CONFIG*` overrides. Tests that exercise Git configuration supply their own.
 - The development launcher removes names recorded in `OPENCHAMBER_INJECTED_ENV`, including inline replacements, so an app-owned password, desktop runtime or asset path cannot leak into the dev instance. Removing that record from the launch environment preserves inherited values. With the inherited bind removed, the server defaults to loopback; the Vite UI has a separate allowed loopback origin.
 
 ## Decisions
+
+### Why the web suite clears Git overrides before loading tests
+
+Disabling the user's Git config files leaves environment overrides active. They
+reach both fixture commands and Git subprocesses that the server starts during
+the test. Clearing them in Vitest setup covers both paths before modules load.
 
 ### Why declarations are generated separately from the source contracts
 

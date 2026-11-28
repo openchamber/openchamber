@@ -1,19 +1,11 @@
 import React, { act } from 'react';
 import { expect, test } from 'bun:test';
-import { plugin } from 'bun';
 import { Window } from 'happy-dom';
 import type { GitStatus } from '@/lib/api/types';
+import { startInlineDiffFixturePool } from '@/test/pierreWorkers.fixture';
 import type {
   ChangeRequest, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlReadContext, SourceControlUser,
 } from '@/lib/source-control/types';
-
-// Bun does not implement Vite's worker URL imports.
-plugin({ name: 'git-view-worker-url', setup(build) {
-  build.onLoad({ filter: /\?worker&url$/ }, () => ({
-    contents: `export default ${JSON.stringify(import.meta.resolve('@pierre/diffs/worker/worker.js'))};`,
-    loader: 'js',
-  }));
-} });
 
 const DIRECTORY = '/repo-comment';
 const endpoint = { displayUrl: 'https://github.com/team/project', fingerprint: 'fetch' };
@@ -126,6 +118,7 @@ test("a pull request comment's opener brings the git tab's text diff to its line
   useGitStore.getState().setActiveDirectory(DIRECTORY);
   useGitStore.getState().restoreStatus(DIRECTORY, STATUS);
   const { useUIStore } = await import('@/stores/useUIStore');
+  useUIStore.setState({ diffLayoutPreference: 'inline' });
   const { useOpenCommentSource } = await import('@/components/comments/useOpenCommentSource');
   const { GitView } = await import('../GitView');
   const { getZoneView, resolveZoneActiveTab, zoneOfMode } = await import('@/lib/workspace/zones');
@@ -154,6 +147,7 @@ test("a pull request comment's opener brings the git tab's text diff to its line
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
+  const workerPool = await startInlineDiffFixturePool(root);
   const frame = () => act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined))); });
   // Wait on the outcome itself, bounded by time rather than a frame count, so a loaded machine only waits longer.
   const until = async (reached: () => boolean) => {
@@ -179,6 +173,7 @@ test("a pull request comment's opener brings the git tab's text diff to its line
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;
     useContextWindowStore.setState({ followedDirectory: null });
+    workerPool.terminate();
     await dom.happyDOM.abort();
     for (const [name, value] of originals) {
       if (value) Object.defineProperty(globalThis, name, value);
